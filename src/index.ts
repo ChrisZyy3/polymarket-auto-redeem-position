@@ -1,6 +1,7 @@
 import { config } from "./config.js";
 import { fetchCurrentPositions, fetchRedeemablePositions } from "./polymarket.js";
-import { sendNotification } from "./notification.js";
+import { sendNotification } from "./serverchan.js";
+import { loadState, saveState } from "./state.js";
 import type { Position } from "./types.js";
 
 /**
