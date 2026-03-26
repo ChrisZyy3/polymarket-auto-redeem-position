@@ -1,13 +1,14 @@
 import axios from "axios";
 import { config } from "./config.js";
 
-/**
- * 发送 ServerChan/Push 通知
- * @param title 标题
- * @param content 内容
- */
 export async function sendNotification(title: string, content: string): Promise<void> {
-  const url = config.ftqqPushUrl || `https://sctapi.ftqq.com/${config.serverChanSendKey}.send`;
+  // 优先构建新版 Push URL，若无则使用老版 ServerChan URL
+  let url = "";
+  if (config.ftqqPushKey) {
+    url = `https://11310.push.ft07.com/send/${config.ftqqPushKey}.send`;
+  } else if (config.serverChanSendKey) {
+    url = `https://sctapi.ftqq.com/${config.serverChanSendKey}.send`;
+  }
   
   if (!url) {
     console.warn("No notification URL configured.");

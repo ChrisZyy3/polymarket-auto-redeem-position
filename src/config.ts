@@ -17,7 +17,7 @@ function requireEnv(name: string): string {
 export const config = {
   polymarketUserAddress: requireEnv("POLYMARKET_USER_ADDRESS"),
   serverChanSendKey: process.env.SERVERCHAN_SEND_KEY || "",
-  ftqqPushUrl: process.env.FTQQ_PUSH_URL || "",
+  ftqqPushKey: process.env.FTQQ_PUSH_KEY || "",
   polymarketDataApiBaseUrl: "https://data-api.polymarket.com",
   minPositionSize: 0.1, // 最小持仓过滤阈值
 };
