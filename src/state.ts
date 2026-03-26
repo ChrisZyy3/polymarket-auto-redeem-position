@@ -4,7 +4,7 @@ import path from "node:path";
 const STATE_FILE = path.join(process.cwd(), "state.json");
 
 interface State {
-  notifiedConditionIds: string[];
+  notifiedKeys: string[];
 }
 
 /**
@@ -15,7 +15,7 @@ export async function loadState(): Promise<string[]> {
   try {
     const content = await fs.readFile(STATE_FILE, "utf-8");
     const data: State = JSON.parse(content);
-    return data.notifiedConditionIds || [];
+    return data.notifiedKeys || [];
   } catch (error) {
     // 如果文件不存在，返回空列表
     return [];
@@ -26,9 +26,9 @@ export async function loadState(): Promise<string[]> {
  * 保存状态到本地文件
  * @param ids 当前发现并成功提醒的所有 conditionId 列表
  */
-export async function saveState(ids: string[]): Promise<void> {
+export async function saveState(keys: string[]): Promise<void> {
   const data: State = {
-    notifiedConditionIds: ids,
+    notifiedKeys: keys,
   };
   await fs.writeFile(STATE_FILE, JSON.stringify(data, null, 2), "utf-8");
 }

@@ -30,9 +30,12 @@ async function main(): Promise<void> {
     const currentRedeemable = await fetchRedeemablePositions(config.polymarketUserAddress);
     console.log(`Total redeemable positions (filtered): ${currentRedeemable.length}`);
 
-    // 3. 加载历史提醒状态并去重
-    const notifiedIds = await loadState();
-    const newRedeemable = currentRedeemable.filter(p => !notifiedIds.includes(p.conditionId));
+    // 3. 加载历史提醒状态并去重 (使用 conditionId + outcome 作为唯一标识)
+    const notifiedKeys = await loadState();
+    const newRedeemable = currentRedeemable.filter(p => {
+      const key = `${p.conditionId}_${p.outcome}`;
+      return !notifiedKeys.includes(key);
+    });
     console.log(`New redeemable positions (not notified): ${newRedeemable.length}\n`);
 
     if (newRedeemable.length === 0) {
@@ -57,9 +60,10 @@ async function main(): Promise<void> {
     await sendNotification(notificationTitle, notificationContent.trim());
 
     // 6. 发送成功后，更新本地状态文件
-    // 将现有的已提醒 ID 和本次新发现的 ID 合并（去重）
-    const updatedNotifiedIds = Array.from(new Set([...notifiedIds, ...newRedeemable.map(p => p.conditionId)]));
-    await saveState(updatedNotifiedIds);
+    // 将现有的已提醒 Key 和本次新发现的 Key 合并（去重）
+    const newKeys = newRedeemable.map(p => `${p.conditionId}_${p.outcome}`);
+    const updatedNotifiedKeys = Array.from(new Set([...notifiedKeys, ...newKeys]));
+    await saveState(updatedNotifiedKeys);
     console.log("State file updated successfully.");
   } catch (error: unknown) {
     console.error("Script failed.");
