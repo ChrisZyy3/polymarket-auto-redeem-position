@@ -29,13 +29,17 @@ export async function sendNotification(title: string, content: string): Promise<
     if (response.data.data?.error === "SUCCESS" || response.data.code === 0) {
       console.log(`Notification sent successfully.`);
     } else {
-      console.error(`Failed to send notification: ${JSON.stringify(response.data)}`);
+      throw new Error(`Failed to send notification: ${JSON.stringify(response.data)}`);
     }
   } catch (error) {
     if (axios.isAxiosError(error) && error.response) {
-      console.error(`Error sending notification (Status ${error.response.status}):`, error.response.data);
+      const errMsg = `Error sending notification (Status ${error.response.status}): ${JSON.stringify(error.response.data)}`;
+      console.error(errMsg);
+      throw new Error(errMsg);
     } else {
-      console.error(`Error sending notification:`, error instanceof Error ? error.message : error);
+      const errMsg = `Error sending notification: ${error instanceof Error ? error.message : String(error)}`;
+      console.error(errMsg);
+      throw new Error(errMsg);
     }
   }
 }
