@@ -27,18 +27,23 @@ async function main(): Promise<void> {
     console.log(`Total current positions (filtered): ${allPositions.length}`);
 
     // 2. 获取可赎回持仓（polymarket.ts 已内部过滤 size < 0.1）
-    const redeemablePositions = await fetchRedeemablePositions(config.polymarketUserAddress);
-    console.log(`Redeemable positions (filtered): ${redeemablePositions.length}\n`);
+    const currentRedeemable = await fetchRedeemablePositions(config.polymarketUserAddress);
+    console.log(`Total redeemable positions (filtered): ${currentRedeemable.length}`);
 
-    if (redeemablePositions.length === 0) {
-      console.log("No redeemable positions found.");
+    // 3. 加载历史提醒状态并去重
+    const notifiedIds = await loadState();
+    const newRedeemable = currentRedeemable.filter(p => !notifiedIds.includes(p.conditionId));
+    console.log(`New redeemable positions (not notified): ${newRedeemable.length}\n`);
+
+    if (newRedeemable.length === 0) {
+      console.log("No new redeemable positions to notify.");
       return;
     }
 
-    // 3. 打印并归集通知内容
+    // 4. 打印并归集通知内容
     let notificationContent = "";
-    for (const [index, position] of redeemablePositions.entries()) {
-      const positionHeader = `--- Redeemable Position #${index + 1} ---`;
+    for (const [index, position] of newRedeemable.entries()) {
+      const positionHeader = `--- New Redeemable Position #${index + 1} ---`;
       console.log(positionHeader);
       const formatted = formatPosition(position);
       console.log(formatted);
@@ -47,9 +52,15 @@ async function main(): Promise<void> {
       notificationContent += `${positionHeader}\n${formatted}\n\n`;
     }
 
-    // 4. 发送汇总通知
-    const notificationTitle = `Polymarket 发现可赎回仓位 (${redeemablePositions.length}个)`;
+    // 5. 发送汇总通知
+    const notificationTitle = `Polymarket 发现新可赎回仓位 (${newRedeemable.length}个)`;
     await sendNotification(notificationTitle, notificationContent.trim());
+
+    // 6. 发送成功后，更新本地状态文件
+    // 将现有的已提醒 ID 和本次新发现的 ID 合并（去重）
+    const updatedNotifiedIds = Array.from(new Set([...notifiedIds, ...newRedeemable.map(p => p.conditionId)]));
+    await saveState(updatedNotifiedIds);
+    console.log("State file updated successfully.");
   } catch (error: unknown) {
     console.error("Script failed.");
     if (error instanceof Error) {
