@@ -11,11 +11,11 @@ import type { Position } from "./types.js";
  */
 function formatPosition(position: Position): string {
   return [
-    `title: ${position.title}`,
-    `outcome: ${position.outcome}`,
-    `size: ${position.size}`,
-    `endDate: ${position.endDate ?? "-"}`,
-  ].join("\n");
+    `* **Title**: ${position.title}`,
+    `* **Outcome**: ${position.outcome}`,
+    `* **Size**: ${position.size}`,
+    `* **End Date**: ${position.endDate ?? "-"}`,
+  ].join("\n\n"); // 使用双换行确保在所有 Markdown 渲染器中都能正确换行
 }
 
 async function main(): Promise<void> {
@@ -46,13 +46,15 @@ async function main(): Promise<void> {
     // 4. 打印并归集通知内容
     let notificationContent = "";
     for (const [index, position] of newRedeemable.entries()) {
-      const positionHeader = `--- New Redeemable Position #${index + 1} ---`;
-      console.log(positionHeader);
+      const positionHeader = `### 🔔 New Redeemable Position #${index + 1}`;
+      console.log(`--- New Redeemable Position #${index + 1} ---`);
+      
       const formatted = formatPosition(position);
-      console.log(formatted);
+      // 控制台打印时稍微简化一下，避免过长
+      console.log(formatPosition(position).replace(/\n\n/g, "\n"));
       console.log("");
 
-      notificationContent += `${positionHeader}\n${formatted}\n\n`;
+      notificationContent += `${positionHeader}\n\n${formatted}\n\n---\n\n`;
     }
 
     // 5. 发送汇总通知
