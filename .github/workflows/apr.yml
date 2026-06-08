@@ -1,0 +1,32 @@
+name: Polymarket APR Check
+
+on:
+  schedule:
+    # cron 用的是 UTC 时间。01:00 UTC = 北京时间 09:00
+    - cron: "0 1 * * *"
+  # 允许在 Actions 页面手动点击触发（方便测试）
+  workflow_dispatch:
+
+jobs:
+  apr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run APR check
+        env:
+          POLYMARKET_USER_ADDRESS: ${{ secrets.POLYMARKET_USER_ADDRESS }}
+          FTQQ_PUSH_KEY: ${{ secrets.FTQQ_PUSH_KEY }}
+          SERVERCHAN_SEND_KEY: ${{ secrets.SERVERCHAN_SEND_KEY }}
+          APR_THRESHOLD: ${{ vars.APR_THRESHOLD || '8' }}
+        run: npm run apr

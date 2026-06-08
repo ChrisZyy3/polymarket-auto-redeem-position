@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
+    "apr": "tsx src/apr-check.ts",
     "check": "tsc --noEmit"
   },
   "dependencies": {
