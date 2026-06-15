@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchCurrentPositions } from '@/lib/polymarket';
+import { fetchCurrentPositions, fetchCashBalance } from '@/lib/polymarket';
 import { calcApr, needsAttention, isLosing } from '@/lib/apr';
 import type { EnrichedPosition } from '@/lib/types';
 
@@ -14,7 +14,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const allPositions = await fetchCurrentPositions(address);
+    const [allPositions, availableBalance] = await Promise.all([
+      fetchCurrentPositions(address),
+      fetchCashBalance(address).catch(() => 0),
+    ]);
 
     const holding = allPositions.filter(p => !p.redeemable);
     const redeemable = allPositions.filter(p => p.redeemable);
@@ -24,19 +27,23 @@ export async function GET(request: NextRequest) {
       const status = isLosing(result, 0.5) ? 'losing' : needsAttention(result, aprThreshold) ? 'attention' : 'good';
       return {
         ...p,
-        roi: result.roi,
-        apr: result.apr,
+        holdRoi: result.holdRoi,
+        costRoi: result.costRoi,
+        holdApr: result.holdApr,
+        costApr: result.costApr,
         daysToSettle: result.daysToSettle,
         status,
-        expectedProfit: p.size * result.roi,
+        expectedProfit: p.size * result.holdRoi,
         note: result.note,
       };
     });
 
     const enrichedRedeemable: EnrichedPosition[] = redeemable.map(p => ({
       ...p,
-      roi: 0,
-      apr: null,
+      holdRoi: 0,
+      costRoi: 0,
+      holdApr: null,
+      costApr: null,
       daysToSettle: 0,
       status: 'redeemable' as const,
       expectedProfit: 0,
@@ -44,16 +51,22 @@ export async function GET(request: NextRequest) {
 
     const allEnriched = [...enrichedHolding, ...enrichedRedeemable];
 
-    // 简单汇总
+    // 按当前仓位价值加权，避免小仓位的极端 APR 拉偏整体均值
+    const totalHoldingValue = enrichedHolding.reduce((sum, p) => sum + p.currentValue, 0);
+    const weightedAvg = (pick: (p: EnrichedPosition) => number | null) =>
+      totalHoldingValue > 0
+        ? enrichedHolding.reduce((sum, p) => sum + (pick(p) || 0) * p.currentValue, 0) / totalHoldingValue
+        : 0;
+
+    const totalValue = allEnriched.reduce((sum, p) => sum + p.currentValue, 0);
+
     const summary = {
       totalPositions: allEnriched.length,
-      totalSize: allEnriched.reduce((sum, p) => sum + p.size, 0),
-      avgApr: enrichedHolding.length > 0 
-        ? enrichedHolding.reduce((sum, p) => sum + (p.apr || 0), 0) / enrichedHolding.length 
-        : 0,
-      attentionCount: enrichedHolding.filter(p => p.status === 'attention').length,
-      losingCount: enrichedHolding.filter(p => p.status === 'losing').length,
-      redeemableCount: enrichedRedeemable.length,
+      totalValue,
+      totalBalance: totalValue + availableBalance,
+      availableBalance,
+      avgHoldApr: weightedAvg(p => p.holdApr),
+      avgCostApr: weightedAvg(p => p.costApr),
     };
 
     return NextResponse.json({ summary, positions: allEnriched });
