@@ -1,1 +1,71 @@
 @import "tailwindcss";
+
+/*
+ * Custom styles for Polymarket Dashboard
+ * 包含发光动画、毛玻璃（Glassmorphism）增强和深色滚动条样式
+ */
+
+/*
+ * Custom Scrollbar for Dark Theme
+ * 适用于深色主题的定制滚动条，确保整体视觉的高级感与一致性
+ */
+::-webkit-scrollbar {
+  width: 8px; /* Width of the vertical scrollbar / 垂直滚动条宽度 */
+  height: 8px; /* Height of the horizontal scrollbar / 水平滚动条高度 */
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6); /* Slate-900 with opacity / 半透明深色背景轨道 */
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3); /* Slate-400 with opacity / 半透明滑块 */
+  border-radius: 9999px; /* Fully rounded corners / 圆角滑块 */
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.5); /* Brighter on hover / 悬停时滑块变亮 */
+}
+
+/*
+ * Pulse Glow Animation for background glow spots
+ * 后台发光斑点的呼吸渐变动画，营造高级的动态质感
+ */
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 0.25;
+    transform: scale(1) translate(0px, 0px);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(1.15) translate(10px, -20px);
+  }
+}
+
+/*
+ * Apply pulse-slow class to background glowing elements
+ * 应用慢速呼吸动画的类
+ */
+.animate-pulse-slow {
+  animation: pulse-slow 15s infinite ease-in-out;
+}
+
+/*
+ * Glowing border border effects for custom cards
+ * 定制卡片的霓虹渐变发光边框效果
+ */
+.neon-border-glow-purple {
+  box-shadow: 0 0 15px rgba(168, 85, 247, 0.15); /* Soft purple glow / 紫色软阴影发光 */
+}
+
+.neon-border-glow-cyan {
+  box-shadow: 0 0 15px rgba(6, 182, 212, 0.15); /* Soft cyan glow / 青色软阴影发光 */
+}
+
+.neon-border-glow-green {
+  box-shadow: 0 0 15px rgba(34, 197, 94, 0.15); /* Soft green glow / 绿色软阴影发光 */
+}
+
+.neon-border-glow-red {
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.15); /* Soft red glow / 红色软阴影发光 */
+}
