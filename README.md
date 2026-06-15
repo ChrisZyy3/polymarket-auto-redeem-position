@@ -19,9 +19,10 @@ npm install
 
 ### 2. 配置环境变量
 复制 `.env.example` 为 `.env` 并填写相关参数：
-- `POLYMARKET_USER_ADDRESS`: 您的钱包地址。
-- `FTQQ_PUSH_URL`: [Server酱/Push](https://s.ftqq.com/) 的推送 URL。
+- `POLYMARKET_USER_ADDRESS`: 您的钱包地址（`0x` + 40 位十六进制）。
+- `SERVERCHAN_SEND_KEY` / `FTQQ_PUSH_KEY`: [Server酱/Push](https://s.ftqq.com/) 的推送密钥，二选一填写（FTQQ 优先），留空则仅控制台输出。
 - `APR_THRESHOLD`: APR 调仓阈值（单位百分比，缺省 `8`）。低于此值的仓位会被单独提示。
+- `LOSING_PRICE_THRESHOLD`: 「即将归零」市价阈值（0~1，缺省 `0.5`）。持有方向市价低于此值的仓位会被单独列出。
 
 ### 3. 运行
 ```bash
@@ -64,6 +65,10 @@ schtasks /Create /TN "Polymarket-APR" ^
 - **Language**: TypeScript
 - **HTTP Client**: Axios
 - **Tooling**: tsx, dotenv
+
+## Dashboard MVP（开发中）
+
+`feat/dashboard-mvp` 分支正在开发一个基于 Next.js + shadcn/ui 的可视化看板，复用本项目的 APR/持仓计算逻辑。详见 [README-dashboard.md](README-dashboard.md)。
 
 ## 许可
 
