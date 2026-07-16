@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "snapshots": [
+    {
+      "recordedAt": "2026-07-16T09:23:40.743Z",
+      "address": "0x052f4191cd324a348835a846d34df5b0061e53fb",
+      "totalBalance": 369540.517386,
+      "positionsValue": 369402.0345,
+      "availableBalance": 138.482886,
+      "positionCount": 15
+    }
+  ]
+}

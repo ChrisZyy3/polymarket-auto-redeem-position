@@ -26,7 +26,11 @@ import {
   X,
   ShieldCheck,
   Zap,
+  CalendarClock,
+  Database,
 } from "lucide-react";
+import { PortfolioHistoryChart } from "@/app/components/portfolio-history-chart";
+import type { PortfolioHistoryMetrics, PortfolioSnapshot } from "@/lib/portfolio-history";
 import type { EnrichedPosition } from "@/lib/types";
 
 // Structure definition for Dashboard statistics summary
@@ -45,6 +49,11 @@ interface Summary {
 interface ApiResponse {
   summary: Summary;
   positions: EnrichedPosition[];
+}
+
+interface HistoryResponse {
+  snapshots: PortfolioSnapshot[];
+  metrics: PortfolioHistoryMetrics;
 }
 
 // User-friendly status labels mapping
@@ -109,6 +118,7 @@ function formatNumber(value: number | null | undefined, digits = 2): string {
 export default function Home() {
   const [address, setAddress] = useState("");
   const [data, setData] = useState<ApiResponse | null>(null);
+  const [portfolioHistory, setPortfolioHistory] = useState<HistoryResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -351,12 +361,16 @@ export default function Home() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/positions?address=${encodeURIComponent(addr)}&aprThreshold=${holdAprThreshold}`);
+      const [res, historyRes] = await Promise.all([
+        fetch(`/api/positions?address=${encodeURIComponent(addr)}&aprThreshold=${holdAprThreshold}`),
+        fetch(`/api/portfolio-history?address=${encodeURIComponent(addr)}`),
+      ]);
       const json = await res.json();
       if (!res.ok) {
         throw new Error(json.error || "请求接口失败，请检查网络或钱包地址格式");
       }
       setData(json as ApiResponse);
+      setPortfolioHistory(historyRes.ok ? ((await historyRes.json()) as HistoryResponse) : null);
       pushHistory(addr);
 
       // Sync active search address into query param context
@@ -366,6 +380,7 @@ export default function Home() {
       window.history.replaceState(null, "", url);
     } catch (err) {
       setData(null);
+      setPortfolioHistory(null);
       setError(err instanceof Error ? err.message : "未知的请求链路错误");
     } finally {
       setLoading(false);
@@ -578,6 +593,31 @@ export default function Home() {
             />
           </div>
 
+          <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <HistoryMetric
+              label="记录以来变化"
+              value={formatSignedPercent(portfolioHistory?.metrics.changeSinceStart)}
+              icon={<Database className="h-4 w-4 text-cyan-400" />}
+            />
+            <HistoryMetric
+              label="记录以来年化"
+              value={formatSignedPercent(portfolioHistory?.metrics.annualizedSinceStart)}
+              icon={<TrendingUp className="h-4 w-4 text-emerald-400" />}
+            />
+            <HistoryMetric
+              label="7 日年化"
+              value={formatSignedPercent(portfolioHistory?.metrics.annualized7d)}
+              icon={<CalendarClock className="h-4 w-4 text-amber-400" />}
+            />
+            <HistoryMetric
+              label="30 日年化"
+              value={formatSignedPercent(portfolioHistory?.metrics.annualized30d)}
+              icon={<CalendarClock className="h-4 w-4 text-indigo-400" />}
+            />
+          </div>
+
+          <PortfolioHistoryChart snapshots={portfolioHistory?.snapshots ?? []} />
+
           {/* Positions detailed tables container / 仓位细分数据列表 */}
           <div className="mt-8 backdrop-blur-xl bg-slate-900/30 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl relative">
             <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent"></div>
@@ -655,6 +695,39 @@ export default function Home() {
         </>
       )}
     </main>
+  );
+}
+
+function formatSignedPercent(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "数据积累中";
+  return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(2)}%`;
+}
+
+function HistoryMetric({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: string;
+  icon: React.ReactNode;
+}) {
+  const isNegative = value.startsWith("-");
+  const isPending = value === "数据积累中";
+  return (
+    <div className="min-h-24 rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+      <div className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-500">
+        {label}
+        {icon}
+      </div>
+      <div
+        className={`mt-4 font-mono text-lg font-bold ${
+          isPending ? "text-slate-500" : isNegative ? "text-rose-400" : "text-emerald-400"
+        }`}
+      >
+        {value}
+      </div>
+    </div>
   );
 }
 
