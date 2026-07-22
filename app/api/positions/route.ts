@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const [allPositions, availableBalance] = await Promise.all([
-      fetchCurrentPositions(address),
+      fetchCurrentPositions(address, Number.isFinite(minSize) && minSize >= 0 ? minSize : 0.1),
       fetchCashBalance(address).catch(() => 0),
     ]);
 

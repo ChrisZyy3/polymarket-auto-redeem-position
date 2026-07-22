@@ -68,7 +68,15 @@ schtasks /Create /TN "Polymarket-APR" ^
 
 ## Dashboard MVP（开发中）
 
-`feat/dashboard-mvp` 分支正在开发一个基于 Next.js + shadcn/ui 的可视化看板，复用本项目的 APR/持仓计算逻辑。详见 [README-dashboard.md](README-dashboard.md)。
+项目包含一个基于 Next.js 的持仓与资金看板，支持当前余额、持仓 APR、每日总资产快照、历史曲线和 7/30 日年化展示。详见 [README-dashboard.md](README-dashboard.md)。
+
+```bash
+# 启动 Dashboard
+npm run dev
+
+# 手动记录一条当天资金快照
+npm run snapshot
+```
 
 ## 许可
 

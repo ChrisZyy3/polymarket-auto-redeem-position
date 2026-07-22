@@ -7,18 +7,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Polymarket position monitoring tool with two parts living in the same repo:
 
 1. **`src/`** — original Node.js CLI scripts (run with `tsx`), the working/shipped tool.
-2. **`app/` + `lib/`** — an in-progress Next.js dashboard (branch `feat/dashboard-mvp`, see [README-dashboard.md](README-dashboard.md)) that reuses the same APR/position logic via a `/api/positions` route. **Next.js itself has not been scaffolded yet** — `package.json` has no `next`/`react` dependencies, so `app/` and `lib/` currently won't build/run until `npx create-next-app@latest .` (and `npx shadcn@latest init`) is run as described in README-dashboard.md.
+2. **`app/` + `lib/`** — a runnable Next.js dashboard (see [README-dashboard.md](README-dashboard.md)) that reuses the same APR/position logic, displays current positions, and reads the Git-tracked portfolio snapshot history.
 
 ## Commands
 
 ```bash
-npm install        # install deps
-npm run dev         # run src/index.ts — checks for newly redeemable positions, sends notification
+npm ci             # install locked deps (Node.js >= 20.9)
+npm run dev         # run the Next.js dashboard
+npm run monitor     # run src/index.ts — checks for newly redeemable positions, sends notification
 npm run apr         # run src/apr-check.ts — APR/rebalance report + alert notification
-npm run check       # tsc --noEmit (type-check src/ only, per tsconfig.json "include")
+npm run snapshot    # record/replace today's portfolio snapshot in data/portfolio-history.json
+npm run test        # run Node test suites through tsx
+npm run check       # tsc --noEmit
+npm run build       # create a production Next.js build
 ```
 
-There is no test suite or linter configured.
+There is no linter configured. Tests cover portfolio history calculations and RPC cash-balance parsing.
 
 ### Environment
 
@@ -48,11 +52,13 @@ Pipeline: `config.ts` → `polymarket.ts` (fetch) → `apr.ts` (compute) → `se
 - **`index.ts`** (`npm run dev`): finds newly-redeemable positions not yet in `state.json`, sends one combined notification, then updates `state.json` — only on success.
 - **`apr-check.ts`** (`npm run apr`): for all non-redeemable held positions, computes APR for each, splits into "about to lose" (price < `LOSING_PRICE_THRESHOLD`, sorted by price asc) vs the rest (sorted by APR asc), prints both reports to console, and sends a combined notification if anything needs attention.
 
-## Architecture (app/ + lib/ — dashboard MVP, WIP)
+## Architecture (app/ + lib/ — dashboard)
 
 - **`lib/polymarket.ts`** and **`lib/apr.ts`** are near-duplicates of the `src/` versions, adapted for the dashboard (`lib/types.ts` adds `EnrichedPosition` with a `status: 'good' | 'attention' | 'losing' | 'redeemable'` field).
-- **Known discrepancy**: `lib/polymarket.ts` points at `https://gamma-api.polymarket.com` (marked `TODO` in the source) whereas `src/polymarket.ts` (the proven-working version) uses `https://data-api.polymarket.com`. If working on the dashboard's data fetching, check whether this still needs fixing.
 - **`app/api/positions/route.ts`**: `GET /api/positions?address=...&aprThreshold=8&minSize=0.1` — fetches positions for `address`, enriches each with APR/ROI/status via `lib/apr.ts`, and returns `{ summary, positions }`. Uses the `@/lib/...` path alias, which requires the Next.js scaffold's `tsconfig.json` paths config to exist.
+- **`scripts/record-portfolio-snapshot.ts`**: captures all position value plus the wallet cash balance and updates `data/portfolio-history.json` once per UTC day.
+- **`app/api/portfolio-history/route.ts`**: returns saved snapshots and history metrics for one wallet.
+- **`app/api/cron/portfolio-snapshot/route.ts`**: Vercel Cron endpoint that commits the snapshot through the GitHub Contents API because Vercel's local filesystem is ephemeral.
 
 ## Project Status
 

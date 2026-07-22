@@ -28,29 +28,6 @@
 }
 
 /*
- * Pulse Glow Animation for background glow spots
- * 后台发光斑点的呼吸渐变动画，营造高级的动态质感
- */
-@keyframes pulse-slow {
-  0%, 100% {
-    opacity: 0.25;
-    transform: scale(1) translate(0px, 0px);
-  }
-  50% {
-    opacity: 0.45;
-    transform: scale(1.15) translate(10px, -20px);
-  }
-}
-
-/*
- * Apply pulse-slow class to background glowing elements
- * 应用慢速呼吸动画的类
- */
-.animate-pulse-slow {
-  animation: pulse-slow 15s infinite ease-in-out;
-}
-
-/*
  * Glowing border border effects for custom cards
  * 定制卡片的霓虹渐变发光边框效果
  */
