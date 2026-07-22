@@ -33,7 +33,7 @@ jobs:
 
       - name: Capture portfolio snapshot
         env:
-          POLYMARKET_USER_ADDRESS: ${{ secrets.POLYMARKET_USER_ADDRESS }}
+          POLYMARKET_USER_ADDRESSES: ${{ vars.POLYMARKET_USER_ADDRESSES || secrets.POLYMARKET_USER_ADDRESS }}
         run: npm run snapshot
 
       - name: Commit updated history

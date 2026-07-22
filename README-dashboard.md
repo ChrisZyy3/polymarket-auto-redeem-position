@@ -45,13 +45,17 @@ npm run snapshot
 
 仓库需要配置：
 
-1. Actions secret：`POLYMARKET_USER_ADDRESS`。
+1. Actions variable：`POLYMARKET_USER_ADDRESSES`，填写逗号分隔的钱包地址；旧的单地址 secret `POLYMARKET_USER_ADDRESS` 仍然兼容。
 2. `Settings > Actions > General > Workflow permissions` 允许 Read and write permissions。
 3. 将功能分支合并到默认分支。定时 workflow 只会从默认分支运行。
 
-### Vercel Cron
+Dashboard 的 `/api/portfolio-history` 会在运行时通过 GitHub Contents API 读取最新的 `data/portfolio-history.json`，因此 GitHub Actions 提交新快照后无需重新部署 Vercel。Vercel Production 环境仍需配置 `GITHUB_HISTORY_TOKEN`、`GITHUB_REPOSITORY` 和 `GITHUB_HISTORY_BRANCH`。
 
-Vercel 的本地文件系统不适合持久化，因此 Cron 路由会通过 GitHub Contents API 更新同一个 JSON 文件。配置 `vercel.json` 后，在 Vercel 添加：
+### Vercel Cron（当前未启用）
+
+当前推荐使用 GitHub Actions 运行定时任务，因此仓库中的 `vercel.json` 不再配置 Cron。Dashboard 仍通过 GitHub Contents API 读取最新的历史 JSON。
+
+如果改用 Vercel Cron，才需要恢复 Cron 配置并在 Vercel 添加：
 
 ```text
 POLYMARKET_USER_ADDRESS=0x...

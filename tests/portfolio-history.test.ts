@@ -7,6 +7,7 @@ import {
   type PortfolioHistory,
   type PortfolioSnapshot,
 } from "../lib/portfolio-history";
+import { parsePortfolioAddresses } from "../lib/portfolio-addresses";
 
 const ADDRESS = "0x1111111111111111111111111111111111111111";
 
@@ -72,4 +73,20 @@ test("calculateHistoryMetrics returns null rates when history is too short", () 
   assert.equal(metrics.changeSinceStart, 0);
   assert.equal(metrics.annualized7d, null);
   assert.equal(metrics.annualized30d, null);
+});
+
+test("parsePortfolioAddresses accepts, normalizes, and deduplicates wallet addresses", () => {
+  const addresses = parsePortfolioAddresses(
+    "0x1111111111111111111111111111111111111111,\n0x2222222222222222222222222222222222222222,0X1111111111111111111111111111111111111111",
+  );
+
+  assert.deepEqual(addresses, [
+    "0x1111111111111111111111111111111111111111",
+    "0x2222222222222222222222222222222222222222",
+  ]);
+});
+
+test("parsePortfolioAddresses rejects missing or invalid addresses", () => {
+  assert.throws(() => parsePortfolioAddresses(undefined), /POLYMARKET_USER_ADDRESSES/);
+  assert.throws(() => parsePortfolioAddresses("0xinvalid"), /Invalid EVM address/);
 });
