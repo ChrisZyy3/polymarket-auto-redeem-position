@@ -13,6 +13,11 @@ interface GitHubStoreOptions {
   branch: string;
 }
 
+interface PublicHistoryOptions {
+  repository: string;
+  branch: string;
+}
+
 function githubHeaders(token: string): HeadersInit {
   return {
     Accept: "application/vnd.github+json",
@@ -23,6 +28,11 @@ function githubHeaders(token: string): HeadersInit {
 
 function historyUrl(options: GitHubStoreOptions): string {
   return `https://api.github.com/repos/${options.repository}/contents/${HISTORY_PATH}?ref=${encodeURIComponent(options.branch)}`;
+}
+
+function rawHistoryUrl(options: PublicHistoryOptions): string {
+  const branchPath = options.branch.split("/").map(encodeURIComponent).join("/");
+  return `https://raw.githubusercontent.com/${options.repository}/${branchPath}/${HISTORY_PATH}`;
 }
 
 function decodeHistory(content: string): PortfolioHistory {
@@ -42,11 +52,16 @@ async function readGitHubContent(options: GitHubStoreOptions): Promise<GitHubCon
   return (await response.json()) as GitHubContentResponse;
 }
 
-export async function readPortfolioHistoryOnGitHub(
-  options: GitHubStoreOptions,
+export async function readPortfolioHistoryFromRawUrl(
+  options: PublicHistoryOptions,
 ): Promise<PortfolioHistory> {
-  const current = await readGitHubContent(options);
-  return decodeHistory(current.content);
+  const response = await fetch(rawHistoryUrl(options), {
+    next: { revalidate: 300 },
+  });
+  if (!response.ok) {
+    throw new Error(`GitHub raw history read failed (${response.status})`);
+  }
+  return (await response.json()) as PortfolioHistory;
 }
 
 export async function appendSnapshotOnGitHub(

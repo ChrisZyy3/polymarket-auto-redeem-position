@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { readPortfolioHistory } from "@/lib/portfolio-history-file";
-import { readPortfolioHistoryOnGitHub } from "@/lib/github-history-store";
+import { readPortfolioHistoryFromRawUrl } from "@/lib/github-history-store";
 import {
   calculateHistoryMetrics,
   snapshotsForAddress,
@@ -12,11 +12,9 @@ import { isValidEvmAddress } from "@/lib/polymarket";
 export const dynamic = "force-dynamic";
 
 async function readLatestHistory(): Promise<PortfolioHistory> {
-  const token = process.env.GITHUB_HISTORY_TOKEN?.trim();
   const repository = process.env.GITHUB_REPOSITORY?.trim();
-  if (token && repository) {
-    return readPortfolioHistoryOnGitHub({
-      token,
+  if (repository) {
+    return readPortfolioHistoryFromRawUrl({
       repository,
       branch: process.env.GITHUB_HISTORY_BRANCH?.trim() || "main",
     });

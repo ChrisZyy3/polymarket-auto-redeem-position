@@ -41,6 +41,8 @@ npm run snapshot
 
 ### GitHub Actions
 
+The Dashboard reads the latest history from the public GitHub Raw URL at runtime with a five-minute server cache. Vercel only needs `GITHUB_REPOSITORY` and `GITHUB_HISTORY_BRANCH`; no GitHub token is required.
+
 `.github/workflows/portfolio-history.yml` 每天北京时间 09:10 执行，采集成功后自动提交 `data/portfolio-history.json`。
 
 仓库需要配置：
@@ -49,11 +51,11 @@ npm run snapshot
 2. `Settings > Actions > General > Workflow permissions` 允许 Read and write permissions。
 3. 将功能分支合并到默认分支。定时 workflow 只会从默认分支运行。
 
-Dashboard 的 `/api/portfolio-history` 会在运行时通过 GitHub Contents API 读取最新的 `data/portfolio-history.json`，因此 GitHub Actions 提交新快照后无需重新部署 Vercel。Vercel Production 环境仍需配置 `GITHUB_HISTORY_TOKEN`、`GITHUB_REPOSITORY` 和 `GITHUB_HISTORY_BRANCH`。
+Dashboard 的 `/api/portfolio-history` 会在运行时通过公开 GitHub Raw URL 读取最新的 `data/portfolio-history.json`，服务端缓存 5 分钟。因此 GitHub Actions 提交新快照后无需重新部署 Vercel，也不需要 GitHub Token。Vercel Production 环境只需配置 `GITHUB_REPOSITORY` 和 `GITHUB_HISTORY_BRANCH`。
 
 ### Vercel Cron（当前未启用）
 
-当前推荐使用 GitHub Actions 运行定时任务，因此仓库中的 `vercel.json` 不再配置 Cron。Dashboard 仍通过 GitHub Contents API 读取最新的历史 JSON。
+当前推荐使用 GitHub Actions 运行定时任务，因此仓库中的 `vercel.json` 不再配置 Cron。Dashboard 仍通过公开 GitHub Raw URL 读取最新的历史 JSON。
 
 如果改用 Vercel Cron，才需要恢复 Cron 配置并在 Vercel 添加：
 
