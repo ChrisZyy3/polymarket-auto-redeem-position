@@ -21,22 +21,41 @@ function githubHeaders(token: string): HeadersInit {
   };
 }
 
+function historyUrl(options: GitHubStoreOptions): string {
+  return `https://api.github.com/repos/${options.repository}/contents/${HISTORY_PATH}?ref=${encodeURIComponent(options.branch)}`;
+}
+
+function decodeHistory(content: string): PortfolioHistory {
+  return JSON.parse(
+    Buffer.from(content.replace(/\n/g, ""), "base64").toString("utf8"),
+  ) as PortfolioHistory;
+}
+
+async function readGitHubContent(options: GitHubStoreOptions): Promise<GitHubContentResponse> {
+  const response = await fetch(historyUrl(options), {
+    headers: githubHeaders(options.token),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(`GitHub history read failed (${response.status})`);
+  }
+  return (await response.json()) as GitHubContentResponse;
+}
+
+export async function readPortfolioHistoryOnGitHub(
+  options: GitHubStoreOptions,
+): Promise<PortfolioHistory> {
+  const current = await readGitHubContent(options);
+  return decodeHistory(current.content);
+}
+
 export async function appendSnapshotOnGitHub(
   snapshot: PortfolioSnapshot,
   options: GitHubStoreOptions,
 ): Promise<void> {
-  const url = `https://api.github.com/repos/${options.repository}/contents/${HISTORY_PATH}?ref=${encodeURIComponent(options.branch)}`;
-  const readResponse = await fetch(url, { headers: githubHeaders(options.token) });
-  if (!readResponse.ok) {
-    throw new Error(`GitHub history read failed (${readResponse.status})`);
-  }
-
-  const current = (await readResponse.json()) as GitHubContentResponse;
-  const history = JSON.parse(
-    Buffer.from(current.content.replace(/\n/g, ""), "base64").toString("utf8"),
-  ) as PortfolioHistory;
-  const updated = appendSnapshot(history, snapshot);
-  const writeResponse = await fetch(url.split("?ref=")[0], {
+  const current = await readGitHubContent(options);
+  const updated = appendSnapshot(decodeHistory(current.content), snapshot);
+  const writeResponse = await fetch(historyUrl(options).split("?ref=")[0], {
     method: "PUT",
     headers: {
       ...githubHeaders(options.token),
