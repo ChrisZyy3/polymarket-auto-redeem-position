@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CalendarDays, LineChart } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronUp, LineChart } from "lucide-react";
 
 import type { PortfolioSnapshot } from "@/lib/portfolio-history";
 
 type Range = 30 | 90 | "all";
+type Language = "zh" | "en";
 
 const WIDTH = 800;
 const HEIGHT = 280;
@@ -19,16 +20,24 @@ function money(value: number): string {
   });
 }
 
-function shortDate(value: string): string {
-  return new Intl.DateTimeFormat("zh-CN", {
+function shortDate(value: string, language: Language): string {
+  return new Intl.DateTimeFormat(language === "en" ? "en-US" : "zh-CN", {
     month: "short",
     day: "numeric",
   }).format(new Date(value));
 }
 
-export function PortfolioHistoryChart({ snapshots }: { snapshots: PortfolioSnapshot[] }) {
+export function PortfolioHistoryChart({
+  snapshots,
+  language,
+}: {
+  snapshots: PortfolioSnapshot[];
+  language: Language;
+}) {
+  const isEnglish = language === "en";
   const [range, setRange] = useState<Range>(30);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const visible = useMemo(() => {
     if (range === "all" || snapshots.length === 0) return snapshots;
@@ -61,43 +70,60 @@ export function PortfolioHistoryChart({ snapshots }: { snapshots: PortfolioSnaps
 
   return (
     <section className="mt-8 border-y border-slate-800 py-7" aria-labelledby="portfolio-history-title">
-      <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className={`${isExpanded ? "mb-5" : ""} flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between`}>
         <div>
           <h2 id="portfolio-history-title" className="flex items-center gap-2 text-lg font-bold text-slate-100">
             <LineChart className="h-5 w-5 text-cyan-400" />
-            总资产历史曲线
-          </h2>
-          <p className="mt-1 text-xs text-slate-500">
-            每日快照由定时任务写入 Git 仓库，包含全部持仓市值与链上可用余额。
-          </p>
-        </div>
-        <div className="inline-flex h-9 self-start rounded-lg border border-slate-700 bg-slate-950 p-1" aria-label="曲线时间范围">
-          {([30, 90, "all"] as const).map((value) => (
+            {isEnglish ? "Total portfolio history" : "总资产历史曲线"}
             <button
-              key={value}
               type="button"
-              onClick={() => {
-                setRange(value);
-                setSelectedIndex(null);
-              }}
-              className={`min-w-14 rounded px-3 text-xs font-semibold transition-colors ${
-                range === value
-                  ? "bg-slate-700 text-white"
-                  : "text-slate-500 hover:text-slate-200"
-              }`}
+              onClick={() => setIsExpanded((expanded) => !expanded)}
+              aria-expanded={isExpanded}
+              aria-controls="portfolio-history-content"
+              aria-label={isExpanded ? (isEnglish ? "Collapse history chart" : "收起历史曲线") : isEnglish ? "Expand history chart" : "展开历史曲线"}
+              title={isExpanded ? (isEnglish ? "Collapse" : "收起") : isEnglish ? "Expand" : "展开"}
+              className="ml-1 inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
             >
-              {value === "all" ? "全部" : `${value} 天`}
+              {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </button>
-          ))}
+          </h2>
+          {isExpanded && (
+            <p className="mt-1 text-xs text-slate-500">
+              {isEnglish
+                ? "Daily snapshots are recorded by a scheduled task and include position value and available on-chain balance."
+                : "每日快照由定时任务写入 Git 仓库，包含全部持仓市值与链上可用余额。"}
+            </p>
+          )}
         </div>
+        {isExpanded && (
+          <div className="inline-flex h-9 self-start rounded-lg border border-slate-700 bg-slate-950 p-1" aria-label={isEnglish ? "Chart time range" : "曲线时间范围"}>
+            {([30, 90, "all"] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => {
+                  setRange(value);
+                  setSelectedIndex(null);
+                }}
+                className={`min-w-14 rounded px-3 text-xs font-semibold transition-colors ${
+                  range === value
+                    ? "bg-slate-700 text-white"
+                    : "text-slate-500 hover:text-slate-200"
+                }`}
+              >
+                {value === "all" ? (isEnglish ? "All" : "全部") : isEnglish ? `${value} days` : `${value} 天`}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {chart ? (
-        <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+      {isExpanded && (chart ? (
+        <div id="portfolio-history-content" className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
           <div className="mb-3 flex h-10 items-center justify-between gap-4">
             <div className="flex items-center gap-2 text-xs text-slate-500">
               <CalendarDays className="h-4 w-4" />
-              {selected ? new Date(selected.recordedAt).toLocaleString("zh-CN") : ""}
+              {selected ? new Date(selected.recordedAt).toLocaleString(isEnglish ? "en-US" : "zh-CN") : ""}
             </div>
             <div className="text-right">
               <div className="font-mono text-lg font-bold text-slate-100">
@@ -105,7 +131,7 @@ export function PortfolioHistoryChart({ snapshots }: { snapshots: PortfolioSnaps
               </div>
               {selected && (
                 <div className="text-[11px] text-slate-500">
-                  持仓 {money(selected.positionsValue)} · 可用 {money(selected.availableBalance)}
+                  {isEnglish ? "Positions" : "持仓"} {money(selected.positionsValue)} · {isEnglish ? "Available" : "可用"} {money(selected.availableBalance)}
                 </div>
               )}
             </div>
@@ -115,7 +141,9 @@ export function PortfolioHistoryChart({ snapshots }: { snapshots: PortfolioSnaps
               viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
               className="h-full w-full overflow-visible"
               role="img"
-              aria-label={`总资产从 ${money(visible[0].totalBalance)} 变化至 ${money(visible.at(-1)!.totalBalance)}`}
+              aria-label={isEnglish
+                ? `Total portfolio changed from ${money(visible[0].totalBalance)} to ${money(visible.at(-1)!.totalBalance)}`
+                : `总资产从 ${money(visible[0].totalBalance)} 变化至 ${money(visible.at(-1)!.totalBalance)}`}
               onMouseLeave={() => setSelectedIndex(null)}
             >
               {[0, 0.5, 1].map((ratio) => {
@@ -159,19 +187,21 @@ export function PortfolioHistoryChart({ snapshots }: { snapshots: PortfolioSnaps
                 </g>
               ))}
               <text x={PADDING.left} y={HEIGHT - 10} fill="#64748b" fontSize="11">
-                {shortDate(visible[0].recordedAt)}
+                {shortDate(visible[0].recordedAt, language)}
               </text>
               <text x={WIDTH - PADDING.right} y={HEIGHT - 10} fill="#64748b" fontSize="11" textAnchor="end">
-                {shortDate(visible.at(-1)!.recordedAt)}
+                {shortDate(visible.at(-1)!.recordedAt, language)}
               </text>
             </svg>
           </div>
         </div>
       ) : (
-        <div className="flex min-h-56 items-center justify-center rounded-lg border border-dashed border-slate-700 bg-slate-950/30 px-6 text-center text-sm text-slate-500">
-          暂无历史快照。定时任务首次成功执行后，资产曲线会从当天开始记录。
+        <div id="portfolio-history-content" className="flex min-h-56 items-center justify-center rounded-lg border border-dashed border-slate-700 bg-slate-950/30 px-6 text-center text-sm text-slate-500">
+          {isEnglish
+            ? "No history snapshots yet. The chart will begin recording after the scheduled task succeeds for the first time."
+            : "暂无历史快照。定时任务首次成功执行后，资产曲线会从当天开始记录。"}
         </div>
-      )}
+      ))}
     </section>
   );
 }
