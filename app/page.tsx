@@ -21,7 +21,6 @@ import {
   TrendingUp,
   Percent,
   Activity,
-  Award,
   AlertTriangle,
   X,
   ShieldCheck,
@@ -49,6 +48,7 @@ interface Summary {
 // Format API response payload
 // API 请求返回的数据负荷接口定义
 interface ApiResponse {
+  fetchedAt: string;
   summary: Summary;
   positions: EnrichedPosition[];
 }
@@ -67,14 +67,14 @@ const LANGUAGE_KEY = "polymarket-dashboard-language";
 const STATUS_LABEL: Record<Language, Record<EnrichedPosition["status"], string>> = {
   zh: {
     good: "收益极佳",
-    attention: "需关注/低年化",
-    losing: "跌破阈值/建议止损",
+    attention: "低年化",
+    losing: "当前亏损",
     redeemable: "已结算可赎回",
   },
   en: {
     good: "Strong return",
     attention: "Low APR",
-    losing: "Below threshold",
+    losing: "Current loss / attention",
     redeemable: "Ready to redeem",
   },
 };
@@ -123,6 +123,35 @@ function formatNumber(value: number | null | undefined, digits = 2): string {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   });
+}
+
+function formatDateTime(value: string, language: Language): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleTimeString(language === "en" ? "en-US" : "zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatSettlementDate(value: string, language: Language): string {
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  const date = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString(language === "en" ? "en-US" : "zh-CN", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function calculateHoldingReturn(position: EnrichedPosition): number | null {
+  if (!Number.isFinite(position.cashPnl) || !Number.isFinite(position.initialValue) || position.initialValue <= 0) {
+    return null;
+  }
+  return position.cashPnl / position.initialValue;
 }
 
 function getMarketUrl(position: EnrichedPosition): string | null {
@@ -226,6 +255,16 @@ export default function Home() {
   // Memoize positions from state payload
   // 缓存提取并解析的仓位数组
   const positions = useMemo(() => data?.positions ?? [], [data]);
+  const totalPortfolioValue = data?.summary.totalValue ?? 0;
+  const marketValues = useMemo(() => {
+    const values = new Map<string, number>();
+    positions.forEach((position) => {
+      const marketKey = position.conditionId || position.eventSlug || position.slug || position.asset;
+      const currentValue = Number.isFinite(position.currentValue) ? position.currentValue : 0;
+      values.set(marketKey, (values.get(marketKey) ?? 0) + currentValue);
+    });
+    return values;
+  }, [positions]);
 
   // Table columns definition with lucide icons and custom render cells
   // 定义表格每一列的数据绑定及其 UI 渲染细节，使用 Tailwind 精准样式控制
@@ -268,15 +307,6 @@ export default function Home() {
         },
       },
       {
-        accessorKey: "size",
-        header: isEnglish ? "Size" : "持仓数量",
-        cell: ({ getValue }) => (
-          <span className="font-mono font-medium text-slate-300">
-            {formatNumber(getValue<number>(), 1)}
-          </span>
-        ),
-      },
-      {
         accessorKey: "avgPrice",
         header: isEnglish ? "Avg. entry ($)" : "建仓均价 ($)",
         cell: ({ getValue }) => (
@@ -302,6 +332,78 @@ export default function Home() {
             ${formatNumber(getValue<number>())}
           </span>
         ),
+      },
+      {
+        accessorKey: "cashPnl",
+        header: isEnglish ? "Current holding P&L ($)" : "当前仓位持有收益 ($)",
+        cell: ({ getValue }) => {
+          const value = getValue<number | null>();
+          if (typeof value !== "number" || !Number.isFinite(value)) {
+            return <span className="font-mono font-bold text-slate-500">—</span>;
+          }
+          return (
+            <span className={`font-mono font-bold ${value >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+              {value >= 0 ? "+" : "-"}${formatNumber(Math.abs(value))}
+            </span>
+          );
+        },
+      },
+      {
+        id: "holdingReturn",
+        accessorFn: (row) => calculateHoldingReturn(row),
+        header: isEnglish ? "Holding return" : "持有收益率",
+        cell: ({ getValue }) => {
+          const value = getValue<number | null>();
+          if (typeof value !== "number" || !Number.isFinite(value)) {
+            return <span className="font-mono font-bold text-slate-500">—</span>;
+          }
+          return (
+            <span className={`font-mono font-bold ${value >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+              {value >= 0 ? "+" : ""}{formatPercent(value)}
+            </span>
+          );
+        },
+      },
+      {
+        id: "positionWeight",
+        accessorFn: (row) => {
+          const marketKey = row.conditionId || row.eventSlug || row.slug || row.asset;
+          const marketValue = marketValues.get(marketKey) ?? 0;
+          return totalPortfolioValue > 0 ? marketValue / totalPortfolioValue : 0;
+        },
+        header: isEnglish ? "Portfolio share" : "仓位占比",
+        cell: ({ getValue }) => {
+          const value = getValue<number>();
+          const isHighConcentration = value > 0.3;
+          const isConcentrated = value > 0.2;
+          const riskLabel = isHighConcentration
+            ? (isEnglish ? "High concentration" : "高集中风险")
+            : isConcentrated
+              ? (isEnglish ? "Concentration risk" : "集中风险")
+              : "";
+          const riskClass = isHighConcentration
+            ? "text-rose-400"
+            : isConcentrated
+              ? "text-amber-400"
+              : "text-cyan-300";
+
+          return (
+            <div
+              className="flex min-w-[92px] flex-col gap-0.5"
+              title={riskLabel || (isEnglish ? "Share of total portfolio value" : "占全部持仓市值的比例")}
+            >
+              <span className={`flex items-center gap-1 font-mono font-semibold ${riskClass}`}>
+                {formatPercent(value)}
+                {isConcentrated && <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+              </span>
+              {riskLabel && (
+                <span className={`text-[10px] leading-tight ${riskClass}`}>
+                  {riskLabel}
+                </span>
+              )}
+            </div>
+          );
+        },
       },
       {
         accessorKey: "holdApr",
@@ -330,11 +432,18 @@ export default function Home() {
       },
       {
         accessorKey: "daysToSettle",
-        header: isEnglish ? "Settlement (days)" : "距结算 (天)",
-        cell: ({ getValue }) => {
-          const value = getValue<number>();
-          const text = Number.isFinite(value) ? Math.max(0, value).toFixed(1) : "—";
-          return <span className="font-mono font-medium text-slate-300">{text}</span>;
+        header: isEnglish ? "Settlement" : "到期信息",
+        cell: ({ row }) => {
+          const value = row.original.daysToSettle;
+          const days = Number.isFinite(value) ? Math.max(0, value).toFixed(1) : "—";
+          return (
+            <div className="flex min-w-28 flex-col gap-0.5">
+              <span className="font-medium text-slate-200">{formatSettlementDate(row.original.endDate, language)}</span>
+              <span className="font-mono text-xs text-slate-400">
+                {isEnglish ? `${days} days remaining` : `剩余 ${days} 天`}
+              </span>
+            </div>
+          );
         },
       },
       {
@@ -366,7 +475,7 @@ export default function Home() {
         },
       },
     ],
-    [holdAprThreshold, isEnglish, language]
+    [holdAprThreshold, isEnglish, language, marketValues, totalPortfolioValue]
   );
 
   // Setup React Table instance
@@ -620,7 +729,7 @@ export default function Home() {
       {data && (
         <>
           {/* Dashboard Summary Statistics Cards Grid / 指标概览区块 */}
-          <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
             <SummaryCard
               label={isEnglish ? "Total portfolio value" : "资产总价值"}
               value={`$${formatNumber(data.summary.totalBalance)}`}
@@ -643,13 +752,6 @@ export default function Home() {
               tooltip={isEnglish ? "Current market value of all positions" : "用户当前所有未结算的持仓当前市价总价值"}
             />
             <SummaryCard
-              label={isEnglish ? "Open positions" : "当前持仓数量"}
-              value={data.summary.totalPositions}
-              icon={<Award className="h-4 w-4 text-purple-400" />}
-              glowColor="purple"
-              tooltip={isEnglish ? "Number of Polymarket positions, excluding positions below $0.10" : "当前拥有的 Polymarket 持仓市场总个数 (已滤除小于 0.1 刀的细微垃圾仓位)"}
-            />
-            <SummaryCard
               label={isEnglish ? "Weighted hold APR" : "加权继续持有 APR"}
               value={formatPercent(data.summary.avgHoldApr)}
               icon={<TrendingUp className="h-4 w-4 text-fuchsia-400" />}
@@ -663,6 +765,11 @@ export default function Home() {
               glowColor="cyan"
               tooltip={isEnglish ? "Initial annualized return at entry, weighted by current position value" : "以仓位当前市值为权重，加权计算的买入成本初始年化收益率"}
             />
+          </div>
+
+          <div className="mt-3 flex items-center justify-end gap-1.5 text-xs text-slate-500">
+            <Database className="h-3.5 w-3.5" />
+            {isEnglish ? "Data fetched at" : "数据获取于"} {formatDateTime(data.fetchedAt, language)}
           </div>
 
           <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">

@@ -24,7 +24,12 @@ export async function GET(request: NextRequest) {
 
     const enrichedHolding: EnrichedPosition[] = holding.map(p => {
       const result = calcApr(p);
-      const status = isLosing(result, 0.5) ? 'losing' : needsAttention(result, aprThreshold) ? 'attention' : 'good';
+      const hasCurrentLoss = Number.isFinite(p.cashPnl) && p.cashPnl < 0;
+      const status = hasCurrentLoss || isLosing(result, 0.5)
+        ? 'losing'
+        : needsAttention(result, aprThreshold)
+          ? 'attention'
+          : 'good';
       return {
         ...p,
         holdRoi: result.holdRoi,
@@ -69,7 +74,11 @@ export async function GET(request: NextRequest) {
       avgCostApr: weightedAvg(p => p.costApr),
     };
 
-    return NextResponse.json({ summary, positions: allEnriched });
+    return NextResponse.json({
+      fetchedAt: new Date().toISOString(),
+      summary,
+      positions: allEnriched,
+    });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Failed to fetch' }, { status: 500 });
   }
