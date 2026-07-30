@@ -1,7 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const STATE_FILE = path.join(process.cwd(), "state.json");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// 使用当前文件所在目录（src）的上一级（即项目根目录）作为存储路径，避免在青龙面板等环境下 process.cwd() 漂移到 /ql 目录下
+const STATE_FILE = path.join(__dirname, "..", "state.json");
 
 interface State {
   notifiedKeys: string[];
