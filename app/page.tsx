@@ -134,11 +134,13 @@ function formatDateTime(value: string, language: Language): string {
   });
 }
 
-function formatSettlementDate(value: string, language: Language): string {
-  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+function formatSettlementDate(value: string | null | undefined, language: Language): string {
+  if (typeof value !== "string" || !value.trim()) return "—";
+  const trimmedValue = value.trim();
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmedValue);
   const date = dateOnly
     ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
-    : new Date(value);
+    : new Date(trimmedValue);
   if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleDateString(language === "en" ? "en-US" : "zh-CN", {
     year: "numeric",
@@ -529,7 +531,7 @@ export default function Home() {
       ]);
       const json = await res.json();
       if (!res.ok) {
-        throw new Error(json.error || "请求接口失败，请检查网络或钱包地址格式");
+        throw new Error(json.error || (isEnglish ? "Request failed. Check your connection or wallet address." : "请求接口失败，请检查网络或钱包地址格式"));
       }
       setData(json as ApiResponse);
       setPortfolioHistory(historyRes.ok ? ((await historyRes.json()) as HistoryResponse) : null);
@@ -543,7 +545,7 @@ export default function Home() {
     } catch (err) {
       setData(null);
       setPortfolioHistory(null);
-      setError(err instanceof Error ? err.message : "未知的请求链路错误");
+      setError(err instanceof Error ? err.message : isEnglish ? "Unknown request error" : "未知的请求链路错误");
     } finally {
       setLoading(false);
     }

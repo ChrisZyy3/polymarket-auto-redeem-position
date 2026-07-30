@@ -22,7 +22,7 @@ export interface Position {
   outcomeIndex: number;
   oppositeOutcome: string;
   oppositeAsset: string;
-  endDate: string;
+  endDate: string | null;
   negativeRisk: boolean;
 }
 
