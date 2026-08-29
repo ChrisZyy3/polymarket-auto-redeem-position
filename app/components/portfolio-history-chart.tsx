@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { CalendarDays, ChevronDown, ChevronUp, LineChart } from "lucide-react";
 
 import type { PortfolioSnapshot } from "@/lib/portfolio-history";
@@ -68,6 +69,51 @@ export function PortfolioHistoryChart({
 
   const selected = selectedIndex === null ? visible.at(-1) : visible[selectedIndex];
 
+  // Roving tabindex refs so keyboard users can arrow through data points
+  // 通过 ref 数组实现 roving tabindex，键盘用户可用方向键遍历数据点
+  const pointRefs = useRef<Array<SVGCircleElement | null>>([]);
+
+  function moveSelection(step: number | "first" | "last") {
+    if (visible.length === 0) return;
+    const current = selectedIndex ?? visible.length - 1;
+    const next =
+      step === "first"
+        ? 0
+        : step === "last"
+          ? visible.length - 1
+          : Math.min(visible.length - 1, Math.max(0, current + step));
+    setSelectedIndex(next);
+    pointRefs.current[next]?.focus();
+  }
+
+  function handlePointKeyDown(event: ReactKeyboardEvent<SVGCircleElement>) {
+    switch (event.key) {
+      case "ArrowLeft":
+        event.preventDefault();
+        moveSelection(-1);
+        break;
+      case "ArrowRight":
+        event.preventDefault();
+        moveSelection(1);
+        break;
+      case "Home":
+        event.preventDefault();
+        moveSelection("first");
+        break;
+      case "End":
+        event.preventDefault();
+        moveSelection("last");
+        break;
+    }
+  }
+
+  function formatPointLabel(snapshot: PortfolioSnapshot, isEnglish: boolean): string {
+    const date = new Date(snapshot.recordedAt).toLocaleString(isEnglish ? "en-US" : "zh-CN");
+    return isEnglish
+      ? `${date}, total assets ${money(snapshot.totalBalance)}`
+      : `${date}，总资产 ${money(snapshot.totalBalance)}`;
+  }
+
   return (
     <section className="mt-8 border-y border-slate-800 py-7" aria-labelledby="portfolio-history-title">
       <div className={`${isExpanded ? "mb-5" : ""} flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between`}>
@@ -125,7 +171,7 @@ export function PortfolioHistoryChart({
               <CalendarDays className="h-4 w-4" />
               {selected ? new Date(selected.recordedAt).toLocaleString(isEnglish ? "en-US" : "zh-CN") : ""}
             </div>
-            <div className="text-right">
+            <div className="text-right" aria-live="polite">
               <div className="font-mono text-lg font-bold text-slate-100">
                 {selected ? money(selected.totalBalance) : "--"}
               </div>
@@ -158,6 +204,22 @@ export function PortfolioHistoryChart({
                   </g>
                 );
               })}
+              {(() => {
+                // Crosshair tracking the selected data point / 跟随选中数据点的十字准线
+                const crossPoint = chart.points[selectedIndex ?? chart.points.length - 1];
+                if (!crossPoint) return null;
+                return (
+                  <line
+                    x1={crossPoint.x}
+                    x2={crossPoint.x}
+                    y1={PADDING.top}
+                    y2={HEIGHT - PADDING.bottom}
+                    stroke="#475569"
+                    strokeWidth="1"
+                    strokeDasharray="4 4"
+                  />
+                );
+              })()}
               {chart.points.length > 1 && (
                 <path
                   d={`${chart.points.map((point, index) => `${index === 0 ? "M" : "L"}${point.x},${point.y}`).join(" ")} L${chart.points.at(-1)!.x},${HEIGHT - PADDING.bottom} L${chart.points[0].x},${HEIGHT - PADDING.bottom} Z`}
@@ -173,19 +235,45 @@ export function PortfolioHistoryChart({
                 strokeLinejoin="round"
                 strokeLinecap="round"
               />
-              {chart.points.map((point, index) => (
-                <g key={visible[index].recordedAt} onMouseEnter={() => setSelectedIndex(index)}>
-                  <circle cx={point.x} cy={point.y} r="14" fill="transparent" />
-                  <circle
-                    cx={point.x}
-                    cy={point.y}
-                    r={selectedIndex === index ? 5 : 3}
-                    fill="#0f172a"
-                    stroke="#67e8f9"
-                    strokeWidth="2"
-                  />
-                </g>
-              ))}
+              {chart.points.map((point, index) => {
+                const snapshot = visible[index];
+                const isSelected = index === (selectedIndex ?? visible.length - 1);
+                return (
+                  <g key={snapshot.recordedAt}>
+                    {/* Large transparent hit area for mouse and touch / 鼠标与触屏共用的透明热区 */}
+                    <circle
+                      cx={point.x}
+                      cy={point.y}
+                      r="14"
+                      fill="transparent"
+                      onMouseEnter={() => setSelectedIndex(index)}
+                      onPointerDown={() => setSelectedIndex(index)}
+                    />
+                    {isSelected && (
+                      <circle cx={point.x} cy={point.y} r="9" fill="none" stroke="#22d3ee" strokeWidth="1.5" opacity="0.5" />
+                    )}
+                    {/* Focusable data point: roving tabindex + arrow key navigation
+                        可聚焦数据点：roving tabindex 配合方向键、Home/End 导航 */}
+                    <circle
+                      ref={(el) => { pointRefs.current[index] = el; }}
+                      cx={point.x}
+                      cy={point.y}
+                      r={isSelected ? 5 : 3}
+                      fill="#0f172a"
+                      stroke="#67e8f9"
+                      strokeWidth="2"
+                      tabIndex={isSelected ? 0 : -1}
+                      role="button"
+                      aria-label={formatPointLabel(snapshot, isEnglish)}
+                      onFocus={() => setSelectedIndex(index)}
+                      onKeyDown={handlePointKeyDown}
+                      className="cursor-pointer focus:outline-none focus-visible:stroke-sky-300"
+                    >
+                      <title>{formatPointLabel(snapshot, isEnglish)}</title>
+                    </circle>
+                  </g>
+                );
+              })}
               <text x={PADDING.left} y={HEIGHT - 10} fill="#64748b" fontSize="11">
                 {shortDate(visible[0].recordedAt, language)}
               </text>
