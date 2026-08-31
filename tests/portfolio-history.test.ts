@@ -61,18 +61,24 @@ test("calculateHistoryMetrics uses the nearest snapshot at or before each lookba
 
   assert.ok(metrics.changeSinceStart !== null);
   assert.ok(Math.abs(metrics.changeSinceStart - 0.1) < 1e-12);
+  assert.equal(metrics.balanceChangeSinceStart, 10);
   assert.ok(metrics.annualized7d !== null);
   assert.ok(Math.abs(metrics.annualized7d - 1.603291266635761) < 1e-10);
+  assert.equal(metrics.balanceChange7d, 2);
   assert.ok(metrics.annualized30d !== null);
   assert.ok(Math.abs(metrics.annualized30d - 2.188680476905306) < 1e-10);
+  assert.equal(metrics.balanceChange30d, 10);
 });
 
 test("calculateHistoryMetrics returns null rates when history is too short", () => {
   const metrics = calculateHistoryMetrics([snapshot("2026-07-14T00:00:00.000Z", 110)]);
 
   assert.equal(metrics.changeSinceStart, 0);
+  assert.equal(metrics.balanceChangeSinceStart, 0);
   assert.equal(metrics.annualized7d, null);
+  assert.equal(metrics.balanceChange7d, null);
   assert.equal(metrics.annualized30d, null);
+  assert.equal(metrics.balanceChange30d, null);
 });
 
 test("parsePortfolioAddresses accepts, normalizes, and deduplicates wallet addresses", () => {

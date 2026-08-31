@@ -14,9 +14,12 @@ export interface PortfolioHistory {
 
 export interface PortfolioHistoryMetrics {
   changeSinceStart: number | null;
+  balanceChangeSinceStart: number | null;
   annualizedSinceStart: number | null;
   annualized7d: number | null;
+  balanceChange7d: number | null;
   annualized30d: number | null;
+  balanceChange30d: number | null;
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -34,20 +37,18 @@ function annualizedChange(start: PortfolioSnapshot, end: PortfolioSnapshot): num
   return Math.pow(end.totalBalance / start.totalBalance, 365 / elapsedDays) - 1;
 }
 
-function lookbackRate(
+function lookbackSnapshot(
   snapshots: PortfolioSnapshot[],
   latest: PortfolioSnapshot,
   lookbackDays: number,
-): number | null {
+): PortfolioSnapshot | undefined {
   const targetMs = Date.parse(latest.recordedAt) - lookbackDays * MS_PER_DAY;
-  let baseline: PortfolioSnapshot | undefined;
   for (let index = snapshots.length - 1; index >= 0; index -= 1) {
     if (Date.parse(snapshots[index].recordedAt) <= targetMs) {
-      baseline = snapshots[index];
-      break;
+      return snapshots[index];
     }
   }
-  return baseline ? annualizedChange(baseline, latest) : null;
+  return undefined;
 }
 
 export function appendSnapshot(
@@ -78,17 +79,26 @@ export function calculateHistoryMetrics(
   if (!first || !latest || first.totalBalance <= 0) {
     return {
       changeSinceStart: null,
+      balanceChangeSinceStart: null,
       annualizedSinceStart: null,
       annualized7d: null,
+      balanceChange7d: null,
       annualized30d: null,
+      balanceChange30d: null,
     };
   }
 
+  const baseline7d = lookbackSnapshot(snapshots, latest, 7);
+  const baseline30d = lookbackSnapshot(snapshots, latest, 30);
+
   return {
     changeSinceStart: latest.totalBalance / first.totalBalance - 1,
+    balanceChangeSinceStart: latest.totalBalance - first.totalBalance,
     annualizedSinceStart: annualizedChange(first, latest),
-    annualized7d: lookbackRate(snapshots, latest, 7),
-    annualized30d: lookbackRate(snapshots, latest, 30),
+    annualized7d: baseline7d ? annualizedChange(baseline7d, latest) : null,
+    balanceChange7d: baseline7d ? latest.totalBalance - baseline7d.totalBalance : null,
+    annualized30d: baseline30d ? annualizedChange(baseline30d, latest) : null,
+    balanceChange30d: baseline30d ? latest.totalBalance - baseline30d.totalBalance : null,
   };
 }
 
