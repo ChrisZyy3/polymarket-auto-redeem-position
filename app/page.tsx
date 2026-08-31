@@ -777,7 +777,11 @@ export default function Home() {
           <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
             <HistoryMetric
               label={isEnglish ? "Change since first record" : "记录以来变化"}
-              value={formatSignedPercent(portfolioHistory?.metrics.changeSinceStart, isEnglish)}
+              value={formatHistoryChange(
+                portfolioHistory?.metrics.changeSinceStart,
+                portfolioHistory?.metrics.balanceChangeSinceStart,
+                isEnglish,
+              )}
               icon={<Database className="h-4 w-4 text-cyan-400" />}
             />
             <HistoryMetric
@@ -786,13 +790,21 @@ export default function Home() {
               icon={<TrendingUp className="h-4 w-4 text-emerald-400" />}
             />
             <HistoryMetric
-              label={isEnglish ? "7-day annualized" : "7 日年化"}
-              value={formatSignedPercent(portfolioHistory?.metrics.annualized7d, isEnglish)}
+              label={isEnglish ? "7-day change (annualized)" : "7 日变化（年化）"}
+              value={formatHistoryChange(
+                portfolioHistory?.metrics.annualized7d,
+                portfolioHistory?.metrics.balanceChange7d,
+                isEnglish,
+              )}
               icon={<CalendarClock className="h-4 w-4 text-amber-400" />}
             />
             <HistoryMetric
-              label={isEnglish ? "30-day annualized" : "30 日年化"}
-              value={formatSignedPercent(portfolioHistory?.metrics.annualized30d, isEnglish)}
+              label={isEnglish ? "30-day change (annualized)" : "30 日变化（年化）"}
+              value={formatHistoryChange(
+                portfolioHistory?.metrics.annualized30d,
+                portfolioHistory?.metrics.balanceChange30d,
+                isEnglish,
+              )}
               icon={<CalendarClock className="h-4 w-4 text-indigo-400" />}
             />
           </div>
@@ -884,6 +896,20 @@ export default function Home() {
 function formatSignedPercent(value: number | null | undefined, isEnglish: boolean): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return isEnglish ? "Collecting data" : "数据积累中";
   return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(2)}%`;
+}
+
+function formatHistoryChange(
+  rate: number | null | undefined,
+  balanceChange: number | null | undefined,
+  isEnglish: boolean,
+): string {
+  if (typeof balanceChange !== "number" || !Number.isFinite(balanceChange)) {
+    return isEnglish ? "Collecting data" : "数据积累中";
+  }
+  const percent = formatSignedPercent(rate, isEnglish);
+  if (percent === "数据积累中" || percent === "Collecting data") return percent;
+  const amount = `${balanceChange >= 0 ? "+" : "-"}$${formatNumber(Math.abs(balanceChange))}`;
+  return isEnglish ? `${amount} (${percent})` : `${amount}（${percent}）`;
 }
 
 function HistoryMetric({
