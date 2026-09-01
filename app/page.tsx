@@ -776,7 +776,7 @@ export default function Home() {
 
           <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
             <HistoryMetric
-              label={isEnglish ? "Change since first record" : "记录以来变化"}
+              label={isEnglish ? "Change since first record (amount)" : "记录以来变化（涨跌额）"}
               value={formatHistoryChange(
                 portfolioHistory?.metrics.changeSinceStart,
                 portfolioHistory?.metrics.balanceChangeSinceStart,
@@ -786,24 +786,26 @@ export default function Home() {
             />
             <HistoryMetric
               label={isEnglish ? "Annualized since first record" : "记录以来年化"}
-              value={formatSignedPercent(portfolioHistory?.metrics.annualizedSinceStart, isEnglish)}
+              value={formatAnnualizedPercent(portfolioHistory?.metrics.annualizedSinceStart, isEnglish)}
               icon={<TrendingUp className="h-4 w-4 text-emerald-400" />}
             />
             <HistoryMetric
-              label={isEnglish ? "7-day change (annualized)" : "7 日变化（年化）"}
+              label={isEnglish ? "7-day change (amount / rate / annualized)" : "7 日变化（涨跌额 / 涨跌幅 / 年化）"}
               value={formatHistoryChange(
-                portfolioHistory?.metrics.annualized7d,
+                portfolioHistory?.metrics.change7d,
                 portfolioHistory?.metrics.balanceChange7d,
                 isEnglish,
+                portfolioHistory?.metrics.annualized7d,
               )}
               icon={<CalendarClock className="h-4 w-4 text-amber-400" />}
             />
             <HistoryMetric
-              label={isEnglish ? "30-day change (annualized)" : "30 日变化（年化）"}
+              label={isEnglish ? "30-day change (amount / rate / annualized)" : "30 日变化（涨跌额 / 涨跌幅 / 年化）"}
               value={formatHistoryChange(
-                portfolioHistory?.metrics.annualized30d,
+                portfolioHistory?.metrics.change30d,
                 portfolioHistory?.metrics.balanceChange30d,
                 isEnglish,
+                portfolioHistory?.metrics.annualized30d,
               )}
               icon={<CalendarClock className="h-4 w-4 text-indigo-400" />}
             />
@@ -898,10 +900,16 @@ function formatSignedPercent(value: number | null | undefined, isEnglish: boolea
   return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(2)}%`;
 }
 
+function formatAnnualizedPercent(value: number | null | undefined, isEnglish: boolean): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return isEnglish ? "Collecting data" : "数据积累中";
+  return `${(value * 100).toFixed(2)}%`;
+}
+
 function formatHistoryChange(
   rate: number | null | undefined,
   balanceChange: number | null | undefined,
   isEnglish: boolean,
+  annualizedRate?: number | null,
 ): string {
   if (typeof balanceChange !== "number" || !Number.isFinite(balanceChange)) {
     return isEnglish ? "Collecting data" : "数据积累中";
@@ -909,7 +917,13 @@ function formatHistoryChange(
   const percent = formatSignedPercent(rate, isEnglish);
   if (percent === "数据积累中" || percent === "Collecting data") return percent;
   const amount = `${balanceChange >= 0 ? "+" : "-"}$${formatNumber(Math.abs(balanceChange))}`;
-  return isEnglish ? `${amount} (${percent})` : `${amount}（${percent}）`;
+  if (typeof annualizedRate !== "number" || !Number.isFinite(annualizedRate)) {
+    return isEnglish ? `${amount} (${percent})` : `${amount}（${percent}）`;
+  }
+  const annualized = formatAnnualizedPercent(annualizedRate, isEnglish);
+  return isEnglish
+    ? `${amount} (${percent}, ${annualized} annualized)`
+    : `${amount}（${percent}，${annualized} 年化）`;
 }
 
 function HistoryMetric({
