@@ -8,6 +8,7 @@
 - 📊 **大小阈值**：支持通过 `size` 过滤小额仓位（默认 0.1），减少垃圾信息。
 - 🔔 **通知整合**：支持 ServerChan (Server酱) 和 FTQQ Push 渠道，自动将多个仓位汇总为单条消息发送。
 - 📈 **APR 监控**：计算每个持仓「持有到结算日」的前瞻年化收益率，低于阈值时提示调仓。
+- 🧩 **浏览器用户脚本**：提供 Polymarket APR 浮层，可在网页内查看 APR、价格路径、筛选和排序。
 - ⚡ **轻量高效**：使用 `tsx` 直接运行 TypeScript 源码，无需复杂的编译流程。
 
 ## 快速开始
@@ -27,13 +28,16 @@ npm install
 ### 3. 运行
 ```bash
 # 可赎回仓位检查（redeem 通知）
-npm run dev
+npm run monitor
 
 # APR 监控（计算各仓位年化收益率，低于阈值时提示调仓）
 npm run apr
 
 # 类型检查
 npm run check
+
+# 运行测试
+npm test
 ```
 
 ## APR 监控说明
@@ -66,9 +70,9 @@ schtasks /Create /TN "Polymarket-APR" ^
 - **HTTP Client**: Axios
 - **Tooling**: tsx, dotenv
 
-## Dashboard MVP（开发中）
+## Dashboard
 
-项目包含一个基于 Next.js 的持仓与资金看板，支持当前余额、持仓 APR、每日总资产快照、历史曲线和 7/30 日年化展示。详见 [README-dashboard.md](README-dashboard.md)。
+项目包含一个基于 Next.js 的持仓与资金看板，支持当前余额、持仓 APR、价格路径、持有收益/收益率、每日总资产快照、历史曲线和 7/30 日年化展示。未查询前也会保留完整页面框架。详见 [README-dashboard.md](README-dashboard.md)。
 
 ```bash
 # 启动 Dashboard
@@ -77,6 +81,23 @@ npm run dev
 # 手动记录一条当天资金快照
 npm run snapshot
 ```
+
+## Polymarket 用户脚本
+
+所有 Tampermonkey/浏览器用户脚本统一放在 [`userscripts/`](userscripts/) 目录：
+
+| 文件 | 用途 | 状态 |
+| --- | --- | --- |
+| [`polymarket-portfolio-apr-overlay-v0.10.0.user.js`](userscripts/polymarket-portfolio-apr-overlay-v0.10.0.user.js) | APR 浮层主脚本；显示继续持有 APR、建仓 APR、建仓价 → 当前价，支持筛选、排序、刷新、折叠和拖动 | 当前推荐版本 |
+
+安装主脚本：
+
+1. 在 Tampermonkey 中新建用户脚本；
+2. 复制 `userscripts/polymarket-portfolio-apr-overlay-v0.10.0.user.js` 的全部内容；
+3. 保存后打开 Polymarket 的 `/portfolio` 或 `/profile` 页面；
+4. 如果没有自动识别地址，在浮层中输入 Profile/Proxy Wallet 地址并点击“应用”。
+
+主脚本通过 `data-api.polymarket.com` 读取仓位数据，只读展示，不执行链上交易。详细演进记录见 [用户脚本分析文档](docs/userscript/polymarket-portfolio-expiry-column-analysis.md)。
 
 ## 许可
 

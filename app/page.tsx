@@ -125,6 +125,19 @@ function formatNumber(value: number | null | undefined, digits = 2): string {
   });
 }
 
+function formatMoneyCompact(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return `$${value.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function formatPriceCents(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return `$${(value * 100).toFixed(2).replace(/\.?0+$/, "")}`;
+}
+
 function formatDateTime(value: string, language: Language): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
@@ -309,20 +322,12 @@ export default function Home() {
         },
       },
       {
-        accessorKey: "avgPrice",
-        header: isEnglish ? "Avg. entry ($)" : "建仓均价 ($)",
-        cell: ({ getValue }) => (
-          <span className="font-mono text-slate-400">
-            {formatNumber(getValue<number>(), 3)}
-          </span>
-        ),
-      },
-      {
-        accessorKey: "curPrice",
-        header: isEnglish ? "Current price ($)" : "当前市价 ($)",
-        cell: ({ getValue }) => (
-          <span className="font-mono font-semibold text-cyan-300">
-            {formatNumber(getValue<number>(), 3)}
+        id: "pricePath",
+        accessorFn: (row) => row.curPrice,
+        header: isEnglish ? "Entry → current" : "建仓价 → 当前价",
+        cell: ({ row }) => (
+          <span className="font-mono font-semibold text-cyan-300 whitespace-nowrap">
+            {formatPriceCents(row.original.avgPrice)} <span className="text-slate-500">→</span> {formatPriceCents(row.original.curPrice)}
           </span>
         ),
       },
@@ -336,32 +341,26 @@ export default function Home() {
         ),
       },
       {
-        accessorKey: "cashPnl",
-        header: isEnglish ? "Current holding P&L ($)" : "当前仓位持有收益 ($)",
-        cell: ({ getValue }) => {
-          const value = getValue<number | null>();
-          if (typeof value !== "number" || !Number.isFinite(value)) {
+        id: "holdingPerformance",
+        accessorFn: (row) => row.cashPnl,
+        header: isEnglish ? "Holding P&L / return" : "持有收益 / 收益率",
+        cell: ({ row }) => {
+          const cashPnl = row.original.cashPnl;
+          const holdingReturn = calculateHoldingReturn(row.original);
+          if (typeof cashPnl !== "number" || !Number.isFinite(cashPnl)) {
             return <span className="font-mono font-bold text-slate-500">—</span>;
           }
           return (
-            <span className={`font-mono font-bold ${value >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-              {value >= 0 ? "+" : "-"}${formatNumber(Math.abs(value))}
-            </span>
-          );
-        },
-      },
-      {
-        id: "holdingReturn",
-        accessorFn: (row) => calculateHoldingReturn(row),
-        header: isEnglish ? "Holding return" : "持有收益率",
-        cell: ({ getValue }) => {
-          const value = getValue<number | null>();
-          if (typeof value !== "number" || !Number.isFinite(value)) {
-            return <span className="font-mono font-bold text-slate-500">—</span>;
-          }
-          return (
-            <span className={`font-mono font-bold ${value >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-              {value >= 0 ? "+" : ""}{formatPercent(value)}
+            <span
+              title={isEnglish ? "Sorted by dollar holding P&L" : "按持有收益金额排序"}
+              className={`whitespace-nowrap font-mono font-bold ${cashPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}
+            >
+              {cashPnl >= 0 ? "+" : "-"}{formatMoneyCompact(Math.abs(cashPnl))}{" "}
+              <span className="text-slate-400">
+                ({typeof holdingReturn === "number" && Number.isFinite(holdingReturn)
+                  ? `${holdingReturn >= 0 ? "+" : ""}${formatPercent(holdingReturn)}`
+                  : "—"})
+              </span>
             </span>
           );
         },
@@ -567,6 +566,21 @@ export default function Home() {
     void runQuery(addr);
   }
 
+  // Keep the dashboard shell visible before the first query and make the
+  // empty/loading state explicit instead of conditionally removing the whole
+  // statistics and positions sections.
+  const emptyMetricValue = isEnglish ? "Awaiting query" : "等待查询";
+  const fetchedAtLabel = data
+    ? `${isEnglish ? "Data fetched at" : "数据获取于"} ${formatDateTime(data.fetchedAt, language)}`
+    : loading
+      ? (isEnglish ? "Loading portfolio data…" : "正在读取持仓数据…")
+      : emptyMetricValue;
+  const emptyPositionsMessage = loading
+    ? (isEnglish ? "Loading positions…" : "正在读取持仓数据…")
+    : data
+      ? (isEnglish ? "No eligible positions found for this wallet." : "未在此钱包中分析到符合条件的持仓数据。")
+      : (isEnglish ? "Enter a wallet address and click Analyze to load positions." : "请输入钱包地址并点击查询分析，查看仓位数据。");
+
   return (
     <main className="mx-auto max-w-7xl px-4 py-10 relative z-10">
       
@@ -724,173 +738,169 @@ export default function Home() {
         </div>
       )}
 
-      {/* 
-        * Metrics & Statistics Dashboard (Only rendered when data is loaded)
-        * 账户总体业绩卡片与统计分析结果
+      {/*
+        * Metrics & Statistics Dashboard (Always rendered with an empty state)
+        * 账户总体业绩卡片与统计分析结果：查询前保留完整页面骨架
         */}
-      {data && (
-        <>
-          {/* Dashboard Summary Statistics Cards Grid / 指标概览区块 */}
-          <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+      {/* Dashboard Summary Statistics Cards Grid / 指标概览区块 */}
+      <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
             <SummaryCard
               label={isEnglish ? "Total portfolio value" : "资产总价值"}
-              value={`$${formatNumber(data.summary.totalBalance)}`}
+              value={data ? `$${formatNumber(data.summary.totalBalance)}` : "—"}
               icon={<DollarSign className="h-4 w-4 text-cyan-400" />}
               glowColor="cyan"
               tooltip={isEnglish ? "Available balance plus the current value of all positions" : "总余额 + 仓位当前市值总和"}
             />
             <SummaryCard
               label={isEnglish ? "Available balance" : "链上可用余额"}
-              value={`$${formatNumber(data.summary.availableBalance)}`}
+              value={data ? `$${formatNumber(data.summary.availableBalance)}` : "—"}
               icon={<Wallet className="h-4 w-4 text-emerald-400" />}
               glowColor="green"
               tooltip={isEnglish ? "Liquid pUSD in the wallet that can be used to buy markets" : "钱包中可用于买入市场的流动 pUSD 现金总额"}
             />
             <SummaryCard
               label={isEnglish ? "Position value" : "当前持仓市值"}
-              value={`$${formatNumber(data.summary.totalValue)}`}
+              value={data ? `$${formatNumber(data.summary.totalValue)}` : "—"}
               icon={<Activity className="h-4 w-4 text-indigo-400" />}
               glowColor="purple"
               tooltip={isEnglish ? "Current market value of all positions" : "用户当前所有未结算的持仓当前市价总价值"}
             />
             <SummaryCard
               label={isEnglish ? "Weighted hold APR" : "加权继续持有 APR"}
-              value={formatPercent(data.summary.avgHoldApr)}
+              value={data ? formatPercent(data.summary.avgHoldApr) : "—"}
               icon={<TrendingUp className="h-4 w-4 text-fuchsia-400" />}
               glowColor="red"
               tooltip={isEnglish ? "Expected annualized return weighted by current position value" : "以仓位当前市值为权重，加权计算的持仓预期年化收益率。评估继续锁定资金的性价比"}
             />
             <SummaryCard
               label={isEnglish ? "Weighted entry APR" : "加权建仓初始 APR"}
-              value={formatPercent(data.summary.avgCostApr)}
+              value={data ? formatPercent(data.summary.avgCostApr) : "—"}
               icon={<Percent className="h-4 w-4 text-amber-400" />}
               glowColor="cyan"
               tooltip={isEnglish ? "Initial annualized return at entry, weighted by current position value" : "以仓位当前市值为权重，加权计算的买入成本初始年化收益率"}
             />
+      </div>
+
+      <div className="mt-3 flex items-center justify-end gap-1.5 text-xs text-slate-500">
+        <Database className="h-3.5 w-3.5" />
+        {fetchedAtLabel}
+      </div>
+
+      <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <HistoryMetric
+          label={isEnglish ? "Change since first record (amount)" : "记录以来变化（涨跌额）"}
+          value={data ? formatHistoryChange(
+            portfolioHistory?.metrics.changeSinceStart,
+            portfolioHistory?.metrics.balanceChangeSinceStart,
+            isEnglish,
+          ) : emptyMetricValue}
+          icon={<Database className="h-4 w-4 text-cyan-400" />}
+        />
+        <HistoryMetric
+          label={isEnglish ? "Annualized since first record" : "记录以来年化"}
+          value={data ? formatAnnualizedPercent(portfolioHistory?.metrics.annualizedSinceStart, isEnglish) : emptyMetricValue}
+          icon={<TrendingUp className="h-4 w-4 text-emerald-400" />}
+        />
+        <HistoryMetric
+          label={isEnglish ? "7-day change (amount / rate / annualized)" : "7 日变化（涨跌额 / 涨跌幅 / 年化）"}
+          value={data ? formatHistoryChange(
+            portfolioHistory?.metrics.change7d,
+            portfolioHistory?.metrics.balanceChange7d,
+            isEnglish,
+            portfolioHistory?.metrics.annualized7d,
+          ) : emptyMetricValue}
+          icon={<CalendarClock className="h-4 w-4 text-amber-400" />}
+        />
+        <HistoryMetric
+          label={isEnglish ? "30-day change (amount / rate / annualized)" : "30 日变化（涨跌额 / 涨跌幅 / 年化）"}
+          value={data ? formatHistoryChange(
+            portfolioHistory?.metrics.change30d,
+            portfolioHistory?.metrics.balanceChange30d,
+            isEnglish,
+            portfolioHistory?.metrics.annualized30d,
+          ) : emptyMetricValue}
+          icon={<CalendarClock className="h-4 w-4 text-indigo-400" />}
+        />
+      </div>
+
+      <PortfolioHistoryChart snapshots={portfolioHistory?.snapshots ?? []} language={language} />
+
+      {/* Positions detailed tables container / 仓位细分数据列表 */}
+      <div className="mt-8 backdrop-blur-xl bg-slate-900/30 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl relative">
+        <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent"></div>
+
+        <div className="px-6 py-5 border-b border-slate-800 bg-slate-900/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-emerald-400" />
+              {isEnglish ? "Current position risk details" : "当前仓位风控明细"}
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">
+              {isEnglish
+                ? "Click a column heading to sort. A red Hold APR indicates a high opportunity cost for locked capital."
+                : "点击各列标题可进行多维排序。若继续持有 APR 变红，说明当前锁定资金的机会成本过高。"}
+            </p>
           </div>
-
-          <div className="mt-3 flex items-center justify-end gap-1.5 text-xs text-slate-500">
-            <Database className="h-3.5 w-3.5" />
-            {isEnglish ? "Data fetched at" : "数据获取于"} {formatDateTime(data.fetchedAt, language)}
+          <div className="flex items-center gap-1.5 self-start sm:self-auto text-xs text-slate-500 font-semibold bg-slate-950/60 border border-slate-800 px-3 py-1.5 rounded-lg shadow-inner">
+            <Info className="h-3.5 w-3.5 text-slate-400" />
+            {isEnglish ? "Positions below $0.10 are excluded" : "自动忽略大小低于 0.1 刀的尘埃仓位"}
           </div>
+        </div>
 
-          <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <HistoryMetric
-              label={isEnglish ? "Change since first record (amount)" : "记录以来变化（涨跌额）"}
-              value={formatHistoryChange(
-                portfolioHistory?.metrics.changeSinceStart,
-                portfolioHistory?.metrics.balanceChangeSinceStart,
-                isEnglish,
-              )}
-              icon={<Database className="h-4 w-4 text-cyan-400" />}
-            />
-            <HistoryMetric
-              label={isEnglish ? "Annualized since first record" : "记录以来年化"}
-              value={formatAnnualizedPercent(portfolioHistory?.metrics.annualizedSinceStart, isEnglish)}
-              icon={<TrendingUp className="h-4 w-4 text-emerald-400" />}
-            />
-            <HistoryMetric
-              label={isEnglish ? "7-day change (amount / rate / annualized)" : "7 日变化（涨跌额 / 涨跌幅 / 年化）"}
-              value={formatHistoryChange(
-                portfolioHistory?.metrics.change7d,
-                portfolioHistory?.metrics.balanceChange7d,
-                isEnglish,
-                portfolioHistory?.metrics.annualized7d,
-              )}
-              icon={<CalendarClock className="h-4 w-4 text-amber-400" />}
-            />
-            <HistoryMetric
-              label={isEnglish ? "30-day change (amount / rate / annualized)" : "30 日变化（涨跌额 / 涨跌幅 / 年化）"}
-              value={formatHistoryChange(
-                portfolioHistory?.metrics.change30d,
-                portfolioHistory?.metrics.balanceChange30d,
-                isEnglish,
-                portfolioHistory?.metrics.annualized30d,
-              )}
-              icon={<CalendarClock className="h-4 w-4 text-indigo-400" />}
-            />
-          </div>
-
-          <PortfolioHistoryChart snapshots={portfolioHistory?.snapshots ?? []} language={language} />
-
-          {/* Positions detailed tables container / 仓位细分数据列表 */}
-          <div className="mt-8 backdrop-blur-xl bg-slate-900/30 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl relative">
-            <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent"></div>
-            
-            <div className="px-6 py-5 border-b border-slate-800 bg-slate-900/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5 text-emerald-400" />
-                  {isEnglish ? "Current position risk details" : "当前仓位风控明细"}
-                </h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  {isEnglish
-                    ? "Click a column heading to sort. A red Hold APR indicates a high opportunity cost for locked capital."
-                    : "点击各列标题可进行多维排序。若继续持有 APR 变红，说明当前锁定资金的机会成本过高。"}
-                </p>
-              </div>
-              <div className="flex items-center gap-1.5 self-start sm:self-auto text-xs text-slate-500 font-semibold bg-slate-950/60 border border-slate-800 px-3 py-1.5 rounded-lg shadow-inner">
-                <Info className="h-3.5 w-3.5 text-slate-400" />
-                {isEnglish ? "Positions below $0.10 are excluded" : "自动忽略大小低于 0.1 刀的尘埃仓位"}
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-sm">
-                <thead>
-                  {table.getHeaderGroups().map((headerGroup) => (
-                    <tr key={headerGroup.id} className="bg-slate-950/60 border-b border-slate-800 text-slate-400">
-                      {headerGroup.headers.map((header) => {
-                        const sortDirection = header.column.getIsSorted();
-                        return (
-                          <th
-                            key={header.id}
-                            onClick={header.column.getToggleSortingHandler()}
-                            className="group/th cursor-pointer select-none whitespace-nowrap px-4 py-4 font-semibold hover:text-slate-200 transition-colors"
-                          >
-                            <span className="flex items-center gap-1.5">
-                              {flexRender(header.column.columnDef.header, header.getContext())}
-                              {sortDirection === "asc" && <ArrowUp className="h-3.5 w-3.5 text-cyan-400" />}
-                              {sortDirection === "desc" && <ArrowDown className="h-3.5 w-3.5 text-cyan-400" />}
-                              {!sortDirection && (
-                                <ArrowUpDown className="h-3.5 w-3.5 text-slate-600 group-hover/th:text-slate-400 transition-colors" />
-                              )}
-                            </span>
-                          </th>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </thead>
-                <tbody className="divide-y divide-slate-800/50 bg-slate-950/10">
-                  {table.getRowModel().rows.map((row) => (
-                    <tr
-                      key={row.id}
-                      className="group hover:bg-slate-900/30 transition-all duration-150"
-                    >
-                      {row.getVisibleCells().map((cell) => (
-                        <td key={cell.id} className="px-4 py-4 align-middle whitespace-nowrap">
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                  {positions.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={columns.length}
-                        className="px-4 py-16 text-center text-slate-500 font-semibold"
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-sm">
+            <thead>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <tr key={headerGroup.id} className="bg-slate-950/60 border-b border-slate-800 text-slate-400">
+                  {headerGroup.headers.map((header) => {
+                    const sortDirection = header.column.getIsSorted();
+                    return (
+                      <th
+                        key={header.id}
+                        onClick={header.column.getToggleSortingHandler()}
+                        className="group/th cursor-pointer select-none whitespace-nowrap px-4 py-4 font-semibold hover:text-slate-200 transition-colors"
                       >
-                        {isEnglish ? "No eligible positions found for this wallet." : "未在此钱包中分析到符合条件的持仓数据。"}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      )}
+                        <span className="flex items-center gap-1.5">
+                          {flexRender(header.column.columnDef.header, header.getContext())}
+                          {sortDirection === "asc" && <ArrowUp className="h-3.5 w-3.5 text-cyan-400" />}
+                          {sortDirection === "desc" && <ArrowDown className="h-3.5 w-3.5 text-cyan-400" />}
+                          {!sortDirection && (
+                            <ArrowUpDown className="h-3.5 w-3.5 text-slate-600 group-hover/th:text-slate-400 transition-colors" />
+                          )}
+                        </span>
+                      </th>
+                    );
+                  })}
+                </tr>
+              ))}
+            </thead>
+            <tbody className="divide-y divide-slate-800/50 bg-slate-950/10">
+              {table.getRowModel().rows.map((row) => (
+                <tr
+                  key={row.id}
+                  className="group hover:bg-slate-900/30 transition-all duration-150"
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <td key={cell.id} className="px-4 py-4 align-middle whitespace-nowrap">
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {positions.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={columns.length}
+                    className="px-4 py-16 text-center text-slate-500 font-semibold"
+                  >
+                    {emptyPositionsMessage}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </main>
   );
 }
