@@ -786,23 +786,19 @@ export default function Home() {
         {fetchedAtLabel}
       </div>
 
-      <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
         <HistoryMetric
-          label={isEnglish ? "Change since first record (amount)" : "记录以来变化（涨跌额）"}
+          label={isEnglish ? "Change / annualized since first record" : "记录以来变化 / 年化"}
           value={data ? formatHistoryChange(
             portfolioHistory?.metrics.changeSinceStart,
             portfolioHistory?.metrics.balanceChangeSinceStart,
             isEnglish,
+            portfolioHistory?.metrics.annualizedSinceStart,
           ) : emptyMetricValue}
           icon={<Database className="h-4 w-4 text-cyan-400" />}
         />
         <HistoryMetric
-          label={isEnglish ? "Annualized since first record" : "记录以来年化"}
-          value={data ? formatAnnualizedPercent(portfolioHistory?.metrics.annualizedSinceStart, isEnglish) : emptyMetricValue}
-          icon={<TrendingUp className="h-4 w-4 text-emerald-400" />}
-        />
-        <HistoryMetric
-          label={isEnglish ? "7-day change (amount / rate / annualized)" : "7 日变化（涨跌额 / 涨跌幅 / 年化）"}
+          label={isEnglish ? "7-day change / annualized" : "7 日变化 / 年化"}
           value={data ? formatHistoryChange(
             portfolioHistory?.metrics.change7d,
             portfolioHistory?.metrics.balanceChange7d,
@@ -812,7 +808,7 @@ export default function Home() {
           icon={<CalendarClock className="h-4 w-4 text-amber-400" />}
         />
         <HistoryMetric
-          label={isEnglish ? "30-day change (amount / rate / annualized)" : "30 日变化（涨跌额 / 涨跌幅 / 年化）"}
+          label={isEnglish ? "30-day change / annualized" : "30 日变化 / 年化"}
           value={data ? formatHistoryChange(
             portfolioHistory?.metrics.change30d,
             portfolioHistory?.metrics.balanceChange30d,
@@ -932,8 +928,8 @@ function formatHistoryChange(
   }
   const annualized = formatAnnualizedPercent(annualizedRate, isEnglish);
   return isEnglish
-    ? `${amount} (${percent}, ${annualized} annualized)`
-    : `${amount}（${percent}，${annualized} 年化）`;
+    ? `${amount} (${percent})\nAnnualized: ${annualized}`
+    : `${amount}（${percent}）\n年化：${annualized}`;
 }
 
 function HistoryMetric({
@@ -945,8 +941,13 @@ function HistoryMetric({
   value: string;
   icon: React.ReactNode;
 }) {
-  const isNegative = value.startsWith("-");
-  const isPending = value === "数据积累中" || value === "Collecting data";
+  const [mainValue, annualizedValue] = value.split("\n");
+  const isNegative = mainValue.startsWith("-");
+  const isPending =
+    mainValue === "数据积累中" ||
+    mainValue === "Collecting data" ||
+    mainValue === "等待查询" ||
+    mainValue === "Awaiting query";
   return (
     <div className="min-h-24 rounded-lg border border-slate-800 bg-slate-900/40 p-4">
       <div className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-500">
@@ -958,7 +959,12 @@ function HistoryMetric({
           isPending ? "text-slate-500" : isNegative ? "text-rose-400" : "text-emerald-400"
         }`}
       >
-        {value}
+        <span className="block">{mainValue}</span>
+        {annualizedValue && (
+          <span className="mt-1 block text-sm font-semibold text-slate-400">
+            {annualizedValue}
+          </span>
+        )}
       </div>
     </div>
   );
