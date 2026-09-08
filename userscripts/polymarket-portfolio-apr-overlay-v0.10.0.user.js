@@ -649,7 +649,7 @@
                     width: min(780px, calc(100vw - 16px)); max-height: calc(100vh - 16px);
                     overflow: auto; color: #e5eefc; background: rgba(8, 15, 30, .97);
                     border: 1px solid rgba(80, 140, 220, .45); border-radius: 14px;
-                    box-shadow: 0 12px 36px rgba(0, 0, 0, .42); font: 11px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                    box-shadow: 0 12px 36px rgba(0, 0, 0, .42); font: 12px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
                     backdrop-filter: blur(14px);
                 }
                 .panel.collapsed { width: 40px; height: 40px; max-height: 40px; overflow: hidden; border-radius: 50%; background: rgba(8, 15, 30, .94); }
@@ -658,40 +658,40 @@
                 .panel.collapsed .actions { width: 100%; height: 100%; display: block; }
                 .panel.collapsed .actions button { display: none; }
                 .panel.collapsed .actions button[data-action="collapse"] { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; font-size: 12px; font-weight: 800; color: #75d6ff; background: radial-gradient(circle, rgba(42, 108, 160, .65), rgba(13, 39, 68, .92)); }
-                .header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-bottom: 1px solid rgba(100, 140, 190, .25); cursor: grab; user-select: none; touch-action: none; }
+                .header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px; border-bottom: 1px solid rgba(100, 140, 190, .25); cursor: grab; user-select: none; touch-action: none; }
                 .header:active { cursor: grabbing; }
-                .title { font-weight: 700; color: #f7fbff; font-size: 12px; }
-                .sub { margin-top: 1px; color: #8da4c5; font-size: 9px; }
+                .title { font-weight: 700; color: #f7fbff; font-size: 13px; }
+                .sub { margin-top: 2px; color: #8da4c5; font-size: 10px; }
                 .actions { display: flex; gap: 4px; }
                 button, input, select { font: inherit; }
-                button { cursor: pointer; border: 1px solid rgba(100, 160, 230, .4); border-radius: 6px; color: #d9ecff; background: rgba(28, 64, 105, .7); padding: 4px 7px; font-size: 10px; }
+                button { cursor: pointer; border: 1px solid rgba(100, 160, 230, .4); border-radius: 6px; color: #d9ecff; background: rgba(28, 64, 105, .7); padding: 5px 8px; font-size: 11px; }
                 button:hover { background: rgba(35, 91, 150, .9); }
-                .body { padding: 8px 10px 10px; }
-                .controls { display: grid; grid-template-columns: minmax(180px, 1fr) 72px 82px 82px 120px auto; gap: 4px; align-items: end; }
-                label { display: flex; flex-direction: column; gap: 2px; color: #8da4c5; font-size: 9px; }
-                input, select { min-width: 0; width: 100%; color: #e5eefc; background: #0b1729; border: 1px solid rgba(100, 140, 190, .38); border-radius: 6px; padding: 5px 6px; outline: none; font-size: 10px; }
+                .body { padding: 9px 11px 11px; }
+                .controls { display: grid; grid-template-columns: minmax(190px, 1fr) 76px 86px 86px 124px auto; gap: 5px; align-items: end; }
+                label { display: flex; flex-direction: column; gap: 3px; color: #8da4c5; font-size: 10px; }
+                input, select { min-width: 0; width: 100%; color: #e5eefc; background: #0b1729; border: 1px solid rgba(100, 140, 190, .38); border-radius: 6px; padding: 6px 7px; outline: none; font-size: 11px; }
                 input:focus, select:focus { border-color: #44b7ff; }
-                .summary { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 6px 0; color: #9cb2d0; font-size: 9px; }
-                .summary span { padding: 3px 6px; border-radius: 99px; background: rgba(35, 63, 98, .5); }
+                .summary { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin: 7px 0; color: #9cb2d0; font-size: 10px; }
+                .summary span { padding: 4px 7px; border-radius: 99px; background: rgba(35, 63, 98, .5); }
                 .summary .error { color: #ff9da9; background: rgba(145, 33, 54, .3); }
                 .table-wrap { overflow-x: auto; border: 1px solid rgba(100, 140, 190, .24); border-radius: 9px; }
-                table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 10px; }
-                th, td { padding: 5px 6px; border-bottom: 1px solid rgba(100, 140, 190, .14); text-align: left; white-space: nowrap; }
-                th { padding: 0; color: #8da4c5; background: rgba(25, 46, 74, .7); font-size: 9px; font-weight: 600; }
-                .sort-button { display: flex; align-items: center; justify-content: space-between; gap: 4px; width: 100%; min-width: 72px; padding: 5px 6px; border: 0; border-radius: 0; color: #8da4c5; background: transparent; text-align: left; font-size: 9px; font-weight: 600; }
+                table { width: 100%; min-width: 740px; border-collapse: collapse; font-size: 11px; }
+                th, td { padding: 6px 7px; border-bottom: 1px solid rgba(100, 140, 190, .14); text-align: left; white-space: nowrap; }
+                th { padding: 0; color: #8da4c5; background: rgba(25, 46, 74, .7); font-size: 10px; font-weight: 600; }
+                .sort-button { display: flex; align-items: center; justify-content: space-between; gap: 4px; width: 100%; min-width: 76px; padding: 6px 7px; border: 0; border-radius: 0; color: #8da4c5; background: transparent; text-align: left; font-size: 10px; font-weight: 600; }
                 .sort-button:hover, .sort-button.active { color: #70d5ff; background: rgba(45, 105, 155, .28); }
-                .sort-indicator { color: #54708f; font-size: 12px; line-height: 1; }
+                .sort-indicator { color: #54708f; font-size: 13px; line-height: 1; }
                 .sort-button.active .sort-indicator { color: #70d5ff; }
                 tr:last-child td { border-bottom: 0; }
                 .market { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
                 .market div { overflow: hidden; text-overflow: ellipsis; }
-                small { display: block; margin-top: 1px; color: #728bab; font-size: 9px; }
+                small { display: block; margin-top: 2px; color: #728bab; font-size: 10px; }
                 .number { color: #c9dcf4; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-align: right; }
                 .price-path { color: #d9e9ff; }
                 .price-arrow { padding: 0 2px; color: #728bab; }
                 .good-value { color: #65e6b0; }
                 .danger { color: #ff8795; }
-                .pill { display: inline-block; padding: 2px 5px; border-radius: 99px; font-size: 9px; }
+                .pill { display: inline-block; padding: 3px 6px; border-radius: 99px; font-size: 10px; }
                 .status-good { color: #65e6b0; background: rgba(25, 145, 101, .18); }
                 .status-attention { color: #ffd36a; background: rgba(180, 120, 20, .2); }
                 .status-losing { color: #ff8795; background: rgba(190, 45, 70, .2); }
