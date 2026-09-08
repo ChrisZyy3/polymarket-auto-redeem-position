@@ -72,10 +72,10 @@ const STATUS_LABEL: Record<Language, Record<EnrichedPosition["status"], string>>
     redeemable: "已结算可赎回",
   },
   en: {
-    good: "Strong return",
+    good: "Good",
     attention: "Low APR",
-    losing: "Current loss / attention",
-    redeemable: "Ready to redeem",
+    losing: "At risk",
+    redeemable: "Redeemable",
   },
 };
 
@@ -123,6 +123,19 @@ function formatNumber(value: number | null | undefined, digits = 2): string {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   });
+}
+
+function formatMoneyCompact(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return `$${value.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function formatPriceCents(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return `$${(value * 100).toFixed(2).replace(/\.?0+$/, "")}`;
 }
 
 function formatDateTime(value: string, language: Language): string {
@@ -298,7 +311,7 @@ export default function Home() {
               target="_blank"
               rel="noreferrer"
               title={fullMarketName}
-              aria-label={`${isEnglish ? "Open Polymarket market" : "打开 Polymarket 市场"}: ${fullMarketName}`}
+              aria-label={`${isEnglish ? "Open market on Polymarket" : "打开 Polymarket 市场"}: ${fullMarketName}`}
               className="block max-w-[280px] rounded-sm outline-none hover:text-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
             >
               {content}
@@ -309,20 +322,12 @@ export default function Home() {
         },
       },
       {
-        accessorKey: "avgPrice",
-        header: isEnglish ? "Avg. entry ($)" : "建仓均价 ($)",
-        cell: ({ getValue }) => (
-          <span className="font-mono text-slate-400">
-            {formatNumber(getValue<number>(), 3)}
-          </span>
-        ),
-      },
-      {
-        accessorKey: "curPrice",
-        header: isEnglish ? "Current price ($)" : "当前市价 ($)",
-        cell: ({ getValue }) => (
-          <span className="font-mono font-semibold text-cyan-300">
-            {formatNumber(getValue<number>(), 3)}
+        id: "pricePath",
+        accessorFn: (row) => row.curPrice,
+        header: isEnglish ? "Entry → current" : "建仓价 → 当前价",
+        cell: ({ row }) => (
+          <span className="font-mono font-semibold text-cyan-300 whitespace-nowrap">
+            {formatPriceCents(row.original.avgPrice)} <span className="text-slate-500">→</span> {formatPriceCents(row.original.curPrice)}
           </span>
         ),
       },
@@ -336,32 +341,26 @@ export default function Home() {
         ),
       },
       {
-        accessorKey: "cashPnl",
-        header: isEnglish ? "Current holding P&L ($)" : "当前仓位持有收益 ($)",
-        cell: ({ getValue }) => {
-          const value = getValue<number | null>();
-          if (typeof value !== "number" || !Number.isFinite(value)) {
+        id: "holdingPerformance",
+        accessorFn: (row) => row.cashPnl,
+        header: isEnglish ? "P&L / return" : "持有收益 / 收益率",
+        cell: ({ row }) => {
+          const cashPnl = row.original.cashPnl;
+          const holdingReturn = calculateHoldingReturn(row.original);
+          if (typeof cashPnl !== "number" || !Number.isFinite(cashPnl)) {
             return <span className="font-mono font-bold text-slate-500">—</span>;
           }
           return (
-            <span className={`font-mono font-bold ${value >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-              {value >= 0 ? "+" : "-"}${formatNumber(Math.abs(value))}
-            </span>
-          );
-        },
-      },
-      {
-        id: "holdingReturn",
-        accessorFn: (row) => calculateHoldingReturn(row),
-        header: isEnglish ? "Holding return" : "持有收益率",
-        cell: ({ getValue }) => {
-          const value = getValue<number | null>();
-          if (typeof value !== "number" || !Number.isFinite(value)) {
-            return <span className="font-mono font-bold text-slate-500">—</span>;
-          }
-          return (
-            <span className={`font-mono font-bold ${value >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-              {value >= 0 ? "+" : ""}{formatPercent(value)}
+            <span
+              title={isEnglish ? "Sort by holding P&L" : "按持有收益金额排序"}
+              className={`whitespace-nowrap font-mono font-bold ${cashPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}
+            >
+              {cashPnl >= 0 ? "+" : "-"}{formatMoneyCompact(Math.abs(cashPnl))}{" "}
+              <span className="text-slate-400">
+                ({typeof holdingReturn === "number" && Number.isFinite(holdingReturn)
+                  ? `${holdingReturn >= 0 ? "+" : ""}${formatPercent(holdingReturn)}`
+                  : "—"})
+              </span>
             </span>
           );
         },
@@ -392,7 +391,7 @@ export default function Home() {
           return (
             <div
               className="flex min-w-[92px] flex-col gap-0.5"
-              title={riskLabel || (isEnglish ? "Share of total portfolio value" : "占全部持仓市值的比例")}
+              title={riskLabel || (isEnglish ? "Share of portfolio value" : "占全部持仓市值的比例")}
             >
               <span className={`flex items-center gap-1 font-mono font-semibold ${riskClass}`}>
                 {formatPercent(value)}
@@ -442,7 +441,7 @@ export default function Home() {
             <div className="flex min-w-28 flex-col gap-0.5">
               <span className="font-medium text-slate-200">{formatSettlementDate(row.original.endDate, language)}</span>
               <span className="font-mono text-xs text-slate-400">
-                {isEnglish ? `${days} days remaining` : `剩余 ${days} 天`}
+                {isEnglish ? `${days} days left` : `剩余 ${days} 天`}
               </span>
             </div>
           );
@@ -450,7 +449,7 @@ export default function Home() {
       },
       {
         accessorKey: "expectedProfit",
-        header: isEnglish ? "Expected profit ($)" : "预估到期收益 ($)",
+        header: isEnglish ? "Est. profit ($)" : "预估到期收益 ($)",
         cell: ({ getValue }) => {
           const val = getValue<number>();
           return (
@@ -545,7 +544,7 @@ export default function Home() {
     } catch (err) {
       setData(null);
       setPortfolioHistory(null);
-      setError(err instanceof Error ? err.message : isEnglish ? "Unknown request error" : "未知的请求链路错误");
+      setError(err instanceof Error ? err.message : isEnglish ? "Unexpected request error" : "未知的请求链路错误");
     } finally {
       setLoading(false);
     }
@@ -567,26 +566,41 @@ export default function Home() {
     void runQuery(addr);
   }
 
+  // Keep the dashboard shell visible before the first query and make the
+  // empty/loading state explicit instead of conditionally removing the whole
+  // statistics and positions sections.
+  const emptyMetricValue = isEnglish ? "No data yet" : "等待查询";
+  const fetchedAtLabel = data
+    ? `${isEnglish ? "Updated" : "数据获取于"} ${formatDateTime(data.fetchedAt, language)}`
+    : loading
+      ? (isEnglish ? "Loading portfolio…" : "正在读取持仓数据…")
+      : emptyMetricValue;
+  const emptyPositionsMessage = loading
+    ? (isEnglish ? "Loading positions…" : "正在读取持仓数据…")
+    : data
+      ? (isEnglish ? "No qualifying positions found." : "未在此钱包中分析到符合条件的持仓数据。")
+      : (isEnglish ? "Enter a wallet address and click Analyze." : "请输入钱包地址并点击查询分析，查看仓位数据。");
+
   return (
-    <main className="mx-auto max-w-7xl px-4 py-10 relative z-10">
+    <main className="relative z-10 mx-auto max-w-7xl px-4 py-6 md:py-7">
       
       {/* 
         * Dashboard Header Brand & Description
         * 顶部系统主标题与装饰标徽
         */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-slate-800 pb-8">
+      <div className="flex flex-col justify-between gap-4 border-b border-slate-800 pb-5 md:flex-row md:items-center">
         <div>
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-xs font-semibold tracking-wider uppercase mb-3 shadow-[0_0_15px_rgba(6,182,212,0.15)] animate-pulse">
+          <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.12)]">
             <Zap className="h-3.5 w-3.5" />
             Polymarket Portfolio Analyzer
           </div>
-          <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight bg-gradient-to-r from-slate-100 via-cyan-200 to-indigo-300 bg-clip-text text-transparent">
-            {isEnglish ? "Portfolio Monitor & Returns Dashboard" : "自动持仓监控与收益看板"}
+          <h1 className="bg-gradient-to-r from-slate-100 via-cyan-200 to-indigo-300 bg-clip-text text-2xl font-extrabold tracking-tight text-transparent md:text-3xl">
+            {isEnglish ? "Portfolio & Returns Monitor" : "自动持仓监控与收益看板"}
           </h1>
-          <p className="mt-2 text-sm text-slate-400 max-w-2xl leading-relaxed">
+          <p className="mt-1 max-w-xl text-xs leading-relaxed text-slate-400">
             {isEnglish
-              ? "Analyze on-chain wallet positions, annualize returns through settlement using the current price, and identify positions approaching zero or ready to redeem."
-              : "解析链上钱包持仓数据，以当前成交市价为本金，实时测算至“到期结算日”的继续持有年化收益率 (Hold APR)，并自动标识即将归零或可以赎回的仓位，助您科学调仓。"}
+              ? "Estimate annualized returns to settlement at current prices, and flag low-APR, losing, and redeemable positions."
+              : "按当前价格计算到期年化，快速识别低 APR、亏损和可赎回仓位。"}
           </p>
         </div>
         <div className="inline-flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900/50 p-1 self-start md:self-auto shadow-inner" aria-label={isEnglish ? "Language" : "语言"}>
@@ -612,24 +626,24 @@ export default function Home() {
 
       {/* 
         * Search Bar & Configurations Container
-        * 地址检索框与年化告警阀值调节面板
+        * 地址检索框与年化告警阈值调节面板
         */}
-      <div className="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
         
         {/* Search Address Input Card / 钱包地址查询输入卡片 */}
-        <div className="lg:col-span-2 backdrop-blur-xl bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 shadow-xl relative overflow-hidden group">
+        <div className="group relative overflow-hidden rounded-xl border border-slate-800/80 bg-slate-900/40 p-4 shadow-lg backdrop-blur-xl lg:col-span-2">
           <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent"></div>
-          <h2 className="text-base font-bold text-slate-200 mb-4 flex items-center gap-2">
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-200">
             <Wallet className="h-4.5 w-4.5 text-cyan-400" />
-            {isEnglish ? "Wallet lookup & analysis" : "账户检索与分析"}
+            {isEnglish ? "Wallet analysis" : "账户检索与分析"}
           </h2>
-          <form onSubmit={handleSubmit} className="flex gap-3">
+          <form onSubmit={handleSubmit} className="flex flex-wrap items-center gap-3">
             <div className="relative flex-1">
               <input
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
-                placeholder={isEnglish ? "Enter an Ethereum wallet address (0x...)" : "请输入以太坊格式钱包地址 (0x...)"}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950/70 py-3 pl-4 pr-10 text-sm text-slate-100 placeholder-slate-500 transition-all focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/50 shadow-inner"
+                placeholder={isEnglish ? "Ethereum wallet address (0x…)" : "请输入以太坊格式钱包地址 (0x...)"}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950/70 py-2.5 pl-3.5 pr-10 text-sm text-slate-100 placeholder-slate-500 shadow-inner transition-all focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
               />
               {address && (
                 <button
@@ -644,17 +658,21 @@ export default function Home() {
             <button
               type="submit"
               disabled={loading}
-              className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-950/50 hover:from-cyan-400 hover:to-indigo-500 transition-all focus:outline-none disabled:opacity-50 active:scale-98 cursor-pointer"
+              className="flex cursor-pointer items-center gap-2 rounded-lg bg-gradient-to-r from-cyan-500 to-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-cyan-950/50 transition-all hover:from-cyan-400 hover:to-indigo-500 focus:outline-none disabled:opacity-50 active:scale-98"
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
               {isEnglish ? "Analyze" : "查询分析"}
             </button>
+            <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-slate-500">
+              <Database className="h-3.5 w-3.5" />
+              {fetchedAtLabel}
+            </div>
           </form>
 
           {/* Search History Badges List / 历史检索地址胶囊徽章列表 */}
           {history.length > 0 && (
-            <div className="mt-4 flex flex-wrap items-center gap-2 pt-2">
-              <span className="text-xs font-semibold text-slate-500">{isEnglish ? "Recent:" : "历史查询:"}</span>
+            <div className="mt-3 flex flex-wrap items-center gap-2 pt-1">
+              <span className="text-xs font-semibold text-slate-500">{isEnglish ? "Recent searches:" : "历史查询:"}</span>
               {history.map((addr) => (
                 <span
                   key={addr}
@@ -684,16 +702,16 @@ export default function Home() {
         </div>
 
         {/* Global Warnings Parameter Card / 报警参数面板卡片 */}
-        <div className="backdrop-blur-xl bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 shadow-xl relative overflow-hidden group">
+        <div className="group relative overflow-hidden rounded-xl border border-slate-800/80 bg-slate-900/40 p-4 shadow-lg backdrop-blur-xl">
           <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-purple-500/30 to-transparent"></div>
-          <h2 className="text-base font-bold text-slate-200 mb-4 flex items-center gap-2">
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-200">
             <Percent className="h-4.5 w-4.5 text-purple-400" />
-            {isEnglish ? "Hold APR alert threshold" : "继续持有 APR 警报阀值"}
+            {isEnglish ? "Hold APR threshold" : "继续持有 APR 警报阈值"}
           </h2>
           <div className="flex flex-col gap-3">
             <label htmlFor="hold-apr-threshold" className="text-xs text-slate-400 leading-relaxed">
               {isEnglish
-                ? "Positions at or below this annualized Hold APR threshold are highlighted as risks in the dashboard and alerts."
+                ? "Positions at or below this Hold APR are flagged in the dashboard and alerts."
                 : "继续持有年化收益率 (Hold APR) 低于或等于此设定阈值时，看板和推送将进行风险预警并标红。"}
             </label>
             <div className="relative mt-1">
@@ -703,7 +721,7 @@ export default function Home() {
                 step="0.5"
                 value={holdAprThreshold}
                 onChange={handleThresholdChange}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 font-semibold focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500/50 shadow-inner"
+                className="w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3.5 py-2.5 text-sm font-semibold text-slate-100 shadow-inner focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500/50"
               />
               <span className="absolute right-4 top-3 text-sm font-bold text-purple-400">%</span>
             </div>
@@ -724,171 +742,160 @@ export default function Home() {
         </div>
       )}
 
-      {/* 
-        * Metrics & Statistics Dashboard (Only rendered when data is loaded)
-        * 账户总体业绩卡片与统计分析结果
+      {/*
+        * Metrics & Statistics Dashboard (Always rendered with an empty state)
+        * 账户总体业绩卡片与统计分析结果：查询前保留完整页面骨架
         */}
-      {data && (
-        <>
-          {/* Dashboard Summary Statistics Cards Grid / 指标概览区块 */}
-          <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+      {/* Dashboard Summary Statistics Cards Grid / 指标概览区块 */}
+      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <SummaryCard
               label={isEnglish ? "Total portfolio value" : "资产总价值"}
-              value={`$${formatNumber(data.summary.totalBalance)}`}
+              value={data ? `$${formatNumber(data.summary.totalBalance)}` : "—"}
               icon={<DollarSign className="h-4 w-4 text-cyan-400" />}
               glowColor="cyan"
-              tooltip={isEnglish ? "Available balance plus the current value of all positions" : "总余额 + 仓位当前市值总和"}
+              tooltip={isEnglish ? "Available balance + current position value" : "总余额 + 仓位当前市值总和"}
             />
             <SummaryCard
               label={isEnglish ? "Available balance" : "链上可用余额"}
-              value={`$${formatNumber(data.summary.availableBalance)}`}
+              value={data ? `$${formatNumber(data.summary.availableBalance)}` : "—"}
               icon={<Wallet className="h-4 w-4 text-emerald-400" />}
               glowColor="green"
-              tooltip={isEnglish ? "Liquid pUSD in the wallet that can be used to buy markets" : "钱包中可用于买入市场的流动 pUSD 现金总额"}
+              tooltip={isEnglish ? "Liquid pUSD available for trading" : "钱包中可用于买入市场的流动 pUSD 现金总额"}
             />
             <SummaryCard
               label={isEnglish ? "Position value" : "当前持仓市值"}
-              value={`$${formatNumber(data.summary.totalValue)}`}
+              value={data ? `$${formatNumber(data.summary.totalValue)}` : "—"}
               icon={<Activity className="h-4 w-4 text-indigo-400" />}
               glowColor="purple"
               tooltip={isEnglish ? "Current market value of all positions" : "用户当前所有未结算的持仓当前市价总价值"}
             />
             <SummaryCard
               label={isEnglish ? "Weighted hold APR" : "加权继续持有 APR"}
-              value={formatPercent(data.summary.avgHoldApr)}
+              value={data ? formatPercent(data.summary.avgHoldApr) : "—"}
               icon={<TrendingUp className="h-4 w-4 text-fuchsia-400" />}
               glowColor="red"
-              tooltip={isEnglish ? "Expected annualized return weighted by current position value" : "以仓位当前市值为权重，加权计算的持仓预期年化收益率。评估继续锁定资金的性价比"}
+              tooltip={isEnglish ? "Expected annualized return, weighted by position value" : "以仓位当前市值为权重，加权计算的持仓预期年化收益率。评估继续锁定资金的性价比"}
             />
             <SummaryCard
               label={isEnglish ? "Weighted entry APR" : "加权建仓初始 APR"}
-              value={formatPercent(data.summary.avgCostApr)}
+              value={data ? formatPercent(data.summary.avgCostApr) : "—"}
               icon={<Percent className="h-4 w-4 text-amber-400" />}
               glowColor="cyan"
-              tooltip={isEnglish ? "Initial annualized return at entry, weighted by current position value" : "以仓位当前市值为权重，加权计算的买入成本初始年化收益率"}
+              tooltip={isEnglish ? "Annualized return at entry, weighted by position value" : "以仓位当前市值为权重，加权计算的买入成本初始年化收益率"}
             />
+      </div>
+
+     <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+        <HistoryMetric
+          label={isEnglish ? "Change since first record" : "记录以来变化 / 年化"}
+          value={data ? formatHistoryChange(
+            portfolioHistory?.metrics.changeSinceStart,
+            portfolioHistory?.metrics.balanceChangeSinceStart,
+            isEnglish,
+            portfolioHistory?.metrics.annualizedSinceStart,
+          ) : emptyMetricValue}
+          icon={<Database className="h-4 w-4 text-cyan-400" />}
+        />
+        <HistoryMetric
+          label={isEnglish ? "7-day change" : "7 日变化 / 年化"}
+          value={data ? formatHistoryChange(
+            portfolioHistory?.metrics.change7d,
+            portfolioHistory?.metrics.balanceChange7d,
+            isEnglish,
+            portfolioHistory?.metrics.annualized7d,
+          ) : emptyMetricValue}
+          icon={<CalendarClock className="h-4 w-4 text-amber-400" />}
+        />
+        <HistoryMetric
+          label={isEnglish ? "30-day change" : "30 日变化 / 年化"}
+          value={data ? formatHistoryChange(
+            portfolioHistory?.metrics.change30d,
+            portfolioHistory?.metrics.balanceChange30d,
+            isEnglish,
+            portfolioHistory?.metrics.annualized30d,
+          ) : emptyMetricValue}
+          icon={<CalendarClock className="h-4 w-4 text-indigo-400" />}
+        />
+      </div>
+
+      <PortfolioHistoryChart snapshots={portfolioHistory?.snapshots ?? []} language={language} />
+
+      {/* Positions detailed tables container / 仓位细分数据列表 */}
+      <div className="mt-8 backdrop-blur-xl bg-slate-900/30 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl relative">
+        <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent"></div>
+
+        <div className="px-6 py-5 border-b border-slate-800 bg-slate-900/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-emerald-400" />
+              {isEnglish ? "Position risk details" : "当前仓位风控明细"}
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">
+              {isEnglish
+                ? "Click a column header to sort. Red Hold APR signals a high opportunity cost."
+                : "点击各列标题可进行多维排序。若继续持有 APR 变红，说明当前锁定资金的机会成本过高。"}
+            </p>
           </div>
-
-          <div className="mt-3 flex items-center justify-end gap-1.5 text-xs text-slate-500">
-            <Database className="h-3.5 w-3.5" />
-            {isEnglish ? "Data fetched at" : "数据获取于"} {formatDateTime(data.fetchedAt, language)}
+          <div className="flex items-center gap-1.5 self-start sm:self-auto text-xs text-slate-500 font-semibold bg-slate-950/60 border border-slate-800 px-3 py-1.5 rounded-lg shadow-inner">
+            <Info className="h-3.5 w-3.5 text-slate-400" />
+            {isEnglish ? "Positions below $0.10 are excluded" : "自动忽略大小低于 0.1 刀的尘埃仓位"}
           </div>
+        </div>
 
-          <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <HistoryMetric
-              label={isEnglish ? "Change since first record" : "记录以来变化"}
-              value={formatHistoryChange(
-                portfolioHistory?.metrics.changeSinceStart,
-                portfolioHistory?.metrics.balanceChangeSinceStart,
-                isEnglish,
-              )}
-              icon={<Database className="h-4 w-4 text-cyan-400" />}
-            />
-            <HistoryMetric
-              label={isEnglish ? "Annualized since first record" : "记录以来年化"}
-              value={formatSignedPercent(portfolioHistory?.metrics.annualizedSinceStart, isEnglish)}
-              icon={<TrendingUp className="h-4 w-4 text-emerald-400" />}
-            />
-            <HistoryMetric
-              label={isEnglish ? "7-day change (annualized)" : "7 日变化（年化）"}
-              value={formatHistoryChange(
-                portfolioHistory?.metrics.annualized7d,
-                portfolioHistory?.metrics.balanceChange7d,
-                isEnglish,
-              )}
-              icon={<CalendarClock className="h-4 w-4 text-amber-400" />}
-            />
-            <HistoryMetric
-              label={isEnglish ? "30-day change (annualized)" : "30 日变化（年化）"}
-              value={formatHistoryChange(
-                portfolioHistory?.metrics.annualized30d,
-                portfolioHistory?.metrics.balanceChange30d,
-                isEnglish,
-              )}
-              icon={<CalendarClock className="h-4 w-4 text-indigo-400" />}
-            />
-          </div>
-
-          <PortfolioHistoryChart snapshots={portfolioHistory?.snapshots ?? []} language={language} />
-
-          {/* Positions detailed tables container / 仓位细分数据列表 */}
-          <div className="mt-8 backdrop-blur-xl bg-slate-900/30 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl relative">
-            <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent"></div>
-            
-            <div className="px-6 py-5 border-b border-slate-800 bg-slate-900/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5 text-emerald-400" />
-                  {isEnglish ? "Current position risk details" : "当前仓位风控明细"}
-                </h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  {isEnglish
-                    ? "Click a column heading to sort. A red Hold APR indicates a high opportunity cost for locked capital."
-                    : "点击各列标题可进行多维排序。若继续持有 APR 变红，说明当前锁定资金的机会成本过高。"}
-                </p>
-              </div>
-              <div className="flex items-center gap-1.5 self-start sm:self-auto text-xs text-slate-500 font-semibold bg-slate-950/60 border border-slate-800 px-3 py-1.5 rounded-lg shadow-inner">
-                <Info className="h-3.5 w-3.5 text-slate-400" />
-                {isEnglish ? "Positions below $0.10 are excluded" : "自动忽略大小低于 0.1 刀的尘埃仓位"}
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-sm">
-                <thead>
-                  {table.getHeaderGroups().map((headerGroup) => (
-                    <tr key={headerGroup.id} className="bg-slate-950/60 border-b border-slate-800 text-slate-400">
-                      {headerGroup.headers.map((header) => {
-                        const sortDirection = header.column.getIsSorted();
-                        return (
-                          <th
-                            key={header.id}
-                            onClick={header.column.getToggleSortingHandler()}
-                            className="group/th cursor-pointer select-none whitespace-nowrap px-4 py-4 font-semibold hover:text-slate-200 transition-colors"
-                          >
-                            <span className="flex items-center gap-1.5">
-                              {flexRender(header.column.columnDef.header, header.getContext())}
-                              {sortDirection === "asc" && <ArrowUp className="h-3.5 w-3.5 text-cyan-400" />}
-                              {sortDirection === "desc" && <ArrowDown className="h-3.5 w-3.5 text-cyan-400" />}
-                              {!sortDirection && (
-                                <ArrowUpDown className="h-3.5 w-3.5 text-slate-600 group-hover/th:text-slate-400 transition-colors" />
-                              )}
-                            </span>
-                          </th>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </thead>
-                <tbody className="divide-y divide-slate-800/50 bg-slate-950/10">
-                  {table.getRowModel().rows.map((row) => (
-                    <tr
-                      key={row.id}
-                      className="group hover:bg-slate-900/30 transition-all duration-150"
-                    >
-                      {row.getVisibleCells().map((cell) => (
-                        <td key={cell.id} className="px-4 py-4 align-middle whitespace-nowrap">
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                  {positions.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={columns.length}
-                        className="px-4 py-16 text-center text-slate-500 font-semibold"
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-sm">
+            <thead>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <tr key={headerGroup.id} className="bg-slate-950/60 border-b border-slate-800 text-slate-400">
+                  {headerGroup.headers.map((header) => {
+                    const sortDirection = header.column.getIsSorted();
+                    return (
+                      <th
+                        key={header.id}
+                        onClick={header.column.getToggleSortingHandler()}
+                        className="group/th cursor-pointer select-none whitespace-nowrap px-4 py-4 font-semibold hover:text-slate-200 transition-colors"
                       >
-                        {isEnglish ? "No eligible positions found for this wallet." : "未在此钱包中分析到符合条件的持仓数据。"}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      )}
+                        <span className="flex items-center gap-1.5">
+                          {flexRender(header.column.columnDef.header, header.getContext())}
+                          {sortDirection === "asc" && <ArrowUp className="h-3.5 w-3.5 text-cyan-400" />}
+                          {sortDirection === "desc" && <ArrowDown className="h-3.5 w-3.5 text-cyan-400" />}
+                          {!sortDirection && (
+                            <ArrowUpDown className="h-3.5 w-3.5 text-slate-600 group-hover/th:text-slate-400 transition-colors" />
+                          )}
+                        </span>
+                      </th>
+                    );
+                  })}
+                </tr>
+              ))}
+            </thead>
+            <tbody className="divide-y divide-slate-800/50 bg-slate-950/10">
+              {table.getRowModel().rows.map((row) => (
+                <tr
+                  key={row.id}
+                  className="group hover:bg-slate-900/30 transition-all duration-150"
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <td key={cell.id} className="px-4 py-4 align-middle whitespace-nowrap">
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {positions.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={columns.length}
+                    className="px-4 py-16 text-center text-slate-500 font-semibold"
+                  >
+                    {emptyPositionsMessage}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </main>
   );
 }
@@ -898,10 +905,16 @@ function formatSignedPercent(value: number | null | undefined, isEnglish: boolea
   return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(2)}%`;
 }
 
+function formatAnnualizedPercent(value: number | null | undefined, isEnglish: boolean): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return isEnglish ? "Collecting data" : "数据积累中";
+  return `${(value * 100).toFixed(2)}%`;
+}
+
 function formatHistoryChange(
   rate: number | null | undefined,
   balanceChange: number | null | undefined,
   isEnglish: boolean,
+  annualizedRate?: number | null,
 ): string {
   if (typeof balanceChange !== "number" || !Number.isFinite(balanceChange)) {
     return isEnglish ? "Collecting data" : "数据积累中";
@@ -909,7 +922,13 @@ function formatHistoryChange(
   const percent = formatSignedPercent(rate, isEnglish);
   if (percent === "数据积累中" || percent === "Collecting data") return percent;
   const amount = `${balanceChange >= 0 ? "+" : "-"}$${formatNumber(Math.abs(balanceChange))}`;
-  return isEnglish ? `${amount} (${percent})` : `${amount}（${percent}）`;
+  if (typeof annualizedRate !== "number" || !Number.isFinite(annualizedRate)) {
+    return isEnglish ? `${amount} (${percent})` : `${amount}（${percent}）`;
+  }
+  const annualized = formatAnnualizedPercent(annualizedRate, isEnglish);
+  return isEnglish
+    ? `${amount} (${percent})\nAnnualized: ${annualized}`
+    : `${amount}（${percent}）\n年化：${annualized}`;
 }
 
 function HistoryMetric({
@@ -921,20 +940,30 @@ function HistoryMetric({
   value: string;
   icon: React.ReactNode;
 }) {
-  const isNegative = value.startsWith("-");
-  const isPending = value === "数据积累中" || value === "Collecting data";
+  const [mainValue, annualizedValue] = value.split("\n");
+  const isNegative = mainValue.startsWith("-");
+  const isPending =
+    mainValue === "数据积累中" ||
+    mainValue === "Collecting data" ||
+    mainValue === "等待查询" ||
+    mainValue === "No data yet";
   return (
-    <div className="min-h-24 rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+    <div className="min-h-20 rounded-lg border border-slate-800 bg-slate-900/40 p-3.5">
       <div className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-500">
         {label}
         {icon}
       </div>
       <div
-        className={`mt-4 font-mono text-lg font-bold ${
+        className={`mt-3 font-mono text-lg font-bold ${
           isPending ? "text-slate-500" : isNegative ? "text-rose-400" : "text-emerald-400"
         }`}
       >
-        {value}
+        <span className="block">{mainValue}</span>
+        {annualizedValue && (
+          <span className="mt-1 block text-sm font-semibold text-slate-400">
+            {annualizedValue}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -966,15 +995,15 @@ function SummaryCard({
 
   return (
     <div
-      className={`rounded-2xl border bg-slate-900/50 p-5 backdrop-blur-md transition-all duration-300 hover:scale-103 shadow-lg flex flex-col justify-between min-h-[120px] group/card ${glowStyles[glowColor]}`}
+      className={`group/card flex min-h-[104px] flex-col justify-between rounded-xl border bg-slate-900/50 p-4 shadow-md backdrop-blur-md transition-all duration-200 ${glowStyles[glowColor]}`}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-semibold text-slate-400 group-hover/card:text-slate-300 transition-colors">
+        <span className="text-[11px] font-semibold text-slate-400 transition-colors group-hover/card:text-slate-300">
           {label}
         </span>
-        {icon && <div className="p-1.5 rounded-lg bg-slate-950/80 border border-slate-800 shadow-inner">{icon}</div>}
+        {icon && <div className="rounded-md border border-slate-800 bg-slate-950/80 p-1 shadow-inner">{icon}</div>}
       </div>
-      <div className="mt-3 flex items-baseline justify-between gap-1">
+      <div className="mt-2 flex items-baseline justify-between gap-1">
         <AutoFitValue value={value} />
         {tooltip && (
           <div className="group/tip relative inline-flex self-end mb-1 cursor-pointer">

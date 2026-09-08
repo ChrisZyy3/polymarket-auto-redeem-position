@@ -64,9 +64,13 @@ test("calculateHistoryMetrics uses the nearest snapshot at or before each lookba
   assert.equal(metrics.balanceChangeSinceStart, 10);
   assert.ok(metrics.annualized7d !== null);
   assert.ok(Math.abs(metrics.annualized7d - 1.603291266635761) < 1e-10);
+  assert.ok(metrics.change7d !== null);
+  assert.ok(Math.abs(metrics.change7d - 2 / 108) < 1e-12);
   assert.equal(metrics.balanceChange7d, 2);
   assert.ok(metrics.annualized30d !== null);
   assert.ok(Math.abs(metrics.annualized30d - 2.188680476905306) < 1e-10);
+  assert.ok(metrics.change30d !== null);
+  assert.ok(Math.abs(metrics.change30d - 0.1) < 1e-12);
   assert.equal(metrics.balanceChange30d, 10);
 });
 
@@ -76,8 +80,10 @@ test("calculateHistoryMetrics returns null rates when history is too short", () 
   assert.equal(metrics.changeSinceStart, 0);
   assert.equal(metrics.balanceChangeSinceStart, 0);
   assert.equal(metrics.annualized7d, null);
+  assert.equal(metrics.change7d, null);
   assert.equal(metrics.balanceChange7d, null);
   assert.equal(metrics.annualized30d, null);
+  assert.equal(metrics.change30d, null);
   assert.equal(metrics.balanceChange30d, null);
 });
 

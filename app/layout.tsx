@@ -4,8 +4,8 @@ import "./globals.css";
 // Global SEO Metadata settings
 // 全局搜索引擎优化 (SEO) 元数据设置
 export const metadata: Metadata = {
-  title: "Polymarket 持仓监控与收益率分析看板",
-  description: "输入 EVM 钱包地址实时计算并查看 Polymarket 持仓的预期收益率 APR / ROI 以及调仓提醒",
+  title: "Polymarket Portfolio Analyzer",
+  description: "Analyze Polymarket positions, Hold APR, ROI, and rebalancing signals for any EVM wallet.",
 };
 
 /**

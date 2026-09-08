@@ -17,8 +17,10 @@ export interface PortfolioHistoryMetrics {
   balanceChangeSinceStart: number | null;
   annualizedSinceStart: number | null;
   annualized7d: number | null;
+  change7d: number | null;
   balanceChange7d: number | null;
   annualized30d: number | null;
+  change30d: number | null;
   balanceChange30d: number | null;
 }
 
@@ -82,8 +84,10 @@ export function calculateHistoryMetrics(
       balanceChangeSinceStart: null,
       annualizedSinceStart: null,
       annualized7d: null,
+      change7d: null,
       balanceChange7d: null,
       annualized30d: null,
+      change30d: null,
       balanceChange30d: null,
     };
   }
@@ -96,8 +100,10 @@ export function calculateHistoryMetrics(
     balanceChangeSinceStart: latest.totalBalance - first.totalBalance,
     annualizedSinceStart: annualizedChange(first, latest),
     annualized7d: baseline7d ? annualizedChange(baseline7d, latest) : null,
+    change7d: baseline7d ? latest.totalBalance / baseline7d.totalBalance - 1 : null,
     balanceChange7d: baseline7d ? latest.totalBalance - baseline7d.totalBalance : null,
     annualized30d: baseline30d ? annualizedChange(baseline30d, latest) : null,
+    change30d: baseline30d ? latest.totalBalance / baseline30d.totalBalance - 1 : null,
     balanceChange30d: baseline30d ? latest.totalBalance - baseline30d.totalBalance : null,
   };
 }
