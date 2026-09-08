@@ -110,7 +110,7 @@ export function PortfolioHistoryChart({
   function formatPointLabel(snapshot: PortfolioSnapshot, isEnglish: boolean): string {
     const date = new Date(snapshot.recordedAt).toLocaleString(isEnglish ? "en-US" : "zh-CN");
     return isEnglish
-      ? `${date}, total assets ${money(snapshot.totalBalance)}`
+      ? `${date}, portfolio value ${money(snapshot.totalBalance)}`
       : `${date}，总资产 ${money(snapshot.totalBalance)}`;
   }
 
@@ -120,13 +120,13 @@ export function PortfolioHistoryChart({
         <div>
           <h2 id="portfolio-history-title" className="flex items-center gap-2 text-lg font-bold text-slate-100">
             <LineChart className="h-5 w-5 text-cyan-400" />
-            {isEnglish ? "Total portfolio history" : "总资产历史曲线"}
+            {isEnglish ? "Portfolio history" : "总资产历史曲线"}
             <button
               type="button"
               onClick={() => setIsExpanded((expanded) => !expanded)}
               aria-expanded={isExpanded}
               aria-controls="portfolio-history-content"
-              aria-label={isExpanded ? (isEnglish ? "Collapse history chart" : "收起历史曲线") : isEnglish ? "Expand history chart" : "展开历史曲线"}
+              aria-label={isExpanded ? (isEnglish ? "Collapse chart" : "收起历史曲线") : isEnglish ? "Expand chart" : "展开历史曲线"}
               title={isExpanded ? (isEnglish ? "Collapse" : "收起") : isEnglish ? "Expand" : "展开"}
               className="ml-1 inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
             >
@@ -136,13 +136,13 @@ export function PortfolioHistoryChart({
           {isExpanded && (
             <p className="mt-1 text-xs text-slate-500">
               {isEnglish
-                ? "Daily snapshots are recorded by a scheduled task and include position value and available on-chain balance."
+                ? "Daily snapshots include position value and available balance."
                 : "每日快照由定时任务写入 Git 仓库，包含全部持仓市值与链上可用余额。"}
             </p>
           )}
         </div>
         {isExpanded && (
-          <div className="inline-flex h-9 self-start rounded-lg border border-slate-700 bg-slate-950 p-1" aria-label={isEnglish ? "Chart time range" : "曲线时间范围"}>
+          <div className="inline-flex h-9 self-start rounded-lg border border-slate-700 bg-slate-950 p-1" aria-label={isEnglish ? "Time range" : "曲线时间范围"}>
             {([30, 90, "all"] as const).map((value) => (
               <button
                 key={value}
@@ -188,7 +188,7 @@ export function PortfolioHistoryChart({
               className="h-full w-full overflow-visible"
               role="img"
               aria-label={isEnglish
-                ? `Total portfolio changed from ${money(visible[0].totalBalance)} to ${money(visible.at(-1)!.totalBalance)}`
+                ? `Portfolio value changed from ${money(visible[0].totalBalance)} to ${money(visible.at(-1)!.totalBalance)}`
                 : `总资产从 ${money(visible[0].totalBalance)} 变化至 ${money(visible.at(-1)!.totalBalance)}`}
               onMouseLeave={() => setSelectedIndex(null)}
             >
@@ -286,7 +286,7 @@ export function PortfolioHistoryChart({
       ) : (
         <div id="portfolio-history-content" className="flex min-h-56 items-center justify-center rounded-lg border border-dashed border-slate-700 bg-slate-950/30 px-6 text-center text-sm text-slate-500">
           {isEnglish
-            ? "No history snapshots yet. The chart will begin recording after the scheduled task succeeds for the first time."
+            ? "No history yet. The chart starts after the first scheduled snapshot."
             : "暂无历史快照。定时任务首次成功执行后，资产曲线会从当天开始记录。"}
         </div>
       ))}
