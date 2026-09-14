@@ -53,9 +53,9 @@ The Dashboard reads the latest history from the public GitHub Raw URL at runtime
 
 Dashboard 的 `/api/portfolio-history` 会在运行时通过公开 GitHub Raw URL 读取最新的 `data/portfolio-history.json`，服务端缓存 5 分钟。因此 GitHub Actions 提交新快照后无需重新部署 Vercel，也不需要 GitHub Token。Vercel Production 环境只需配置 `GITHUB_REPOSITORY` 和 `GITHUB_HISTORY_BRANCH`。
 
-### Vercel Cron（当前未启用）
+### Vercel Cron（组合快照未启用）
 
-当前推荐使用 GitHub Actions 运行定时任务，因此仓库中的 `vercel.json` 不再配置 Cron。Dashboard 仍通过公开 GitHub Raw URL 读取最新的历史 JSON。
+当前推荐使用 GitHub Actions 记录组合快照，因此 `vercel.json` 不为组合快照配置 Cron；它仅用于下方 PolyYield 的每日 dry-run。Dashboard 仍通过公开 GitHub Raw URL 读取最新的历史 JSON。
 
 如果改用 Vercel Cron，才需要恢复 Cron 配置并在 Vercel 添加：
 
@@ -88,6 +88,16 @@ curl -H "Authorization: Bearer YOUR_CRON_SECRET" \
   https://YOUR_PROJECT.vercel.app/api/rebalance
 ```
 
+### 仓位买卖价格建议
+
+仓位表中的“展开买卖建议”会按需读取当前 token 的公开盘口，结合页面的“继续持有 APR 警报阈值”计算：
+
+- 阈值价格：达到目标 APR 时的理论价格。
+- 推荐买入限价：不会高于阈值价格；若当前卖一已低于阈值，则使用卖一作为成交参考。
+- 推荐卖出限价：以阈值价格作为最低参考；若当前买一已达到该价格，则使用买一作为卖出参考。
+
+该功能使用只读接口 `GET /api/position-quote?tokenId=...&currentPrice=...&endDate=...&thresholdApr=...`，不会创建、撤销或修改订单。当前页面阈值采用看板既有的简单年化 APR 口径，而不是复利 APY。
+
 ## 指标口径
 
 - 记录以来变化：最新总资产相对首条快照的变化率。
@@ -102,3 +112,4 @@ curl -H "Authorization: Bearer YOUR_CRON_SECRET" \
 - `GET /api/portfolio-history?address=...`：历史快照与年化指标。
 - `GET /api/cron/portfolio-snapshot`：Vercel Cron 采集入口。
 - `GET /api/rebalance`：PolyYield dry-run 调仓决策入口。
+- `GET /api/position-quote`：单个仓位的只读目标价、推荐买入价和推荐卖出价。

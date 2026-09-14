@@ -46,6 +46,13 @@ function endOfDaySettlementUtcMs(dateStr: string): number | null {
   return settlementUtcMs;
 }
 
+export function daysUntilSettlement(endDate: string | null, now: Date = new Date()): number {
+  if (!endDate) return Number.NaN;
+  const endMs = endOfDaySettlementUtcMs(endDate);
+  if (endMs === null) return Number.NaN;
+  return (endMs - now.getTime()) / MS_PER_DAY;
+}
+
 export interface AprResult {
   position: Position;
   curPrice: number;
@@ -73,11 +80,10 @@ export function calcApr(position: Position, now: Date = new Date()): AprResult {
   if (!position.endDate) {
     note = "缺少结算日期";
   } else {
-    const endMs = endOfDaySettlementUtcMs(position.endDate);
-    if (endMs === null) {
+    daysToSettle = daysUntilSettlement(position.endDate, now);
+    if (!Number.isFinite(daysToSettle)) {
       note = "结算日期无法解析";
     } else {
-      daysToSettle = (endMs - now.getTime()) / MS_PER_DAY;
       if (daysToSettle <= 0) {
         note = "已过结算日";
       } else {

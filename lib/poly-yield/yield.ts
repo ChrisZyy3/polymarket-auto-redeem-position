@@ -20,3 +20,8 @@ export function floorToTick(value: number, tick: number): number {
   const decimals = Math.max(0, (tick.toString().split(".")[1] ?? "").length);
   return Number((Math.floor((value + 1e-12) / tick) * tick).toFixed(decimals));
 }
+
+export function ceilToTick(value: number, tick: number): number {
+  const decimals = Math.max(0, (tick.toString().split(".")[1] ?? "").length);
+  return Number((Math.ceil((value - 1e-12) / tick) * tick).toFixed(decimals));
+}

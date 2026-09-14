@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   type ColumnDef,
   type SortingState,
@@ -29,9 +29,13 @@ import {
   Database,
   ExternalLink,
   Languages,
+  ChevronDown,
+  ChevronUp,
+  RefreshCw,
 } from "lucide-react";
 import { PortfolioHistoryChart } from "@/app/components/portfolio-history-chart";
 import type { PortfolioHistoryMetrics, PortfolioSnapshot } from "@/lib/portfolio-history";
+import type { PositionQuote } from "@/lib/position-quote";
 import type { EnrichedPosition } from "@/lib/types";
 
 // Structure definition for Dashboard statistics summary
@@ -56,6 +60,19 @@ interface ApiResponse {
 interface HistoryResponse {
   snapshots: PortfolioSnapshot[];
   metrics: PortfolioHistoryMetrics;
+}
+
+interface PositionQuoteResponse {
+  ok: boolean;
+  quote?: PositionQuote;
+  error?: string;
+}
+
+interface QuoteState {
+  status: "loading" | "ready" | "error";
+  thresholdAprPercent: number;
+  quote?: PositionQuote;
+  error?: string;
 }
 
 type Language = "zh" | "en";
@@ -174,6 +191,15 @@ function getMarketUrl(position: EnrichedPosition): string | null {
   return slug ? `https://polymarket.com/event/${encodeURIComponent(slug)}` : null;
 }
 
+function getPositionKey(position: EnrichedPosition): string {
+  return `${position.conditionId}:${position.asset}`;
+}
+
+function formatQuotePrice(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return `$${value.toFixed(4)}`;
+}
+
 /**
  * Polymarket Position Analysis Dashboard Entry Component
  * Polymarket 自动仓位与收益监控系统前端主界面
@@ -188,6 +214,9 @@ export default function Home() {
   const [history, setHistory] = useState<string[]>([]);
   const [holdAprThreshold, setHoldAprThreshold] = useState(DEFAULT_HOLD_APR_THRESHOLD);
   const [language, setLanguage] = useState<Language>("zh");
+  const [expandedPositionKey, setExpandedPositionKey] = useState<string | null>(null);
+  const [quoteStates, setQuoteStates] = useState<Record<string, QuoteState>>({});
+  const quoteRequestVersion = useRef(0);
   const isEnglish = language === "en";
 
   // Initialize state configurations from localstorage and URL params on mount
@@ -257,6 +286,9 @@ export default function Home() {
     const value = Number(e.target.value);
     if (Number.isNaN(value)) return;
     setHoldAprThreshold(value);
+    quoteRequestVersion.current += 1;
+    setExpandedPositionKey(null);
+    setQuoteStates({});
     try {
       localStorage.setItem(HOLD_APR_THRESHOLD_KEY, String(value));
     } catch {
@@ -281,6 +313,82 @@ export default function Home() {
     return values;
   }, [positions]);
 
+  async function loadPositionQuote(
+    position: EnrichedPosition,
+    thresholdApr = holdAprThreshold,
+    force = false,
+  ) {
+    const key = getPositionKey(position);
+    const existing = quoteStates[key];
+    if (
+      !force &&
+      existing &&
+      existing.thresholdAprPercent === thresholdApr &&
+      (existing.status === "loading" || existing.status === "ready")
+    ) return;
+
+    const requestVersion = ++quoteRequestVersion.current;
+
+    setQuoteStates((previous) => ({
+      ...previous,
+      [key]: { status: "loading", thresholdAprPercent: thresholdApr },
+    }));
+
+    try {
+      const params = new URLSearchParams({
+        tokenId: position.asset,
+        currentPrice: String(position.curPrice),
+        thresholdApr: String(thresholdApr),
+      });
+      if (position.endDate) params.set("endDate", position.endDate);
+
+      const response = await fetch(`/api/position-quote?${params.toString()}`, { cache: "no-store" });
+      const payload = (await response.json()) as PositionQuoteResponse;
+      if (!response.ok || !payload.ok || !payload.quote) {
+        throw new Error(payload.error || (isEnglish ? "Quote request failed" : "获取仓位报价失败"));
+      }
+
+      setQuoteStates((previous) => {
+        if (requestVersion !== quoteRequestVersion.current) return previous;
+        return {
+          ...previous,
+          [key]: { status: "ready", thresholdAprPercent: thresholdApr, quote: payload.quote },
+        };
+      });
+    } catch (err) {
+      setQuoteStates((previous) => {
+        if (requestVersion !== quoteRequestVersion.current) return previous;
+        return {
+          ...previous,
+          [key]: {
+            status: "error",
+            thresholdAprPercent: thresholdApr,
+            error: err instanceof Error ? err.message : isEnglish ? "Unexpected quote error" : "获取报价时发生未知错误",
+          },
+        };
+      });
+    }
+  }
+
+  function handleQuoteToggle(position: EnrichedPosition) {
+    const key = getPositionKey(position);
+    if (expandedPositionKey === key) {
+      setExpandedPositionKey(null);
+      return;
+    }
+
+    setExpandedPositionKey(key);
+    const state = quoteStates[key];
+    if (!state || state.thresholdAprPercent !== holdAprThreshold || state.status === "error") {
+      void loadPositionQuote(position);
+    }
+  }
+
+  function handleQuoteRefresh(position: EnrichedPosition) {
+    setExpandedPositionKey(getPositionKey(position));
+    void loadPositionQuote(position, holdAprThreshold, true);
+  }
+
   // Table columns definition with lucide icons and custom render cells
   // 定义表格每一列的数据绑定及其 UI 渲染细节，使用 Tailwind 精准样式控制
   const columns = useMemo<ColumnDef<EnrichedPosition>[]>(
@@ -291,7 +399,9 @@ export default function Home() {
         cell: ({ row }) => {
           const marketUrl = getMarketUrl(row.original);
           const fullMarketName = `${row.original.title} - ${row.original.outcome}`;
-          const content = (
+          const quoteKey = getPositionKey(row.original);
+          const quoteExpanded = expandedPositionKey === quoteKey;
+          const marketContent = (
             <>
               <div className="flex items-center gap-1 font-semibold text-slate-200 group-hover:text-cyan-400 transition-colors">
                 <span className="truncate">{row.original.title}</span>
@@ -305,19 +415,35 @@ export default function Home() {
               </div>
             </>
           );
-          return marketUrl ? (
-            <a
-              href={marketUrl}
-              target="_blank"
-              rel="noreferrer"
-              title={fullMarketName}
-              aria-label={`${isEnglish ? "Open market on Polymarket" : "打开 Polymarket 市场"}: ${fullMarketName}`}
-              className="block max-w-[280px] rounded-sm outline-none hover:text-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
-            >
-              {content}
-            </a>
-          ) : (
-            <div className="max-w-[280px]" title={fullMarketName}>{content}</div>
+          return (
+            <div className="max-w-[280px]">
+              {marketUrl ? (
+                <a
+                  href={marketUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={fullMarketName}
+                  aria-label={`${isEnglish ? "Open market on Polymarket" : "打开 Polymarket 市场"}: ${fullMarketName}`}
+                  className="block rounded-sm outline-none hover:text-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
+                >
+                  {marketContent}
+                </a>
+              ) : (
+                <div title={fullMarketName}>{marketContent}</div>
+              )}
+              {row.original.status !== "redeemable" ? (
+                <button
+                  type="button"
+                  onClick={() => handleQuoteToggle(row.original)}
+                  aria-expanded={quoteExpanded}
+                  aria-label={isEnglish ? "Show recommended buy and sell prices" : "展开推荐买入和卖出价格"}
+                  className="mt-2 inline-flex items-center gap-1 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2 py-1 text-[10px] font-semibold text-cyan-400 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/10 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                >
+                  {quoteExpanded ? <ChevronUp className="h-3 w-3" aria-hidden="true" /> : <ChevronDown className="h-3 w-3" aria-hidden="true" />}
+                  {isEnglish ? "Trade quote" : "展开买卖建议"}
+                </button>
+              ) : null}
+            </div>
           );
         },
       },
@@ -476,7 +602,7 @@ export default function Home() {
         },
       },
     ],
-    [holdAprThreshold, isEnglish, language, marketValues, totalPortfolioValue]
+    [expandedPositionKey, handleQuoteToggle, holdAprThreshold, isEnglish, language, marketValues, totalPortfolioValue]
   );
 
   // Setup React Table instance
@@ -523,6 +649,9 @@ export default function Home() {
   async function runQuery(addr: string) {
     setLoading(true);
     setError(null);
+    quoteRequestVersion.current += 1;
+    setExpandedPositionKey(null);
+    setQuoteStates({});
     try {
       const [res, historyRes] = await Promise.all([
         fetch(`/api/positions?address=${encodeURIComponent(addr)}&aprThreshold=${holdAprThreshold}`),
@@ -870,18 +999,34 @@ export default function Home() {
               ))}
             </thead>
             <tbody className="divide-y divide-slate-800/50 bg-slate-950/10">
-              {table.getRowModel().rows.map((row) => (
-                <tr
-                  key={row.id}
-                  className="group hover:bg-slate-900/30 transition-all duration-150"
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-4 py-4 align-middle whitespace-nowrap">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  ))}
-                </tr>
-              ))}
+              {table.getRowModel().rows.map((row) => {
+                const positionKey = getPositionKey(row.original);
+                const isExpanded = expandedPositionKey === positionKey;
+                return (
+                  <Fragment key={row.id}>
+                    <tr className="group hover:bg-slate-900/30 transition-all duration-150">
+                      {row.getVisibleCells().map((cell) => (
+                        <td key={cell.id} className="px-4 py-4 align-middle whitespace-nowrap">
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </td>
+                      ))}
+                    </tr>
+                    {isExpanded ? (
+                      <tr className="bg-slate-950/40">
+                        <td colSpan={columns.length} className="px-4 pb-5 pt-1 align-top whitespace-normal">
+                          <PositionQuotePanel
+                            position={row.original}
+                            quoteState={quoteStates[positionKey]}
+                            thresholdAprPercent={holdAprThreshold}
+                            language={language}
+                            onRefresh={() => handleQuoteRefresh(row.original)}
+                          />
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
               {positions.length === 0 && (
                 <tr>
                   <td
@@ -897,6 +1042,201 @@ export default function Home() {
         </div>
       </div>
     </main>
+  );
+}
+
+function PositionQuotePanel({
+  position,
+  quoteState,
+  thresholdAprPercent,
+  language,
+  onRefresh,
+}: {
+  position: EnrichedPosition;
+  quoteState?: QuoteState;
+  thresholdAprPercent: number;
+  language: Language;
+  onRefresh: () => void;
+}) {
+  const isEnglish = language === "en";
+  const quote = quoteState?.quote;
+  const isLoading = quoteState?.status === "loading";
+  const actionLabel = quote?.action === "buy"
+    ? (isEnglish ? "BUY BIAS" : "偏向买入")
+    : quote?.action === "sell"
+      ? (isEnglish ? "SELL BIAS" : "偏向卖出")
+      : (isEnglish ? "UNAVAILABLE" : "暂不可用");
+  const actionStyle = quote?.action === "buy"
+    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+    : quote?.action === "sell"
+      ? "border-rose-500/30 bg-rose-500/10 text-rose-300"
+      : "border-slate-700 bg-slate-900/70 text-slate-400";
+
+  return (
+    <div className="rounded-xl border border-cyan-500/20 bg-slate-900/70 p-4 shadow-inner">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h4 className="text-sm font-bold text-slate-100">
+              {isEnglish ? "Read-only trade quote" : "只读买卖价格建议"}
+            </h4>
+            <span className="rounded-full border border-slate-700 bg-slate-950/70 px-2 py-0.5 text-[10px] font-semibold text-slate-400">
+              {position.outcome}
+            </span>
+            {quote && (
+              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold tracking-wide ${actionStyle}`}>
+                {actionLabel}
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-slate-400">
+            {isEnglish
+              ? `Target APR ${thresholdAprPercent.toFixed(2)}%. Prices are refreshed for this position only.`
+              : `目标 APR ${thresholdAprPercent.toFixed(2)}%。只刷新当前仓位的实时盘口，不执行下单。`}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={isLoading}
+          className="inline-flex shrink-0 items-center justify-center gap-1.5 self-start rounded-md border border-slate-700 bg-slate-950/70 px-2.5 py-1.5 text-xs font-semibold text-slate-300 transition-colors hover:border-cyan-500/50 hover:text-cyan-300 disabled:cursor-wait disabled:opacity-60"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} aria-hidden="true" />
+          {isEnglish ? "Refresh quote" : "刷新报价"}
+        </button>
+      </div>
+
+      {isLoading ? (
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-4 text-xs text-slate-400">
+          <Loader2 className="h-4 w-4 animate-spin text-cyan-400" aria-hidden="true" />
+          {isEnglish ? "Reading the live order book…" : "正在读取当前实时盘口…"}
+        </div>
+      ) : quoteState?.status === "error" ? (
+        <div className="mt-4 rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-3 text-xs text-rose-300">
+          {quoteState.error}
+        </div>
+      ) : quote ? (
+        <>
+          <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
+            <QuoteMetric
+              label={isEnglish ? "Target APR" : "目标 APR"}
+              value={`${quote.thresholdAprPercent.toFixed(2)}%`}
+            />
+            <QuoteMetric
+              label={isEnglish ? "Threshold price" : "阈值价格"}
+              value={formatQuotePrice(quote.thresholdPrice)}
+              accent="cyan"
+            />
+            <QuoteMetric
+              label={isEnglish ? "Current Hold APR" : "当前继续持有 APR"}
+              value={formatPercent(quote.currentApr, 2)}
+              accent={quote.action === "sell" ? "rose" : "emerald"}
+            />
+            <QuoteMetric
+              label={isEnglish ? "Time to settlement" : "距结算"}
+              value={quote.daysToSettle === null ? "—" : `${quote.daysToSettle.toFixed(1)}d`}
+            />
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <QuotePriceCard
+              title={isEnglish ? "Recommended buy limit" : "推荐买入限价"}
+              price={quote.recommendedBuyPrice}
+              accent="emerald"
+              description={
+                quote.bestAsk !== null && quote.recommendedBuyPrice === quote.bestAsk
+                  ? (isEnglish ? "At or below target; current best ask is usable." : "未超过目标价，当前卖一可作为成交参考。")
+                  : (isEnglish ? "Do not bid above the threshold price." : "不要以高于阈值价格的价格买入。")
+              }
+            />
+            <QuotePriceCard
+              title={isEnglish ? "Recommended sell limit" : "推荐卖出限价"}
+              price={quote.recommendedSellPrice}
+              accent="rose"
+              description={
+                quote.bestBid !== null && quote.recommendedSellPrice === quote.bestBid
+                  ? (isEnglish ? "Current best bid is usable as an exit reference." : "当前买一可作为卖出成交参考。")
+                  : (isEnglish ? "Use the threshold price as the minimum reference." : "以阈值价格作为最低参考，不低价卖出。")
+              }
+            />
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-slate-800 bg-slate-950/45 px-3 py-2.5 text-xs text-slate-400">
+            <span className="font-semibold text-slate-300">{isEnglish ? "Live book" : "实时盘口"}</span>
+            <span>{isEnglish ? "Best bid" : "买一"}: <strong className="font-mono text-emerald-300">{formatQuotePrice(quote.bestBid)}</strong></span>
+            <span>{isEnglish ? "Best ask" : "卖一"}: <strong className="font-mono text-rose-300">{formatQuotePrice(quote.bestAsk)}</strong></span>
+            <span>{isEnglish ? "Tick" : "最小价位"}: <strong className="font-mono text-slate-300">{formatQuotePrice(quote.tickSize)}</strong></span>
+            <span className={quote.orderBookAvailable ? "text-emerald-400" : "text-amber-400"}>
+              {quote.orderBookAvailable
+                ? (isEnglish ? "Live book available" : "已读取实时盘口")
+                : (isEnglish ? "Theoretical price only" : "当前仅显示理论价格")}
+            </span>
+          </div>
+
+          {quote.note && (
+            <p className="mt-2 text-[11px] leading-relaxed text-amber-300/80">{quote.note}</p>
+          )}
+          <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+            {isEnglish
+              ? "Reference only. This panel never places or cancels orders."
+              : "以上仅为价格参考；此面板不会创建、撤销或修改任何订单。"}
+          </p>
+        </>
+      ) : (
+        <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-4 text-xs text-slate-500">
+          {isEnglish ? "Preparing quote…" : "正在准备报价…"}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QuoteMetric({
+  label,
+  value,
+  accent = "slate",
+}: {
+  label: string;
+  value: string;
+  accent?: "slate" | "cyan" | "emerald" | "rose";
+}) {
+  const accentClass = {
+    slate: "text-slate-100",
+    cyan: "text-cyan-300",
+    emerald: "text-emerald-300",
+    rose: "text-rose-300",
+  }[accent];
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950/45 px-3 py-2.5">
+      <div className="text-[10px] font-semibold text-slate-500">{label}</div>
+      <div className={`mt-1 font-mono text-sm font-bold ${accentClass}`}>{value}</div>
+    </div>
+  );
+}
+
+function QuotePriceCard({
+  title,
+  price,
+  accent,
+  description,
+}: {
+  title: string;
+  price: number | null;
+  accent: "emerald" | "rose";
+  description: string;
+}) {
+  const borderClass = accent === "emerald" ? "border-emerald-500/20" : "border-rose-500/20";
+  const priceClass = accent === "emerald" ? "text-emerald-300" : "text-rose-300";
+
+  return (
+    <div className={`rounded-lg border ${borderClass} bg-slate-950/45 px-3.5 py-3`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-slate-400">{title}</span>
+        <span className={`font-mono text-lg font-black ${priceClass}`}>{formatQuotePrice(price)}</span>
+      </div>
+      <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">{description}</p>
+    </div>
   );
 }
 
