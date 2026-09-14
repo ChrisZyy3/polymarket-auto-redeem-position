@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { getOrderBook } from "../../../lib/polymarket";
-import { decideOrder } from "../../../lib/strategy";
-import type { Strategy } from "../../../lib/types";
+import { getOrderBook } from "@/lib/poly-yield/polymarket";
+import { decideOrder } from "@/lib/poly-yield/strategy";
+import type { Strategy } from "@/lib/poly-yield/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +21,12 @@ function authorized(request: Request): boolean {
 
 async function handle(request: Request) {
   if (!authorized(request)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  if (process.env.DRY_RUN === "false") {
+    return NextResponse.json(
+      { ok: false, error: "live order execution is not implemented yet" },
+      { status: 501 },
+    );
+  }
   const now = new Date();
   const strategies = loadStrategies();
   const results = [];

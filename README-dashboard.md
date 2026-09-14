@@ -1,6 +1,6 @@
 # Polymarket Dashboard
 
-Next.js 看板会展示钱包当前持仓、可用余额、持仓 APR，以及由每日快照累积出的总资产曲线和历史年化指标。
+Next.js 看板会展示钱包当前持仓、可用余额、持仓 APR，以及由每日快照累积出的总资产曲线和历史年化指标。它同时提供 PolyYield 的只读 dry-run 调仓决策入口。
 
 ## 本地运行
 
@@ -69,6 +69,25 @@ GITHUB_HISTORY_BRANCH=main
 
 路由为 `GET /api/cron/portfolio-snapshot`。Vercel 会把 `CRON_SECRET` 作为 Bearer token 发送，未授权请求返回 401。
 
+### PolyYield 每日 Dry Run
+
+PolyYield 已集成到同一个根 Next.js 项目中，入口为 `GET /api/rebalance`。根目录的 `vercel.json` 配置每天 `01:00 UTC` 调用一次（北京时间 09:00）。V1 只读取 CLOB orderbook 并返回推荐价格，不读取或修改订单。
+
+需要在 Vercel Production 环境配置：
+
+```text
+CRON_SECRET=随机长字符串
+DRY_RUN=true
+STRATEGIES_JSON=[...]
+```
+
+手动测试时使用：
+
+```bash
+curl -H "Authorization: Bearer YOUR_CRON_SECRET" \
+  https://YOUR_PROJECT.vercel.app/api/rebalance
+```
+
 ## 指标口径
 
 - 记录以来变化：最新总资产相对首条快照的变化率。
@@ -82,3 +101,4 @@ GITHUB_HISTORY_BRANCH=main
 - `GET /api/positions?address=...`：当前持仓与余额。
 - `GET /api/portfolio-history?address=...`：历史快照与年化指标。
 - `GET /api/cron/portfolio-snapshot`：Vercel Cron 采集入口。
+- `GET /api/rebalance`：PolyYield dry-run 调仓决策入口。
