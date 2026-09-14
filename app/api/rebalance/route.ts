@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getOrderBook } from "@/lib/poly-yield/polymarket";
+import { getOrderBook, OrderBookRequestError } from "@/lib/poly-yield/polymarket";
 import { decideOrder } from "@/lib/poly-yield/strategy";
 import type { Strategy } from "@/lib/poly-yield/types";
 
@@ -19,6 +19,32 @@ function authorized(request: Request): boolean {
   return !!secret && request.headers.get("authorization") === `Bearer ${secret}`;
 }
 
+function describeError(error: unknown) {
+  if (error instanceof OrderBookRequestError) {
+    return {
+      kind: error.kind,
+      message: error.message,
+      endpoint: error.endpoint,
+      ...(error.status === undefined ? {} : { status: error.status }),
+      ...(error.causeMessage ? { cause: error.causeMessage } : {}),
+    };
+  }
+
+  if (error instanceof Error) {
+    const cause = "cause" in error ? error.cause : undefined;
+    return {
+      kind: "unknown",
+      name: error.name,
+      message: error.message,
+      ...(cause === undefined
+        ? {}
+        : { cause: cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause) }),
+    };
+  }
+
+  return { kind: "unknown", message: String(error) };
+}
+
 async function handle(request: Request) {
   if (!authorized(request)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   if (process.env.DRY_RUN === "false") {
@@ -35,7 +61,9 @@ async function handle(request: Request) {
       const book = await getOrderBook(strategy.tokenId);
       results.push({ strategy: strategy.name, ...decideOrder(strategy, book, now) });
     } catch (error) {
-      results.push({ strategy: strategy.name, error: error instanceof Error ? error.message : String(error) });
+      const errorDetails = describeError(error);
+      console.error("[poly-yield] strategy failed", { strategy: strategy.name, ...errorDetails });
+      results.push({ strategy: strategy.name, error: errorDetails.message, errorDetails });
     }
   }
   return NextResponse.json({ ok: true, mode: "dry-run", at: now.toISOString(), results });

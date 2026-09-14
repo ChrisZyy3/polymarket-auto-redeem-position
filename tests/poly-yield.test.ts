@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { getOrderBook, OrderBookRequestError } from "../lib/poly-yield/polymarket";
 import { decideOrder } from "../lib/poly-yield/strategy";
 import { apyForPrice, priceForTargetApy } from "../lib/poly-yield/yield";
 
@@ -58,4 +59,51 @@ test("caps the desired price one tick below a nearby ask", () => {
   );
 
   assert.equal(result.desiredPrice, 0.82);
+});
+
+test("surfaces CLOB network causes and request timeouts", async () => {
+  const originalFetch = globalThis.fetch;
+
+  try {
+    globalThis.fetch = async () => {
+      const error = new TypeError("fetch failed");
+      Object.defineProperty(error, "cause", { value: new Error("ECONNRESET") });
+      throw error;
+    };
+
+    await assert.rejects(
+      () => getOrderBook("token", { timeoutMs: 50 }),
+      (error: unknown) => {
+        assert.ok(error instanceof OrderBookRequestError);
+        assert.equal(error.kind, "network");
+        assert.match(error.causeMessage ?? "", /ECONNRESET/);
+        return true;
+      },
+    );
+
+    globalThis.fetch = async (_input, init) =>
+      new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => {
+            const error = new Error("aborted");
+            error.name = "AbortError";
+            reject(error);
+          },
+          { once: true },
+        );
+      });
+
+    await assert.rejects(
+      () => getOrderBook("token", { timeoutMs: 5 }),
+      (error: unknown) => {
+        assert.ok(error instanceof OrderBookRequestError);
+        assert.equal(error.kind, "timeout");
+        assert.match(error.message, /timed out after 5ms/);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
