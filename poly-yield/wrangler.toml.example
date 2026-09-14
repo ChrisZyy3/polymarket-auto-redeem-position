@@ -1,0 +1,10 @@
+name = "poly-yield-cron"
+main = "cloudflare-worker.js"
+compatibility_date = "2026-09-14"
+
+[triggers]
+crons = ["*/2 * * * *"]
+
+[vars]
+REBALANCE_URL = "https://YOUR_PROJECT.vercel.app/api/rebalance"
+# Store CRON_SECRET with `wrangler secret put CRON_SECRET`, not here.
