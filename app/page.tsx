@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { PortfolioHistoryChart } from "@/app/components/portfolio-history-chart";
 import type { PortfolioHistoryMetrics, PortfolioSnapshot } from "@/lib/portfolio-history";
+import { formatPriceForTick } from "@/lib/price-format";
 import type { PositionQuote } from "@/lib/position-quote";
 import type { EnrichedPosition } from "@/lib/types";
 
@@ -193,11 +194,6 @@ function getMarketUrl(position: EnrichedPosition): string | null {
 
 function getPositionKey(position: EnrichedPosition): string {
   return `${position.conditionId}:${position.asset}`;
-}
-
-function formatQuotePrice(value: number | null | undefined): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  return `$${value.toFixed(4)}`;
 }
 
 /**
@@ -1124,7 +1120,7 @@ function PositionQuotePanel({
             />
             <QuoteMetric
               label={isEnglish ? "Threshold price" : "阈值价格"}
-              value={formatQuotePrice(quote.thresholdPrice)}
+              value={formatPriceForTick(quote.thresholdPrice, quote.tickSize)}
               accent="cyan"
             />
             <QuoteMetric
@@ -1142,6 +1138,7 @@ function PositionQuotePanel({
             <QuotePriceCard
               title={isEnglish ? "Recommended buy limit" : "推荐买入限价"}
               price={quote.recommendedBuyPrice}
+              tickSize={quote.tickSize}
               accent="emerald"
               description={
                 quote.bestAsk !== null && quote.recommendedBuyPrice === quote.bestAsk
@@ -1152,6 +1149,7 @@ function PositionQuotePanel({
             <QuotePriceCard
               title={isEnglish ? "Recommended sell limit" : "推荐卖出限价"}
               price={quote.recommendedSellPrice}
+              tickSize={quote.tickSize}
               accent="rose"
               description={
                 quote.bestBid !== null && quote.recommendedSellPrice === quote.bestBid
@@ -1163,9 +1161,9 @@ function PositionQuotePanel({
 
           <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-slate-800 bg-slate-950/45 px-3 py-2.5 text-xs text-slate-400">
             <span className="font-semibold text-slate-300">{isEnglish ? "Live book" : "实时盘口"}</span>
-            <span>{isEnglish ? "Best bid" : "买一"}: <strong className="font-mono text-emerald-300">{formatQuotePrice(quote.bestBid)}</strong></span>
-            <span>{isEnglish ? "Best ask" : "卖一"}: <strong className="font-mono text-rose-300">{formatQuotePrice(quote.bestAsk)}</strong></span>
-            <span>{isEnglish ? "Tick" : "最小价位"}: <strong className="font-mono text-slate-300">{formatQuotePrice(quote.tickSize)}</strong></span>
+            <span>{isEnglish ? "Best bid" : "买一"}: <strong className="font-mono text-emerald-300">{formatPriceForTick(quote.bestBid, quote.tickSize)}</strong></span>
+            <span>{isEnglish ? "Best ask" : "卖一"}: <strong className="font-mono text-rose-300">{formatPriceForTick(quote.bestAsk, quote.tickSize)}</strong></span>
+            <span>{isEnglish ? "Tick" : "最小价位"}: <strong className="font-mono text-slate-300">{formatPriceForTick(quote.tickSize, quote.tickSize)}</strong></span>
             <span className={quote.orderBookAvailable ? "text-emerald-400" : "text-amber-400"}>
               {quote.orderBookAvailable
                 ? (isEnglish ? "Live book available" : "已读取实时盘口")
@@ -1218,11 +1216,13 @@ function QuoteMetric({
 function QuotePriceCard({
   title,
   price,
+  tickSize,
   accent,
   description,
 }: {
   title: string;
   price: number | null;
+  tickSize: number | null;
   accent: "emerald" | "rose";
   description: string;
 }) {
@@ -1233,7 +1233,7 @@ function QuotePriceCard({
     <div className={`rounded-lg border ${borderClass} bg-slate-950/45 px-3.5 py-3`}>
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-semibold text-slate-400">{title}</span>
-        <span className={`font-mono text-lg font-black ${priceClass}`}>{formatQuotePrice(price)}</span>
+        <span className={`font-mono text-lg font-black ${priceClass}`}>{formatPriceForTick(price, tickSize)}</span>
       </div>
       <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">{description}</p>
     </div>
