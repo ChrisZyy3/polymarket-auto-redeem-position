@@ -40,19 +40,14 @@ function parseLevelPrice(level: BookLevel): number | null {
   return isValidPrice(price) && Number.isFinite(size) && size > 0 ? price : null;
 }
 
-function bestBid(orderBook: OrderBook | null): number | null {
-  if (!orderBook) return null;
-  return orderBook.bids.reduce<number | null>((best, level) => {
+function bestLevelPrice(levels: BookLevel[], priority: "highest" | "lowest"): number | null {
+  return levels.reduce<number | null>((best, level) => {
     const price = parseLevelPrice(level);
-    return price !== null && (best === null || price > best) ? price : best;
-  }, null);
-}
-
-function bestAsk(orderBook: OrderBook | null): number | null {
-  if (!orderBook) return null;
-  return orderBook.asks.reduce<number | null>((best, level) => {
-    const price = parseLevelPrice(level);
-    return price !== null && (best === null || price < best) ? price : best;
+    if (price === null) return best;
+    if (best === null) return price;
+    return priority === "highest"
+      ? Math.max(best, price)
+      : Math.min(best, price);
   }, null);
 }
 
@@ -116,8 +111,8 @@ export function buildPositionQuote(input: PositionQuoteInput): PositionQuote {
   const orderBookAvailable = input.orderBook !== null;
   const tickSize = orderBookAvailable ? parseTickSize(input.orderBook) : null;
   const roundingTick = parseTickSize(input.orderBook);
-  const bid = bestBid(input.orderBook);
-  const ask = bestAsk(input.orderBook);
+  const bid = input.orderBook ? bestLevelPrice(input.orderBook.bids, "highest") : null;
+  const ask = input.orderBook ? bestLevelPrice(input.orderBook.asks, "lowest") : null;
 
   if (thresholdPrice === null || currentApr === null || !Number.isFinite(input.thresholdAprPercent) || input.thresholdAprPercent < 0) {
     return {
