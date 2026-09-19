@@ -25,6 +25,8 @@ export interface PositionQuote {
   recommendedSellPrice: number | null;
   bestBid: number | null;
   bestAsk: number | null;
+  bestBidApr: number | null;
+  bestAskApr: number | null;
   tickSize: number | null;
   orderBookAvailable: boolean;
   note?: string;
@@ -115,6 +117,8 @@ export function buildPositionQuote(input: PositionQuoteInput): PositionQuote {
   const roundingTick = parseTickSize(usableOrderBook);
   const bid = usableOrderBook ? bestLevelPrice(usableOrderBook.bids, "highest") : null;
   const ask = usableOrderBook ? bestLevelPrice(usableOrderBook.asks, "lowest") : null;
+  const bestBidApr = daysToSettle !== null && bid !== null ? aprForPrice(bid, daysToSettle) : null;
+  const bestAskApr = daysToSettle !== null && ask !== null ? aprForPrice(ask, daysToSettle) : null;
   const normalizedInput = { ...input, orderBook: usableOrderBook };
 
   if (thresholdPrice === null || currentApr === null || !Number.isFinite(input.thresholdAprPercent) || input.thresholdAprPercent < 0) {
@@ -129,6 +133,8 @@ export function buildPositionQuote(input: PositionQuoteInput): PositionQuote {
       recommendedSellPrice: null,
       bestBid: bid,
       bestAsk: ask,
+      bestBidApr,
+      bestAskApr,
       tickSize,
       orderBookAvailable,
       note: buildNote(normalizedInput, rawDaysToSettle, currentApr),
@@ -152,6 +158,8 @@ export function buildPositionQuote(input: PositionQuoteInput): PositionQuote {
     recommendedSellPrice,
     bestBid: bid,
     bestAsk: ask,
+    bestBidApr,
+    bestAskApr,
     tickSize,
     orderBookAvailable,
     note: buildNote(normalizedInput, rawDaysToSettle, currentApr),

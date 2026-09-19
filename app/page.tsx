@@ -23,7 +23,6 @@ import {
   Activity,
   AlertTriangle,
   X,
-  ShieldCheck,
   Zap,
   CalendarClock,
   Database,
@@ -79,32 +78,6 @@ interface QuoteState {
 type Language = "zh" | "en";
 
 const LANGUAGE_KEY = "polymarket-dashboard-language";
-
-// User-friendly status labels mapping
-// 仓位状态友好名称映射字典
-const STATUS_LABEL: Record<Language, Record<EnrichedPosition["status"], string>> = {
-  zh: {
-    good: "收益极佳",
-    attention: "低年化",
-    losing: "当前亏损",
-    redeemable: "已结算可赎回",
-  },
-  en: {
-    good: "Good",
-    attention: "Low APR",
-    losing: "At risk",
-    redeemable: "Redeemable",
-  },
-};
-
-// Styling for status pills
-// 仓位状态胶囊标签的样式字典
-const STATUS_STYLE: Record<EnrichedPosition["status"], string> = {
-  good: "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[0_0_12px_rgba(16,185,129,0.1)]",
-  attention: "bg-amber-500/10 text-amber-400 border border-amber-500/20 shadow-[0_0_12px_rgba(245,158,11,0.1)]",
-  losing: "bg-rose-500/10 text-rose-400 border border-rose-500/20 shadow-[0_0_12px_rgba(244,63,94,0.1)]",
-  redeemable: "bg-sky-500/10 text-sky-400 border border-sky-500/20 shadow-[0_0_12px_rgba(14,165,233,0.1)]",
-};
 
 // LocalStorage Keys for state persistence
 // 本地状态存储字段常量定义
@@ -432,11 +405,11 @@ export default function Home() {
                   type="button"
                   onClick={() => handleQuoteToggle(row.original)}
                   aria-expanded={quoteExpanded}
-                  aria-label={isEnglish ? "Show recommended buy and sell prices" : "展开推荐买入和卖出价格"}
+                  aria-label={isEnglish ? "Show live bid and ask APR" : "展开实时买一和卖一 APR"}
                   className="mt-2 inline-flex items-center gap-1 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2 py-1 text-[10px] font-semibold text-cyan-400 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/10 focus:outline-none focus:ring-1 focus:ring-cyan-400"
                 >
                   {quoteExpanded ? <ChevronUp className="h-3 w-3" aria-hidden="true" /> : <ChevronDown className="h-3 w-3" aria-hidden="true" />}
-                  {isEnglish ? "Trade quote" : "展开买卖建议"}
+                  {isEnglish ? "Market APR" : "查看盘口 APR"}
                 </button>
               ) : null}
             </div>
@@ -566,34 +539,6 @@ export default function Home() {
                 {isEnglish ? `${days} days left` : `剩余 ${days} 天`}
               </span>
             </div>
-          );
-        },
-      },
-      {
-        accessorKey: "expectedProfit",
-        header: isEnglish ? "Est. profit ($)" : "预估到期收益 ($)",
-        cell: ({ getValue }) => {
-          const val = getValue<number>();
-          return (
-            <span
-              className={`font-mono font-bold ${
-                val >= 0 ? "text-emerald-400" : "text-rose-400"
-              }`}
-            >
-              {val >= 0 ? "+" : ""}${formatNumber(val)}
-            </span>
-          );
-        },
-      },
-      {
-        accessorKey: "status",
-        header: isEnglish ? "Status" : "风控状态",
-        cell: ({ getValue }) => {
-          const status = getValue<EnrichedPosition["status"]>();
-          return (
-            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_STYLE[status]}`}>
-              {STATUS_LABEL[language][status]}
-            </span>
           );
         },
       },
@@ -788,7 +733,7 @@ export default function Home() {
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
               {isEnglish ? "Analyze" : "查询分析"}
             </button>
-            <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-slate-500">
+            <div className="hidden shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-slate-500">
               <Database className="h-3.5 w-3.5" />
               {fetchedAtLabel}
             </div>
@@ -952,13 +897,13 @@ export default function Home() {
         <div className="px-6 py-5 border-b border-slate-800 bg-slate-900/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5 text-emerald-400" />
-              {isEnglish ? "Position risk details" : "当前仓位风控明细"}
+              <Activity className="h-5 w-5 text-cyan-400" />
+              {isEnglish ? "Position yield and market APR" : "持仓收益与盘口 APR"}
             </h3>
             <p className="text-xs text-slate-400 mt-1">
               {isEnglish
-                ? "Click a column header to sort. Red Hold APR signals a high opportunity cost."
-                : "点击各列标题可进行多维排序。若继续持有 APR 变红，说明当前锁定资金的机会成本过高。"}
+                ? "Expand a market to compare the live best-bid and best-ask conditional APR."
+                : "展开市场即可比较实时买一、卖一价格对应的条件 APR。"}
             </p>
           </div>
           <div className="flex items-center gap-1.5 self-start sm:self-auto text-xs text-slate-500 font-semibold bg-slate-950/60 border border-slate-800 px-3 py-1.5 rounded-lg shadow-inner">
@@ -1013,7 +958,6 @@ export default function Home() {
                           <PositionQuotePanel
                             position={row.original}
                             quoteState={quoteStates[positionKey]}
-                            thresholdAprPercent={holdAprThreshold}
                             language={language}
                             onRefresh={() => handleQuoteRefresh(row.original)}
                           />
@@ -1044,51 +988,33 @@ export default function Home() {
 function PositionQuotePanel({
   position,
   quoteState,
-  thresholdAprPercent,
   language,
   onRefresh,
 }: {
   position: EnrichedPosition;
   quoteState?: QuoteState;
-  thresholdAprPercent: number;
   language: Language;
   onRefresh: () => void;
 }) {
   const isEnglish = language === "en";
   const quote = quoteState?.quote;
   const isLoading = quoteState?.status === "loading";
-  const actionLabel = quote?.action === "buy"
-    ? (isEnglish ? "BUY BIAS" : "偏向买入")
-    : quote?.action === "sell"
-      ? (isEnglish ? "SELL BIAS" : "偏向卖出")
-      : (isEnglish ? "UNAVAILABLE" : "暂不可用");
-  const actionStyle = quote?.action === "buy"
-    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-    : quote?.action === "sell"
-      ? "border-rose-500/30 bg-rose-500/10 text-rose-300"
-      : "border-slate-700 bg-slate-900/70 text-slate-400";
-
   return (
     <div className="rounded-xl border border-cyan-500/20 bg-slate-900/70 p-4 shadow-inner">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h4 className="text-sm font-bold text-slate-100">
-              {isEnglish ? "Read-only trade quote" : "只读买卖价格建议"}
+              {isEnglish ? "Live order-book conditional APR" : "实时盘口条件 APR"}
             </h4>
             <span className="rounded-full border border-slate-700 bg-slate-950/70 px-2 py-0.5 text-[10px] font-semibold text-slate-400">
               {position.outcome}
             </span>
-            {quote && (
-              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold tracking-wide ${actionStyle}`}>
-                {actionLabel}
-              </span>
-            )}
           </div>
           <p className="mt-1 text-xs leading-relaxed text-slate-400">
             {isEnglish
-              ? `Target APR ${thresholdAprPercent.toFixed(2)}%. Prices are refreshed for this position only.`
-              : `目标 APR ${thresholdAprPercent.toFixed(2)}%。只刷新当前仓位的实时盘口，不执行下单。`}
+              ? "Gross annualized return if this outcome settles at $1. This panel never places orders."
+              : "假设该结果最终结算为 $1 的单利年化收益；这里只读取盘口，不执行下单。"}
           </p>
         </div>
         <button
@@ -1113,56 +1039,29 @@ function PositionQuotePanel({
         </div>
       ) : quote ? (
         <>
-          <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
-            <QuoteMetric
-              label={isEnglish ? "Target APR" : "目标 APR"}
-              value={`${quote.thresholdAprPercent.toFixed(2)}%`}
-            />
-            <QuoteMetric
-              label={isEnglish ? "Threshold price" : "阈值价格"}
-              value={formatPriceForTick(quote.thresholdPrice, quote.tickSize)}
-              accent="cyan"
-            />
-            <QuoteMetric
-              label={isEnglish ? "Current Hold APR" : "当前继续持有 APR"}
-              value={formatPercent(quote.currentApr, 2)}
-              accent={quote.action === "sell" ? "rose" : "emerald"}
-            />
-            <QuoteMetric
-              label={isEnglish ? "Time to settlement" : "距结算"}
-              value={quote.daysToSettle === null ? "—" : `${quote.daysToSettle.toFixed(1)}d`}
-            />
-          </div>
-
-          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-            <QuotePriceCard
-              title={isEnglish ? "Recommended buy limit" : "推荐买入限价"}
-              price={quote.recommendedBuyPrice}
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <OrderBookAprCard
+              label={isEnglish ? "Best bid" : "买一"}
+              price={quote.bestBid}
+              apr={quote.bestBidApr}
               tickSize={quote.tickSize}
               accent="emerald"
-              description={
-                quote.bestAsk !== null && quote.recommendedBuyPrice === quote.bestAsk
-                  ? (isEnglish ? "At or below target; current best ask is usable." : "未超过目标价，当前卖一可作为成交参考。")
-                  : (isEnglish ? "Do not bid above the threshold price." : "不要以高于阈值价格的价格买入。")
-              }
+              description={isEnglish ? "Maker bid reference" : "Maker 买单收益参考"}
+              language={language}
             />
-            <QuotePriceCard
-              title={isEnglish ? "Recommended sell limit" : "推荐卖出限价"}
-              price={quote.recommendedSellPrice}
+            <OrderBookAprCard
+              label={isEnglish ? "Best ask" : "卖一"}
+              price={quote.bestAsk}
+              apr={quote.bestAskApr}
               tickSize={quote.tickSize}
               accent="rose"
-              description={
-                quote.bestBid !== null && quote.recommendedSellPrice === quote.bestBid
-                  ? (isEnglish ? "Current best bid is usable as an exit reference." : "当前买一可作为卖出成交参考。")
-                  : (isEnglish ? "Use the threshold price as the minimum reference." : "以阈值价格作为最低参考，不低价卖出。")
-              }
+              description={isEnglish ? "Immediate buy reference" : "即时买入收益参考"}
+              language={language}
             />
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-slate-800 bg-slate-950/45 px-3 py-2.5 text-xs text-slate-400">
-            <span className="font-semibold text-slate-300">{isEnglish ? "Live book" : "实时盘口"}</span>
-            <span>{isEnglish ? "Best bid" : "买一"}: <strong className="font-mono text-emerald-300">{formatPriceForTick(quote.bestBid, quote.tickSize)}</strong></span>
-            <span>{isEnglish ? "Best ask" : "卖一"}: <strong className="font-mono text-rose-300">{formatPriceForTick(quote.bestAsk, quote.tickSize)}</strong></span>
+            <span>{isEnglish ? "Time to settlement" : "距结算"}: <strong className="font-mono text-slate-200">{quote.daysToSettle === null ? "—" : `${quote.daysToSettle.toFixed(1)}d`}</strong></span>
             <span>{isEnglish ? "Tick" : "最小价位"}: <strong className="font-mono text-slate-300">{formatPriceForTick(quote.tickSize, quote.tickSize)}</strong></span>
             <span className={quote.orderBookAvailable ? "text-emerald-400" : "text-amber-400"}>
               {quote.orderBookAvailable
@@ -1176,8 +1075,8 @@ function PositionQuotePanel({
           )}
           <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
             {isEnglish
-              ? "Reference only. This panel never places or cancels orders."
-              : "以上仅为价格参考；此面板不会创建、撤销或修改任何订单。"}
+              ? "APR excludes fees and is realized only if the outcome settles at $1."
+              : "APR 未计手续费，且仅在该结果最终结算为 $1 时成立。"}
           </p>
         </>
       ) : (
@@ -1189,53 +1088,49 @@ function PositionQuotePanel({
   );
 }
 
-function QuoteMetric({
+function OrderBookAprCard({
   label,
-  value,
-  accent = "slate",
-}: {
-  label: string;
-  value: string;
-  accent?: "slate" | "cyan" | "emerald" | "rose";
-}) {
-  const accentClass = {
-    slate: "text-slate-100",
-    cyan: "text-cyan-300",
-    emerald: "text-emerald-300",
-    rose: "text-rose-300",
-  }[accent];
-
-  return (
-    <div className="rounded-lg border border-slate-800 bg-slate-950/45 px-3 py-2.5">
-      <div className="text-[10px] font-semibold text-slate-500">{label}</div>
-      <div className={`mt-1 font-mono text-sm font-bold ${accentClass}`}>{value}</div>
-    </div>
-  );
-}
-
-function QuotePriceCard({
-  title,
   price,
+  apr,
   tickSize,
   accent,
   description,
+  language,
 }: {
-  title: string;
+  label: string;
   price: number | null;
+  apr: number | null;
   tickSize: number | null;
   accent: "emerald" | "rose";
   description: string;
+  language: Language;
 }) {
-  const borderClass = accent === "emerald" ? "border-emerald-500/20" : "border-rose-500/20";
-  const priceClass = accent === "emerald" ? "text-emerald-300" : "text-rose-300";
+  const isEnglish = language === "en";
+  const borderClass = accent === "emerald" ? "border-emerald-500/25" : "border-rose-500/25";
+  const accentClass = accent === "emerald" ? "text-emerald-300" : "text-rose-300";
 
   return (
-    <div className={`rounded-lg border ${borderClass} bg-slate-950/45 px-3.5 py-3`}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-semibold text-slate-400">{title}</span>
-        <span className={`font-mono text-lg font-black ${priceClass}`}>{formatPriceForTick(price, tickSize)}</span>
+    <div className={`rounded-xl border ${borderClass} bg-slate-950/55 px-4 py-4`}>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className={`text-sm font-bold ${accentClass}`}>{label}</div>
+          <div className="mt-1 text-xs text-slate-400">{description}</div>
+        </div>
+        <div className="text-right">
+          <div className="font-mono text-lg font-black text-slate-100">{formatPriceForTick(price, tickSize)}</div>
+          <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            {isEnglish ? "Price" : "价格"}
+          </div>
+        </div>
       </div>
-      <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">{description}</p>
+      <div className="mt-4 border-t border-slate-800 pt-3">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+          {isEnglish ? "Conditional APR" : "条件 APR"}
+        </div>
+        <div className={`mt-1 font-mono text-2xl font-black ${accentClass}`}>
+          {formatPercent(apr, 2)}
+        </div>
+      </div>
     </div>
   );
 }

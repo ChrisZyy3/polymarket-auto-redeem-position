@@ -78,6 +78,8 @@ test("selects the highest valid bid and lowest valid ask from an unsorted book",
 
   assert.equal(quote.bestBid, 0.81);
   assert.equal(quote.bestAsk, 0.82);
+  assert.ok(quote.bestBidApr !== null && quote.bestBidApr > quote.bestAskApr!);
+  assert.ok(quote.bestAskApr !== null && quote.bestAskApr > 0);
 });
 
 test("keeps the theoretical target price when the order book is unavailable", () => {
@@ -92,6 +94,8 @@ test("keeps the theoretical target price when the order book is unavailable", ()
   assert.equal(quote.action, "buy");
   assert.equal(quote.bestBid, null);
   assert.equal(quote.bestAsk, null);
+  assert.equal(quote.bestBidApr, null);
+  assert.equal(quote.bestAskApr, null);
   assert.ok(quote.thresholdPrice !== null);
   assert.ok(quote.recommendedBuyPrice !== null);
   assert.ok(quote.recommendedSellPrice !== null);
