@@ -55,6 +55,30 @@ test("recommends a sell when the current APR is at or below the target", () => {
   assert.ok(quote.recommendedBuyPrice < quote.recommendedSellPrice);
 });
 
+test("selects the highest valid bid and lowest valid ask from an unsorted book", () => {
+  const quote = buildPositionQuote({
+    currentPrice: 0.8,
+    endDate: "2027-01-01",
+    thresholdAprPercent: 20,
+    orderBook: book({
+      bids: [
+        { price: "0.790", size: "1000" },
+        { price: "0.810", size: "1000" },
+        { price: "0.820", size: "0" },
+      ],
+      asks: [
+        { price: "0.840", size: "1000" },
+        { price: "0.820", size: "1000" },
+        { price: "0.800", size: "0" },
+      ],
+    }),
+    now,
+  });
+
+  assert.equal(quote.bestBid, 0.81);
+  assert.equal(quote.bestAsk, 0.82);
+});
+
 test("keeps the theoretical target price when the order book is unavailable", () => {
   const quote = buildPositionQuote({
     currentPrice: 0.8,
