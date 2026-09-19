@@ -1,4 +1,4 @@
-import type { OrderBook } from "./types";
+import { isOrderBook, type OrderBook } from "./types";
 
 const HOST = "https://clob.polymarket.com";
 const PATH = "/book";
@@ -49,13 +49,18 @@ export async function getOrderBook(tokenId: string, options: GetOrderBookOptions
       });
     }
 
+    let payload: unknown;
     try {
-      return await response.json();
+      payload = await response.json();
     } catch (error) {
       throw new OrderBookRequestError("invalid-response", "book response was not valid JSON", {
         causeMessage: formatError(error),
       });
     }
+    if (!isOrderBook(payload)) {
+      throw new OrderBookRequestError("invalid-response", "book response had an invalid order-book shape");
+    }
+    return payload;
   } catch (error) {
     if (error instanceof OrderBookRequestError) throw error;
 

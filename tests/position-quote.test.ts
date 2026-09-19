@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { buildPositionQuote } from "../lib/position-quote";
+import { getOrderBook, OrderBookRequestError } from "../lib/poly-yield/polymarket";
 import type { OrderBook } from "../lib/poly-yield/types";
 
 const now = new Date("2026-01-01T00:00:00.000Z");
@@ -112,4 +113,46 @@ test("returns an unavailable quote for a position without a valid settlement win
   assert.equal(quote.recommendedSellPrice, null);
   assert.equal(quote.currentApr, null);
   assert.equal(quote.note, "缺少结算日期");
+});
+
+test("treats a malformed successful order-book response as unavailable", async () => {
+  const originalFetch = globalThis.fetch;
+
+  try {
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ bids: null, asks: "not-an-array", tick_size: "0.001" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+
+    await assert.rejects(
+      () => getOrderBook("token"),
+      (error: unknown) => {
+        assert.ok(error instanceof OrderBookRequestError);
+        assert.equal(error.kind, "invalid-response");
+        assert.equal(error.message, "book response had an invalid order-book shape");
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("builds a theoretical quote when the supplied order book has invalid arrays", () => {
+  const quote = buildPositionQuote({
+    currentPrice: 0.8,
+    endDate: "2027-01-01",
+    thresholdAprPercent: 20,
+    orderBook: { bids: null, asks: "not-an-array", tick_size: "0.001" } as unknown as OrderBook,
+    now,
+  });
+
+  assert.equal(quote.orderBookAvailable, false);
+  assert.equal(quote.bestBid, null);
+  assert.equal(quote.bestAsk, null);
+  assert.ok(quote.thresholdPrice !== null);
+  assert.ok(quote.recommendedBuyPrice !== null);
+  assert.ok(quote.recommendedSellPrice !== null);
+  assert.match(quote.note ?? "", /盘口/);
 });

@@ -1,6 +1,6 @@
 import { daysUntilSettlement } from "./apr";
 import { ceilToTick, floorToTick } from "./poly-yield/yield";
-import type { BookLevel, OrderBook } from "./poly-yield/types";
+import { isOrderBook, type BookLevel, type OrderBook } from "./poly-yield/types";
 
 const DEFAULT_TICK_SIZE = 0.001;
 
@@ -35,6 +35,7 @@ function isValidPrice(value: number): boolean {
 }
 
 function parseLevelPrice(level: BookLevel): number | null {
+  if (typeof level !== "object" || level === null) return null;
   const price = Number(level.price);
   const size = Number(level.size);
   return isValidPrice(price) && Number.isFinite(size) && size > 0 ? price : null;
@@ -101,6 +102,7 @@ function buildNote(input: PositionQuoteInput, daysToSettle: number, currentApr: 
 
 export function buildPositionQuote(input: PositionQuoteInput): PositionQuote {
   const now = input.now ?? new Date();
+  const usableOrderBook = isOrderBook(input.orderBook) ? input.orderBook : null;
   const rawDaysToSettle = daysUntilSettlement(input.endDate, now);
   const daysToSettle = Number.isFinite(rawDaysToSettle) ? rawDaysToSettle : null;
   const currentPrice = isValidPrice(input.currentPrice) ? input.currentPrice : null;
@@ -108,11 +110,12 @@ export function buildPositionQuote(input: PositionQuoteInput): PositionQuote {
   const thresholdPrice = daysToSettle !== null
     ? priceForTargetApr(input.thresholdAprPercent, daysToSettle)
     : null;
-  const orderBookAvailable = input.orderBook !== null;
-  const tickSize = orderBookAvailable ? parseTickSize(input.orderBook) : null;
-  const roundingTick = parseTickSize(input.orderBook);
-  const bid = input.orderBook ? bestLevelPrice(input.orderBook.bids, "highest") : null;
-  const ask = input.orderBook ? bestLevelPrice(input.orderBook.asks, "lowest") : null;
+  const orderBookAvailable = usableOrderBook !== null;
+  const tickSize = orderBookAvailable ? parseTickSize(usableOrderBook) : null;
+  const roundingTick = parseTickSize(usableOrderBook);
+  const bid = usableOrderBook ? bestLevelPrice(usableOrderBook.bids, "highest") : null;
+  const ask = usableOrderBook ? bestLevelPrice(usableOrderBook.asks, "lowest") : null;
+  const normalizedInput = { ...input, orderBook: usableOrderBook };
 
   if (thresholdPrice === null || currentApr === null || !Number.isFinite(input.thresholdAprPercent) || input.thresholdAprPercent < 0) {
     return {
@@ -128,7 +131,7 @@ export function buildPositionQuote(input: PositionQuoteInput): PositionQuote {
       bestAsk: ask,
       tickSize,
       orderBookAvailable,
-      note: buildNote(input, rawDaysToSettle, currentApr),
+      note: buildNote(normalizedInput, rawDaysToSettle, currentApr),
     };
   }
 
@@ -151,6 +154,6 @@ export function buildPositionQuote(input: PositionQuoteInput): PositionQuote {
     bestAsk: ask,
     tickSize,
     orderBookAvailable,
-    note: buildNote(input, rawDaysToSettle, currentApr),
+    note: buildNote(normalizedInput, rawDaysToSettle, currentApr),
   };
 }
