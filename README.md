@@ -74,6 +74,8 @@ schtasks /Create /TN "Polymarket-APR" ^
 
 项目包含一个基于 Next.js 的持仓与资金看板，支持当前余额、持仓 APR、价格路径、持有收益/收益率、每日总资产快照、历史曲线和 7/30 日年化展示。未查询前也会保留完整页面框架。详见 [README-dashboard.md](README-dashboard.md)。
 
+同一个 Dashboard 项目还提供 PolyYield V1 的 `/api/rebalance` dry-run 入口，以及仓位展开后的 `/api/position-quote` 只读价格建议：读取 Polymarket CLOB orderbook，按目标年化计算推荐买卖价，不执行下单或撤单。
+
 ```bash
 # 启动 Dashboard
 npm run dev
