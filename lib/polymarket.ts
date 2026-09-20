@@ -27,6 +27,15 @@ export function parseCashBalanceResponse(response: JsonRpcBalanceResponse): numb
   return Number(BigInt(response.result)) / 1e6;
 }
 
+export function filterPositionsByMinimumValue<T extends Pick<Position, "currentValue">>(
+  positions: T[],
+  minimumValueUsd: number,
+): T[] {
+  return positions.filter(
+    (position) => Number.isFinite(position.currentValue) && position.currentValue >= minimumValueUsd,
+  );
+}
+
 export async function fetchCurrentPositions(
   userAddress: string,
   minPositionSize = config.minPositionSize,

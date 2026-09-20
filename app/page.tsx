@@ -87,6 +87,7 @@ const MAX_HISTORY = 8;
 const HOLD_APR_THRESHOLD_KEY = "polymarket-dashboard-hold-apr-threshold";
 const DEFAULT_HOLD_APR_THRESHOLD = 8; // Default 8% APR alert threshold / 默认 8% 的 APR 预警阈值
 const TARGET_APR_BY_ASSET_KEY = "polymarket-dashboard-target-apr-by-asset-v1";
+const DUST_POSITION_VALUE_USD = 1;
 
 function parseTargetAprInput(value: string): number | null {
   if (!value.trim()) return null;
@@ -299,7 +300,7 @@ export default function Home() {
   // Memoize positions from state payload
   // 缓存提取并解析的仓位数组
   const positions = useMemo(() => data?.positions ?? [], [data]);
-  const totalPortfolioValue = data?.summary.totalValue ?? 0;
+  const totalAssetValue = data?.summary.totalBalance ?? 0;
   const marketValues = useMemo(() => {
     const values = new Map<string, number>();
     positions.forEach((position) => {
@@ -473,49 +474,12 @@ export default function Home() {
       {
         accessorKey: "currentValue",
         header: isEnglish ? "Value ($)" : "持仓市值 ($)",
-        cell: ({ getValue }) => (
-          <span className="font-mono font-bold text-slate-200">
-            ${formatNumber(getValue<number>())}
-          </span>
-        ),
-      },
-      {
-        id: "holdingPerformance",
-        accessorFn: (row) => row.cashPnl,
-        header: isEnglish ? "P&L / return" : "持有收益 / 收益率",
-        cell: ({ row }) => {
-          const cashPnl = row.original.cashPnl;
-          const holdingReturn = calculateHoldingReturn(row.original);
-          if (typeof cashPnl !== "number" || !Number.isFinite(cashPnl)) {
-            return <span className="font-mono font-bold text-slate-500">—</span>;
-          }
-          return (
-            <span
-              title={isEnglish ? "Sort by holding P&L" : "按持有收益金额排序"}
-              className={`whitespace-nowrap font-mono font-bold ${cashPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}
-            >
-              {cashPnl >= 0 ? "+" : "-"}{formatMoneyCompact(Math.abs(cashPnl))}{" "}
-              <span className="text-slate-400">
-                ({typeof holdingReturn === "number" && Number.isFinite(holdingReturn)
-                  ? `${holdingReturn >= 0 ? "+" : ""}${formatPercent(holdingReturn)}`
-                  : "—"})
-              </span>
-            </span>
-          );
-        },
-      },
-      {
-        id: "positionWeight",
-        accessorFn: (row) => {
-          const marketKey = row.conditionId || row.eventSlug || row.slug || row.asset;
+        cell: ({ row, getValue }) => {
+          const marketKey = row.original.conditionId || row.original.eventSlug || row.original.slug || row.original.asset;
           const marketValue = marketValues.get(marketKey) ?? 0;
-          return totalPortfolioValue > 0 ? marketValue / totalPortfolioValue : 0;
-        },
-        header: isEnglish ? "Portfolio share" : "仓位占比",
-        cell: ({ getValue }) => {
-          const value = getValue<number>();
-          const isHighConcentration = value > 0.3;
-          const isConcentrated = value > 0.2;
+          const positionWeight = totalAssetValue > 0 ? marketValue / totalAssetValue : 0;
+          const isHighConcentration = positionWeight > 0.3;
+          const isConcentrated = positionWeight > 0.2;
           const riskLabel = isHighConcentration
             ? (isEnglish ? "High concentration" : "高集中风险")
             : isConcentrated
@@ -529,46 +493,90 @@ export default function Home() {
 
           return (
             <div
-              className="flex min-w-[92px] flex-col gap-0.5"
-              title={riskLabel || (isEnglish ? "Share of portfolio value" : "占全部持仓市值的比例")}
+              className="flex min-w-[120px] flex-col gap-0.5"
+              title={isEnglish
+                ? "Market position value as a share of total asset value"
+                : "该市场持仓市值占资产总价值的比例"}
             >
-              <span className={`flex items-center gap-1 font-mono font-semibold ${riskClass}`}>
-                {formatPercent(value)}
-                {isConcentrated && <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+              <span className="font-mono font-bold text-slate-200">
+                ${formatNumber(getValue<number>())}
               </span>
-              {riskLabel && (
-                <span className={`text-[10px] leading-tight ${riskClass}`}>
-                  {riskLabel}
-                </span>
-              )}
+              <span className={`flex items-center gap-1 text-xs font-semibold ${riskClass}`}>
+                <span className="text-slate-500">{isEnglish ? "Asset share" : "仓位占比"}</span>
+                <span className="font-mono">{formatPercent(positionWeight)}</span>
+                {isConcentrated ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : null}
+                {riskLabel ? <span className="text-[10px]">{riskLabel}</span> : null}
+              </span>
             </div>
           );
         },
       },
       {
-        accessorKey: "holdApr",
-        header: isEnglish ? "Hold APR" : "继续持有 APR",
+        accessorKey: "cashPnl",
+        header: isEnglish ? "Holding P&L ($)" : "持有收益 ($)",
         cell: ({ getValue }) => {
-          const value = getValue<number | null>();
-          const isLow = value !== null && value * 100 <= holdAprThreshold;
+          const cashPnl = getValue<number>();
+          if (typeof cashPnl !== "number" || !Number.isFinite(cashPnl)) {
+            return <span className="font-mono font-bold text-slate-500">—</span>;
+          }
           return (
             <span
-              className={`font-mono font-bold flex items-center gap-1 ${
-                isLow ? "text-rose-400 animate-pulse" : "text-emerald-400"
-              }`}
+              title={isEnglish ? "Sort by holding P&L" : "按持有收益金额排序"}
+              className={`whitespace-nowrap font-mono font-bold ${cashPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}
             >
-              {isLow && <AlertTriangle className="h-3.5 w-3.5" />}
-              {formatPercent(value)}
+              {cashPnl >= 0 ? "+" : "-"}{formatMoneyCompact(Math.abs(cashPnl))}
             </span>
           );
         },
       },
       {
-        accessorKey: "costApr",
-        header: isEnglish ? "Entry APR" : "初始建仓 APR",
-        cell: ({ getValue }) => (
-          <span className="font-mono text-slate-400">{formatPercent(getValue<number | null>())}</span>
-        ),
+        id: "holdingReturn",
+        accessorFn: (row) => calculateHoldingReturn(row),
+        header: isEnglish ? "Holding return" : "收益率",
+        cell: ({ getValue }) => {
+          const holdingReturn = getValue<number | null>();
+          if (typeof holdingReturn !== "number" || !Number.isFinite(holdingReturn)) {
+            return <span className="font-mono font-bold text-slate-500">—</span>;
+          }
+          return (
+            <span
+              title={isEnglish ? "Sort by holding return" : "按持有收益率排序"}
+              className={`whitespace-nowrap font-mono font-bold ${holdingReturn >= 0 ? "text-emerald-400" : "text-rose-400"}`}
+            >
+              {holdingReturn >= 0 ? "+" : ""}{formatPercent(holdingReturn)}
+            </span>
+          );
+        },
+      },
+      {
+        id: "aprComparison",
+        accessorFn: (position) => position.holdApr,
+        header: isEnglish ? "APR (market / cost)" : "APR（当前价 / 成本）",
+        cell: ({ row }) => {
+          const { holdApr, costApr } = row.original;
+          const isLow = holdApr !== null && holdApr * 100 <= holdAprThreshold;
+          return (
+            <div className="flex min-w-28 flex-col gap-0.5 font-mono">
+              <span
+                className={`flex items-center gap-1 font-bold ${
+                  isLow ? "text-rose-400 animate-pulse" : "text-emerald-400"
+                }`}
+              >
+                <span className="font-sans text-[11px] font-medium text-slate-500">
+                  {isEnglish ? "Market" : "当前价"}
+                </span>
+                {isLow && <AlertTriangle aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
+                {formatPercent(holdApr)}
+              </span>
+              <span className="flex items-center gap-1 text-slate-400">
+                <span className="font-sans text-[11px] font-medium text-slate-500">
+                  {isEnglish ? "Cost" : "成本"}
+                </span>
+                {formatPercent(costApr)}
+              </span>
+            </div>
+          );
+        },
       },
       {
         accessorKey: "daysToSettle",
@@ -587,7 +595,7 @@ export default function Home() {
         },
       },
     ],
-    [expandedPositionKey, handleQuoteToggle, holdAprThreshold, isEnglish, language, marketValues, totalPortfolioValue]
+    [expandedPositionKey, handleQuoteToggle, holdAprThreshold, isEnglish, language, marketValues, totalAssetValue]
   );
 
   // Setup React Table instance
@@ -639,7 +647,7 @@ export default function Home() {
     setQuoteStates({});
     try {
       const [res, historyRes] = await Promise.all([
-        fetch(`/api/positions?address=${encodeURIComponent(addr)}&aprThreshold=${holdAprThreshold}`),
+        fetch(`/api/positions?address=${encodeURIComponent(addr)}&aprThreshold=${holdAprThreshold}&minValue=${DUST_POSITION_VALUE_USD}`),
         fetch(`/api/portfolio-history?address=${encodeURIComponent(addr)}`),
       ]);
       const json = await res.json();
@@ -952,7 +960,9 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-1.5 self-start sm:self-auto text-xs text-slate-500 font-semibold bg-slate-950/60 border border-slate-800 px-3 py-1.5 rounded-lg shadow-inner">
             <Info className="h-3.5 w-3.5 text-slate-400" />
-            {isEnglish ? "Positions below $0.10 are excluded" : "自动忽略大小低于 0.1 刀的尘埃仓位"}
+            {isEnglish
+              ? `Positions worth less than $${DUST_POSITION_VALUE_USD} are excluded`
+              : `自动忽略市值低于 ${DUST_POSITION_VALUE_USD} 美元的尘埃仓位`}
           </div>
         </div>
 
