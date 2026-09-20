@@ -34,7 +34,7 @@ import {
 } from "lucide-react";
 import { PortfolioHistoryChart } from "@/app/components/portfolio-history-chart";
 import type { PortfolioHistoryMetrics, PortfolioSnapshot } from "@/lib/portfolio-history";
-import { formatPriceForTick } from "@/lib/price-format";
+import { formatMarketPercentForTick } from "@/lib/price-format";
 import { buildTargetAprPlan, type PositionQuote } from "@/lib/position-quote";
 import type { EnrichedPosition } from "@/lib/types";
 
@@ -46,7 +46,6 @@ interface Summary {
   totalBalance: number;
   availableBalance: number;
   avgHoldApr: number;
-  avgCostApr: number;
 }
 
 // Format API response payload
@@ -138,11 +137,6 @@ function formatMoneyCompact(value: number | null | undefined): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   })}`;
-}
-
-function formatPriceCents(value: number | null | undefined): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  return `$${(value * 100).toFixed(2).replace(/\.?0+$/, "")}`;
 }
 
 function formatDateTime(value: string, language: Language): string {
@@ -464,12 +458,12 @@ export default function Home() {
       {
         id: "pricePath",
         accessorFn: (row) => row.curPrice,
-        header: isEnglish ? "Entry → current" : "建仓价 → 当前价",
+        header: isEnglish ? "Entry → current (%)" : "建仓价 → 当前价 (%)",
         cell: ({ row }) => (
           <span className="whitespace-nowrap font-mono">
-            <span className="font-medium text-slate-400">{formatPriceCents(row.original.avgPrice)}</span>
+            <span className="font-medium text-slate-400">{formatPercent(row.original.avgPrice, 1)}</span>
             <span className="mx-1 text-slate-600">→</span>
-            <span className="font-bold text-cyan-300">{formatPriceCents(row.original.curPrice)}</span>
+            <span className="font-bold text-cyan-300">{formatPercent(row.original.curPrice, 1)}</span>
           </span>
         ),
       },
@@ -558,32 +552,21 @@ export default function Home() {
         },
       },
       {
-        id: "aprComparison",
+        id: "marketApr",
         accessorFn: (position) => position.holdApr,
-        header: isEnglish ? "APR (market / cost)" : "APR（当前价 / 成本）",
+        header: isEnglish ? "Market APR" : "市场 APR",
         cell: ({ row }) => {
-          const { holdApr, costApr } = row.original;
+          const { holdApr } = row.original;
           const isLow = holdApr !== null && holdApr * 100 <= holdAprThreshold;
           return (
-            <div className="flex min-w-28 flex-col gap-0.5 font-mono">
-              <span
-                className={`flex items-center gap-1 font-bold ${
-                  isLow ? "text-rose-400 animate-pulse" : "text-emerald-400"
-                }`}
-              >
-                <span className="font-sans text-[11px] font-medium text-slate-500">
-                  {isEnglish ? "Market" : "当前价"}
-                </span>
-                {isLow && <AlertTriangle aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
-                {formatPercent(holdApr)}
-              </span>
-              <span className="flex items-center gap-1 text-slate-400">
-                <span className="font-sans text-[11px] font-medium text-slate-500">
-                  {isEnglish ? "Cost" : "成本"}
-                </span>
-                {formatPercent(costApr)}
-              </span>
-            </div>
+            <span
+              className={`flex min-w-24 items-center gap-1 font-mono font-bold ${
+                isLow ? "text-rose-400 animate-pulse" : "text-emerald-400"
+              }`}
+            >
+              {isLow && <AlertTriangle aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
+              {formatPercent(holdApr)}
+            </span>
           );
         },
       },
@@ -878,7 +861,7 @@ export default function Home() {
         * 账户总体业绩卡片与统计分析结果：查询前保留完整页面骨架
         */}
       {/* Dashboard Summary Statistics Cards Grid / 指标概览区块 */}
-      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
             <SummaryCard
               label={isEnglish ? "Total portfolio value" : "资产总价值"}
               value={data ? `$${formatNumber(data.summary.totalBalance)}` : "—"}
@@ -901,18 +884,11 @@ export default function Home() {
               tooltip={isEnglish ? "Current market value of all positions" : "用户当前所有未结算的持仓当前市价总价值"}
             />
             <SummaryCard
-              label={isEnglish ? "Weighted hold APR" : "加权继续持有 APR"}
+              label={isEnglish ? "Weighted market APR" : "加权市场 APR"}
               value={data ? formatPercent(data.summary.avgHoldApr) : "—"}
               icon={<TrendingUp className="h-4 w-4 text-fuchsia-400" />}
               glowColor="red"
               tooltip={isEnglish ? "Expected annualized return, weighted by position value" : "以仓位当前市值为权重，加权计算的持仓预期年化收益率。评估继续锁定资金的性价比"}
-            />
-            <SummaryCard
-              label={isEnglish ? "Weighted entry APR" : "加权建仓初始 APR"}
-              value={data ? formatPercent(data.summary.avgCostApr) : "—"}
-              icon={<Percent className="h-4 w-4 text-amber-400" />}
-              glowColor="cyan"
-              tooltip={isEnglish ? "Annualized return at entry, weighted by position value" : "以仓位当前市值为权重，加权计算的买入成本初始年化收益率"}
             />
       </div>
 
@@ -1144,7 +1120,7 @@ function PositionQuotePanel({
 
           <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-slate-800 bg-slate-950/45 px-3 py-2.5 text-xs text-slate-400">
             <span>{isEnglish ? "Time to settlement" : "距结算"}: <strong className="font-mono text-slate-200">{quote.daysToSettle === null ? "—" : `${quote.daysToSettle.toFixed(1)}d`}</strong></span>
-            <span>{isEnglish ? "Tick" : "最小价位"}: <strong className="font-mono text-slate-300">{formatPriceForTick(quote.tickSize, quote.tickSize)}</strong></span>
+            <span>{isEnglish ? "Tick" : "最小价位"}: <strong className="font-mono text-slate-300">{formatMarketPercentForTick(quote.tickSize, quote.tickSize)}</strong></span>
             <span className={quote.orderBookAvailable ? "text-emerald-400" : "text-amber-400"}>
               {quote.orderBookAvailable
                 ? (isEnglish ? "Live book available" : "已读取实时盘口")
@@ -1191,8 +1167,8 @@ function PositionQuotePanel({
             ) : (
               <p className="mt-3 rounded-lg border border-dashed border-slate-700 px-3 py-3 text-xs text-slate-400">
                 {isEnglish
-                  ? "Set a Target APR to calculate the target price and maker bid."
-                  : "输入 Target APR 后，将计算目标价格与 Maker 建议挂价。"}
+                  ? "Set a Target APR to calculate the target probability and maker bid."
+                  : "输入 Target APR 后，将计算目标概率与 Maker 建议挂价。"}
               </p>
             )}
           </div>
@@ -1246,12 +1222,12 @@ function TargetAprPlanPanel({
   return (
     <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)]">
       <TargetAprMetric
-        label={isEnglish ? "Target price" : "目标 APR 对应价格"}
-        value={formatPriceForTick(plan.targetPrice, tickSize)}
+        label={isEnglish ? "Target probability" : "目标 APR 对应概率"}
+        value={formatMarketPercentForTick(plan.targetPrice, tickSize)}
       />
       <TargetAprMetric
         label={isEnglish ? "Suggested maker bid" : "Maker 建议挂价"}
-        value={formatPriceForTick(plan.suggestedMakerBuyPrice, tickSize)}
+        value={formatMarketPercentForTick(plan.suggestedMakerBuyPrice, tickSize)}
         supportingValue={isEnglish
           ? `APR ${formatPercent(plan.suggestedMakerApr, 2)}`
           : `对应 APR ${formatPercent(plan.suggestedMakerApr, 2)}`}
@@ -1311,9 +1287,9 @@ function OrderBookAprCard({
           <div className="mt-1 text-xs text-slate-400">{description}</div>
         </div>
         <div className="text-right">
-          <div className="font-mono text-lg font-black text-slate-100">{formatPriceForTick(price, tickSize)}</div>
+          <div className="font-mono text-lg font-black text-slate-100">{formatMarketPercentForTick(price, tickSize)}</div>
           <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-            {isEnglish ? "Price" : "价格"}
+            {isEnglish ? "Market probability" : "市场概率"}
           </div>
         </div>
       </div>
