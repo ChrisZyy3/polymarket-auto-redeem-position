@@ -466,8 +466,10 @@ export default function Home() {
         accessorFn: (row) => row.curPrice,
         header: isEnglish ? "Entry → current" : "建仓价 → 当前价",
         cell: ({ row }) => (
-          <span className="font-mono font-semibold text-cyan-300 whitespace-nowrap">
-            {formatPriceCents(row.original.avgPrice)} <span className="text-slate-500">→</span> {formatPriceCents(row.original.curPrice)}
+          <span className="whitespace-nowrap font-mono">
+            <span className="font-medium text-slate-400">{formatPriceCents(row.original.avgPrice)}</span>
+            <span className="mx-1 text-slate-600">→</span>
+            <span className="font-bold text-cyan-300">{formatPriceCents(row.original.curPrice)}</span>
           </span>
         ),
       },
@@ -501,50 +503,57 @@ export default function Home() {
               <span className="font-mono font-bold text-slate-200">
                 ${formatNumber(getValue<number>())}
               </span>
-              <span className={`flex items-center gap-1 text-xs font-semibold ${riskClass}`}>
+              <span className="flex items-center gap-1 text-xs font-semibold">
                 <span className="text-slate-500">{isEnglish ? "Asset share" : "仓位占比"}</span>
-                <span className="font-mono">{formatPercent(positionWeight)}</span>
-                {isConcentrated ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : null}
-                {riskLabel ? <span className="text-[10px]">{riskLabel}</span> : null}
+                <span className={`font-mono ${riskClass}`}>{formatPercent(positionWeight)}</span>
               </span>
+              {riskLabel ? (
+                <span className={`flex items-center gap-1 text-[10px] font-semibold ${riskClass}`}>
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  {riskLabel}
+                </span>
+              ) : null}
             </div>
           );
         },
       },
       {
-        accessorKey: "cashPnl",
-        header: isEnglish ? "Holding P&L ($)" : "持有收益 ($)",
-        cell: ({ getValue }) => {
-          const cashPnl = getValue<number>();
-          if (typeof cashPnl !== "number" || !Number.isFinite(cashPnl)) {
-            return <span className="font-mono font-bold text-slate-500">—</span>;
-          }
+        id: "holdingPerformance",
+        accessorFn: (position) => position.cashPnl,
+        header: isEnglish ? "P&L / return" : "持有收益 / 收益率",
+        cell: ({ row }) => {
+          const { cashPnl } = row.original;
+          const holdingReturn = calculateHoldingReturn(row.original);
+          const hasCashPnl = typeof cashPnl === "number" && Number.isFinite(cashPnl);
+          const hasHoldingReturn = typeof holdingReturn === "number" && Number.isFinite(holdingReturn);
+          const cashPnlClass = hasCashPnl
+            ? cashPnl >= 0 ? "text-emerald-400" : "text-rose-400"
+            : "text-slate-500";
+          const holdingReturnClass = hasHoldingReturn
+            ? holdingReturn >= 0 ? "text-emerald-400" : "text-rose-400"
+            : "text-slate-500";
+
           return (
-            <span
+            <div
               title={isEnglish ? "Sort by holding P&L" : "按持有收益金额排序"}
-              className={`whitespace-nowrap font-mono font-bold ${cashPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}
+              className="flex min-w-28 flex-col gap-0.5 font-mono"
             >
-              {cashPnl >= 0 ? "+" : "-"}{formatMoneyCompact(Math.abs(cashPnl))}
-            </span>
-          );
-        },
-      },
-      {
-        id: "holdingReturn",
-        accessorFn: (row) => calculateHoldingReturn(row),
-        header: isEnglish ? "Holding return" : "收益率",
-        cell: ({ getValue }) => {
-          const holdingReturn = getValue<number | null>();
-          if (typeof holdingReturn !== "number" || !Number.isFinite(holdingReturn)) {
-            return <span className="font-mono font-bold text-slate-500">—</span>;
-          }
-          return (
-            <span
-              title={isEnglish ? "Sort by holding return" : "按持有收益率排序"}
-              className={`whitespace-nowrap font-mono font-bold ${holdingReturn >= 0 ? "text-emerald-400" : "text-rose-400"}`}
-            >
-              {holdingReturn >= 0 ? "+" : ""}{formatPercent(holdingReturn)}
-            </span>
+              <span className={`whitespace-nowrap font-bold ${cashPnlClass}`}>
+                {hasCashPnl
+                  ? `${cashPnl >= 0 ? "+" : "-"}${formatMoneyCompact(Math.abs(cashPnl))}`
+                  : "—"}
+              </span>
+              <span className="flex items-center gap-1 text-xs">
+                <span className="font-sans font-medium text-slate-500">
+                  {isEnglish ? "Return" : "收益率"}
+                </span>
+                <span className={`font-semibold ${holdingReturnClass}`}>
+                  {hasHoldingReturn
+                    ? `${holdingReturn >= 0 ? "+" : ""}${formatPercent(holdingReturn)}`
+                    : "—"}
+                </span>
+              </span>
+            </div>
           );
         },
       },
