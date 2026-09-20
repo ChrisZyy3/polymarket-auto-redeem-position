@@ -35,7 +35,7 @@ import {
 import { PortfolioHistoryChart } from "@/app/components/portfolio-history-chart";
 import type { PortfolioHistoryMetrics, PortfolioSnapshot } from "@/lib/portfolio-history";
 import { formatPriceForTick } from "@/lib/price-format";
-import type { PositionQuote } from "@/lib/position-quote";
+import { buildTargetAprPlan, type PositionQuote } from "@/lib/position-quote";
 import type { EnrichedPosition } from "@/lib/types";
 
 // Structure definition for Dashboard statistics summary
@@ -86,6 +86,21 @@ const MAX_HISTORY = 8;
 
 const HOLD_APR_THRESHOLD_KEY = "polymarket-dashboard-hold-apr-threshold";
 const DEFAULT_HOLD_APR_THRESHOLD = 8; // Default 8% APR alert threshold / 默认 8% 的 APR 预警阈值
+const TARGET_APR_BY_ASSET_KEY = "polymarket-dashboard-target-apr-by-asset-v1";
+
+function parseTargetAprInput(value: string): number | null {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function serializeTargetAprInputs(inputs: Record<string, string>): string {
+  const validEntries = Object.entries(inputs).flatMap(([asset, value]) => {
+    const parsed = parseTargetAprInput(value);
+    return parsed === null ? [] : [[asset, parsed] as const];
+  });
+  return JSON.stringify(Object.fromEntries(validEntries));
+}
 
 /**
  * Shorten hex addresses to improve visual presentation
@@ -185,6 +200,7 @@ export default function Home() {
   const [language, setLanguage] = useState<Language>("zh");
   const [expandedPositionKey, setExpandedPositionKey] = useState<string | null>(null);
   const [quoteStates, setQuoteStates] = useState<Record<string, QuoteState>>({});
+  const [targetAprInputs, setTargetAprInputs] = useState<Record<string, string>>({});
   const quoteRequestVersion = useRef(0);
   const isEnglish = language === "en";
 
@@ -196,6 +212,18 @@ export default function Home() {
       if (raw) setHistory(JSON.parse(raw));
       const storedLanguage = localStorage.getItem(LANGUAGE_KEY);
       if (storedLanguage === "zh" || storedLanguage === "en") setLanguage(storedLanguage);
+      const storedTargetApr = localStorage.getItem(TARGET_APR_BY_ASSET_KEY);
+      if (storedTargetApr) {
+        const parsed = JSON.parse(storedTargetApr) as unknown;
+        if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+          const entries = Object.entries(parsed).flatMap(([asset, value]) =>
+            typeof value === "number" && Number.isFinite(value) && value >= 0
+              ? [[asset, String(value)] as const]
+              : [],
+          );
+          setTargetAprInputs(Object.fromEntries(entries));
+        }
+      }
     } catch {
       // Ignore invalid localStorage access / 忽略无法访问 localStorage 的异常情况
     }
@@ -336,6 +364,22 @@ export default function Home() {
           },
         };
       });
+    }
+  }
+
+  function handleTargetAprChange(asset: string, value: string) {
+    if (value && !/^\d*(?:\.\d*)?$/.test(value)) return;
+    const nextInputs = { ...targetAprInputs };
+    if (value) {
+      nextInputs[asset] = value;
+    } else {
+      delete nextInputs[asset];
+    }
+    setTargetAprInputs(nextInputs);
+    try {
+      localStorage.setItem(TARGET_APR_BY_ASSET_KEY, serializeTargetAprInputs(nextInputs));
+    } catch {
+      // Ignore unavailable localStorage.
     }
   }
 
@@ -958,7 +1002,9 @@ export default function Home() {
                           <PositionQuotePanel
                             position={row.original}
                             quoteState={quoteStates[positionKey]}
+                            targetAprInput={targetAprInputs[row.original.asset] ?? ""}
                             language={language}
+                            onTargetAprChange={(value) => handleTargetAprChange(row.original.asset, value)}
                             onRefresh={() => handleQuoteRefresh(row.original)}
                           />
                         </td>
@@ -988,17 +1034,34 @@ export default function Home() {
 function PositionQuotePanel({
   position,
   quoteState,
+  targetAprInput,
   language,
+  onTargetAprChange,
   onRefresh,
 }: {
   position: EnrichedPosition;
   quoteState?: QuoteState;
+  targetAprInput: string;
   language: Language;
+  onTargetAprChange: (value: string) => void;
   onRefresh: () => void;
 }) {
   const isEnglish = language === "en";
   const quote = quoteState?.quote;
   const isLoading = quoteState?.status === "loading";
+  const targetAprPercent = parseTargetAprInput(targetAprInput);
+  const targetAprPlan = quote && targetAprPercent !== null
+    ? buildTargetAprPlan({
+        targetAprPercent,
+        daysToSettle: quote.daysToSettle,
+        bestBid: quote.bestBid,
+        bestAsk: quote.bestAsk,
+        tickSize: quote.tickSize,
+      })
+    : null;
+  const targetAprInputId = `target-apr-${position.asset}`;
+  const targetAprHelpId = `${targetAprInputId}-help`;
+  const hasInvalidTargetApr = targetAprInput.trim() !== "" && targetAprPercent === null;
   return (
     <div className="rounded-xl border border-cyan-500/20 bg-slate-900/70 p-4 shadow-inner">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1070,6 +1133,51 @@ function PositionQuotePanel({
             </span>
           </div>
 
+          <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="max-w-xl">
+                <label htmlFor={targetAprInputId} className="text-sm font-bold text-slate-100">
+                  {isEnglish ? "Target APR for this outcome" : "该 Outcome 的目标 APR"}
+                </label>
+                <p id={targetAprHelpId} className="mt-1 text-xs leading-relaxed text-slate-400">
+                  {isEnglish
+                    ? "Saved in this browser for this token only. It is separate from the global Alert APR."
+                    : "仅针对当前 token 保存在此浏览器中，与全局 Alert APR 预警阈值相互独立。"}
+                </p>
+              </div>
+              <div className="relative w-full max-w-44 shrink-0">
+                <input
+                  id={targetAprInputId}
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  inputMode="decimal"
+                  value={targetAprInput}
+                  onChange={(event) => onTargetAprChange(event.target.value)}
+                  aria-describedby={targetAprHelpId}
+                  aria-invalid={hasInvalidTargetApr}
+                  placeholder="12.0"
+                  className="h-11 w-full rounded-lg border border-slate-700 bg-slate-950/80 px-3 pr-9 font-mono text-base font-bold text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20"
+                />
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-500">%</span>
+              </div>
+            </div>
+
+            {hasInvalidTargetApr ? (
+              <p className="mt-3 text-xs font-semibold text-rose-300" role="alert">
+                {isEnglish ? "Enter a non-negative APR." : "请输入不小于 0 的 APR。"}
+              </p>
+            ) : targetAprPlan ? (
+              <TargetAprPlanPanel plan={targetAprPlan} tickSize={quote.tickSize} language={language} />
+            ) : (
+              <p className="mt-3 rounded-lg border border-dashed border-slate-700 px-3 py-3 text-xs text-slate-400">
+                {isEnglish
+                  ? "Set a Target APR to calculate the target price and maker bid."
+                  : "输入 Target APR 后，将计算目标价格与 Maker 建议挂价。"}
+              </p>
+            )}
+          </div>
+
           {quote.note && (
             <p className="mt-2 text-[11px] leading-relaxed text-amber-300/80">{quote.note}</p>
           )}
@@ -1084,6 +1192,73 @@ function PositionQuotePanel({
           {isEnglish ? "Preparing quote…" : "正在准备报价…"}
         </div>
       )}
+    </div>
+  );
+}
+
+function TargetAprPlanPanel({
+  plan,
+  tickSize,
+  language,
+}: {
+  plan: NonNullable<ReturnType<typeof buildTargetAprPlan>>;
+  tickSize: number | null;
+  language: Language;
+}) {
+  const isEnglish = language === "en";
+  const status = plan.bestBidMeetsTarget === true
+    ? {
+        label: isEnglish ? "Best bid meets target" : "当前买一满足目标 APR",
+        detail: isEnglish ? "Join the current best bid as a maker." : "建议以当前买一作为 Maker 挂价。",
+        className: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300",
+      }
+    : plan.bestBidMeetsTarget === false
+      ? {
+          label: isEnglish ? "Best bid is below target yield" : "当前买一 APR 未达到目标",
+          detail: isEnglish ? "Use the lower target-APR price as a maker bid." : "建议降低挂价至目标 APR 对应价格。",
+          className: "border-amber-500/25 bg-amber-500/10 text-amber-300",
+        }
+      : {
+          label: isEnglish ? "No best bid available" : "当前暂无买一",
+          detail: isEnglish ? "The suggestion uses the target APR and best ask only." : "建议价仅根据目标 APR 与卖一计算。",
+          className: "border-slate-700 bg-slate-900/70 text-slate-300",
+        };
+
+  return (
+    <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)]">
+      <TargetAprMetric
+        label={isEnglish ? "Target price" : "目标 APR 对应价格"}
+        value={formatPriceForTick(plan.targetPrice, tickSize)}
+      />
+      <TargetAprMetric
+        label={isEnglish ? "Suggested maker bid" : "Maker 建议挂价"}
+        value={formatPriceForTick(plan.suggestedMakerBuyPrice, tickSize)}
+        supportingValue={isEnglish
+          ? `APR ${formatPercent(plan.suggestedMakerApr, 2)}`
+          : `对应 APR ${formatPercent(plan.suggestedMakerApr, 2)}`}
+      />
+      <div className={`rounded-lg border px-3 py-3 ${status.className}`}>
+        <div className="text-xs font-bold">{status.label}</div>
+        <div className="mt-1 text-xs leading-relaxed opacity-80">{status.detail}</div>
+      </div>
+    </div>
+  );
+}
+
+function TargetAprMetric({
+  label,
+  value,
+  supportingValue,
+}: {
+  label: string;
+  value: string;
+  supportingValue?: string;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950/55 px-3 py-3">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</div>
+      <div className="mt-1 font-mono text-lg font-black text-cyan-300">{value}</div>
+      {supportingValue ? <div className="mt-1 text-xs text-slate-400">{supportingValue}</div> : null}
     </div>
   );
 }

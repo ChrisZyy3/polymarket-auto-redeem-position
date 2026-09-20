@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildPositionQuote } from "../lib/position-quote";
+import { buildPositionQuote, buildTargetAprPlan } from "../lib/position-quote";
 import { getOrderBook, OrderBookRequestError } from "../lib/poly-yield/polymarket";
 import type { OrderBook } from "../lib/poly-yield/types";
 
@@ -159,4 +159,49 @@ test("builds a theoretical quote when the supplied order book has invalid arrays
   assert.ok(quote.recommendedBuyPrice !== null);
   assert.ok(quote.recommendedSellPrice !== null);
   assert.match(quote.note ?? "", /盘口/);
+});
+
+test("joins the best bid when it already meets the configured target APR", () => {
+  const plan = buildTargetAprPlan({
+    targetAprPercent: 12,
+    daysToSettle: 365,
+    bestBid: 0.85,
+    bestAsk: 0.9,
+    tickSize: 0.001,
+  });
+
+  assert.ok(plan);
+  assert.equal(plan.bestBidMeetsTarget, true);
+  assert.equal(plan.suggestedMakerBuyPrice, 0.85);
+  assert.ok(plan.suggestedMakerApr !== null && plan.suggestedMakerApr > 0.12);
+});
+
+test("uses the target APR price when the best bid is too expensive", () => {
+  const plan = buildTargetAprPlan({
+    targetAprPercent: 12,
+    daysToSettle: 365,
+    bestBid: 0.9,
+    bestAsk: 0.91,
+    tickSize: 0.001,
+  });
+
+  assert.ok(plan);
+  assert.equal(plan.bestBidMeetsTarget, false);
+  assert.equal(plan.suggestedMakerBuyPrice, 0.892);
+  assert.ok(plan.suggestedMakerBuyPrice < 0.9);
+});
+
+test("keeps a theoretical target APR plan maker-only when no best bid exists", () => {
+  const plan = buildTargetAprPlan({
+    targetAprPercent: 12,
+    daysToSettle: 365,
+    bestBid: null,
+    bestAsk: 0.89,
+    tickSize: 0.001,
+  });
+
+  assert.ok(plan);
+  assert.equal(plan.bestBidMeetsTarget, null);
+  assert.equal(plan.suggestedMakerBuyPrice, 0.889);
+  assert.ok(plan.suggestedMakerBuyPrice < 0.89);
 });

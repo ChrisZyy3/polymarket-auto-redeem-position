@@ -32,6 +32,14 @@ export interface PositionQuote {
   note?: string;
 }
 
+export interface TargetAprPlan {
+  targetAprPercent: number;
+  targetPrice: number;
+  suggestedMakerBuyPrice: number | null;
+  suggestedMakerApr: number | null;
+  bestBidMeetsTarget: boolean | null;
+}
+
 function isValidPrice(value: number): boolean {
   return Number.isFinite(value) && value > 0 && value < 1;
 }
@@ -81,6 +89,55 @@ function priceForTargetApr(targetAprPercent: number, daysToSettle: number): numb
 function aprForPrice(price: number, daysToSettle: number): number | null {
   if (!isValidPrice(price) || !Number.isFinite(daysToSettle) || daysToSettle <= 0) return null;
   return ((1 - price) / price) * (365 / daysToSettle);
+}
+
+export function buildTargetAprPlan({
+  targetAprPercent,
+  daysToSettle,
+  bestBid,
+  bestAsk,
+  tickSize,
+}: {
+  targetAprPercent: number;
+  daysToSettle: number | null;
+  bestBid: number | null;
+  bestAsk: number | null;
+  tickSize: number | null;
+}): TargetAprPlan | null {
+  if (daysToSettle === null) return null;
+  const targetPrice = priceForTargetApr(targetAprPercent, daysToSettle);
+  if (targetPrice === null) return null;
+
+  const tick = Number.isFinite(tickSize) && tickSize !== null && tickSize > 0 && tickSize < 1
+    ? tickSize
+    : DEFAULT_TICK_SIZE;
+  const targetLimit = clampLimitPrice(floorToTick(targetPrice, tick), tick);
+  const validBestBid = bestBid !== null && isValidPrice(bestBid) ? bestBid : null;
+  const validBestAsk = bestAsk !== null && isValidPrice(bestAsk) ? bestAsk : null;
+  let suggestedMakerBuyPrice = validBestBid === null
+    ? targetLimit
+    : Math.min(validBestBid, targetLimit);
+
+  if (validBestAsk !== null) {
+    const makerCeiling = floorToTick(validBestAsk - tick, tick);
+    suggestedMakerBuyPrice = makerCeiling > 0
+      ? Math.min(suggestedMakerBuyPrice, makerCeiling)
+      : Number.NaN;
+  }
+
+  const validSuggestedPrice = isValidPrice(suggestedMakerBuyPrice)
+    ? suggestedMakerBuyPrice
+    : null;
+
+  return {
+    targetAprPercent,
+    targetPrice,
+    suggestedMakerBuyPrice: validSuggestedPrice,
+    suggestedMakerApr: validSuggestedPrice === null
+      ? null
+      : aprForPrice(validSuggestedPrice, daysToSettle),
+    bestBidMeetsTarget: validBestBid === null ? null : validBestBid <= targetPrice,
+  };
 }
 
 function buildNote(input: PositionQuoteInput, daysToSettle: number, currentApr: number | null): string | undefined {
