@@ -1058,8 +1058,8 @@ function PositionQuotePanel({
   const targetAprHelpId = `${targetAprInputId}-help`;
   const hasInvalidTargetApr = targetAprInput.trim() !== "" && targetAprPercent === null;
   return (
-    <div className="rounded-xl border border-cyan-500/20 bg-slate-900/70 p-4 shadow-inner">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="rounded-xl border border-cyan-500/20 bg-slate-900/70 p-3 shadow-inner">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h4 className="text-sm font-bold text-slate-100">
@@ -1069,7 +1069,7 @@ function PositionQuotePanel({
               {position.outcome}
             </span>
           </div>
-          <p className="mt-1 text-xs leading-relaxed text-slate-400">
+          <p className="mt-0.5 text-xs leading-5 text-slate-400">
             {isEnglish
               ? "Gross annualized return if this outcome settles at $1. This panel never places orders."
               : "假设该结果最终结算为 $1 的单利年化收益；这里只读取盘口，不执行下单。"}
@@ -1087,17 +1087,17 @@ function PositionQuotePanel({
       </div>
 
       {isLoading ? (
-        <div className="mt-4 flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-4 text-xs text-slate-400">
+        <div className="mt-3 flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-3 text-xs text-slate-400">
           <Loader2 className="h-4 w-4 animate-spin text-cyan-400" aria-hidden="true" />
           {isEnglish ? "Reading the live order book…" : "正在读取当前实时盘口…"}
         </div>
       ) : quoteState?.status === "error" ? (
-        <div className="mt-4 rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-3 text-xs text-rose-300">
+        <div className="mt-3 rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2.5 text-xs text-rose-300">
           {quoteState.error}
         </div>
       ) : quote ? (
         <>
-          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
             <OrderBookAprCard
               label={isEnglish ? "Best bid" : "买一"}
               price={quote.bestBid}
@@ -1118,7 +1118,7 @@ function PositionQuotePanel({
             />
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-slate-800 bg-slate-950/45 px-3 py-2.5 text-xs text-slate-400">
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-slate-800 bg-slate-950/45 px-3 py-2 text-xs text-slate-400">
             <span>{isEnglish ? "Time to settlement" : "距结算"}: <strong className="font-mono text-slate-200">{quote.daysToSettle === null ? "—" : `${quote.daysToSettle.toFixed(1)}d`}</strong></span>
             <span>{isEnglish ? "Tick" : "最小价位"}: <strong className="font-mono text-slate-300">{formatMarketPercentForTick(quote.tickSize, quote.tickSize)}</strong></span>
             <span className={quote.orderBookAvailable ? "text-emerald-400" : "text-amber-400"}>
@@ -1128,13 +1128,13 @@ function PositionQuotePanel({
             </span>
           </div>
 
-          <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="mt-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3">
+            <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
               <div className="max-w-xl">
                 <label htmlFor={targetAprInputId} className="text-sm font-bold text-slate-100">
                   {isEnglish ? "Target APR for this outcome" : "该 Outcome 的目标 APR"}
                 </label>
-                <p id={targetAprHelpId} className="mt-1 text-xs leading-relaxed text-slate-400">
+                <p id={targetAprHelpId} className="mt-0.5 text-xs leading-5 text-slate-400">
                   {isEnglish
                     ? "Saved in this browser for this token only. It is separate from the global Alert APR."
                     : "仅针对当前 token 保存在此浏览器中，与全局 Alert APR 预警阈值相互独立。"}
@@ -1152,20 +1152,20 @@ function PositionQuotePanel({
                   aria-describedby={targetAprHelpId}
                   aria-invalid={hasInvalidTargetApr}
                   placeholder="12.0"
-                  className="h-11 w-full rounded-lg border border-slate-700 bg-slate-950/80 px-3 pr-9 font-mono text-base font-bold text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20"
+                  className="h-10 w-full rounded-lg border border-slate-700 bg-slate-950/80 px-3 pr-9 font-mono text-base font-bold text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20"
                 />
                 <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-500">%</span>
               </div>
             </div>
 
             {hasInvalidTargetApr ? (
-              <p className="mt-3 text-xs font-semibold text-rose-300" role="alert">
+              <p className="mt-2 text-xs font-semibold text-rose-300" role="alert">
                 {isEnglish ? "Enter a non-negative APR." : "请输入不小于 0 的 APR。"}
               </p>
             ) : targetAprPlan ? (
               <TargetAprPlanPanel plan={targetAprPlan} tickSize={quote.tickSize} language={language} />
             ) : (
-              <p className="mt-3 rounded-lg border border-dashed border-slate-700 px-3 py-3 text-xs text-slate-400">
+              <p className="mt-2 rounded-lg border border-dashed border-slate-700 px-3 py-2 text-xs text-slate-400">
                 {isEnglish
                   ? "Set a Target APR to calculate the target probability and maker bid."
                   : "输入 Target APR 后，将计算目标概率与 Maker 建议挂价。"}
@@ -1174,16 +1174,16 @@ function PositionQuotePanel({
           </div>
 
           {quote.note && (
-            <p className="mt-2 text-[11px] leading-relaxed text-amber-300/80">{quote.note}</p>
+            <p className="mt-1.5 text-[11px] leading-5 text-amber-300/80">{quote.note}</p>
           )}
-          <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+          <p className="mt-1.5 text-[11px] leading-5 text-slate-500">
             {isEnglish
               ? "APR excludes fees and is realized only if the outcome settles at $1."
               : "APR 未计手续费，且仅在该结果最终结算为 $1 时成立。"}
           </p>
         </>
       ) : (
-        <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-4 text-xs text-slate-500">
+        <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-3 text-xs text-slate-500">
           {isEnglish ? "Preparing quote…" : "正在准备报价…"}
         </div>
       )}
@@ -1220,7 +1220,7 @@ function TargetAprPlanPanel({
         };
 
   return (
-    <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)]">
+    <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)]">
       <TargetAprMetric
         label={isEnglish ? "Target probability" : "目标 APR 对应概率"}
         value={formatMarketPercentForTick(plan.targetPrice, tickSize)}
@@ -1232,7 +1232,7 @@ function TargetAprPlanPanel({
           ? `APR ${formatPercent(plan.suggestedMakerApr, 2)}`
           : `对应 APR ${formatPercent(plan.suggestedMakerApr, 2)}`}
       />
-      <div className={`rounded-lg border px-3 py-3 ${status.className}`}>
+      <div className={`rounded-lg border px-3 py-2.5 ${status.className}`}>
         <div className="text-xs font-bold">{status.label}</div>
         <div className="mt-1 text-xs leading-relaxed opacity-80">{status.detail}</div>
       </div>
@@ -1250,7 +1250,7 @@ function TargetAprMetric({
   supportingValue?: string;
 }) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-950/55 px-3 py-3">
+    <div className="rounded-lg border border-slate-800 bg-slate-950/55 px-3 py-2.5">
       <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</div>
       <div className="mt-1 font-mono text-lg font-black text-cyan-300">{value}</div>
       {supportingValue ? <div className="mt-1 text-xs text-slate-400">{supportingValue}</div> : null}
@@ -1280,11 +1280,11 @@ function OrderBookAprCard({
   const accentClass = accent === "emerald" ? "text-emerald-300" : "text-rose-300";
 
   return (
-    <div className={`rounded-xl border ${borderClass} bg-slate-950/55 px-4 py-4`}>
-      <div className="flex items-start justify-between gap-4">
+    <div className={`rounded-lg border ${borderClass} bg-slate-950/55 px-3 py-2.5`}>
+      <div className="flex items-start justify-between gap-3">
         <div>
           <div className={`text-sm font-bold ${accentClass}`}>{label}</div>
-          <div className="mt-1 text-xs text-slate-400">{description}</div>
+          <div className="mt-0.5 text-xs text-slate-400">{description}</div>
         </div>
         <div className="text-right">
           <div className="font-mono text-lg font-black text-slate-100">{formatMarketPercentForTick(price, tickSize)}</div>
@@ -1293,11 +1293,11 @@ function OrderBookAprCard({
           </div>
         </div>
       </div>
-      <div className="mt-4 border-t border-slate-800 pt-3">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+      <div className="mt-2 flex items-end justify-between gap-3 border-t border-slate-800 pt-2">
+        <div className="pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
           {isEnglish ? "Conditional APR" : "条件 APR"}
         </div>
-        <div className={`mt-1 font-mono text-2xl font-black ${accentClass}`}>
+        <div className={`font-mono text-xl font-black ${accentClass}`}>
           {formatPercent(apr, 2)}
         </div>
       </div>
