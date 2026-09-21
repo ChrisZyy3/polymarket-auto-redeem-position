@@ -72,3 +72,17 @@ The userscripts are not imported by the Next.js app. Install the recommended scr
 ## Project Status
 
 See [PROJECT_PLAN.md](PROJECT_PLAN.md) for phase tracking. Phases 1–2 (fetch/filter redeemable positions, notification pipeline with dedup) are done. The Next.js dashboard and userscript APR overlay are available for read-only monitoring. Phases 3–6 (manual redeem, automated batch redeem, polling daemon, production deployment) are not yet implemented — `src/` currently only *reports* on positions, it does not execute on-chain redeem transactions.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs for this repo live as GitHub issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository. See `docs/agents/domain.md`.

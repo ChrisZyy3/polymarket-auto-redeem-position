@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchCurrentPositions, fetchCashBalance } from '@/lib/polymarket';
+import { fetchCurrentPositions, fetchCashBalance, filterPositionsByMinimumValue } from '@/lib/polymarket';
 import { calcApr, needsAttention, isLosing } from '@/lib/apr';
 import type { EnrichedPosition } from '@/lib/types';
 
@@ -8,6 +8,7 @@ export async function GET(request: NextRequest) {
   const address = searchParams.get('address');
   const aprThreshold = parseFloat(searchParams.get('aprThreshold') || '8');
   const minSize = parseFloat(searchParams.get('minSize') || '0.1');
+  const minValue = parseFloat(searchParams.get('minValue') || '1');
 
   if (!address) {
     return NextResponse.json({ error: 'Missing address' }, { status: 400 });
@@ -19,8 +20,10 @@ export async function GET(request: NextRequest) {
       fetchCashBalance(address).catch(() => 0),
     ]);
 
-    const holding = allPositions.filter(p => !p.redeemable);
-    const redeemable = allPositions.filter(p => p.redeemable);
+    const minimumValue = Number.isFinite(minValue) && minValue >= 0 ? minValue : 1;
+    const visiblePositions = filterPositionsByMinimumValue(allPositions, minimumValue);
+    const holding = visiblePositions.filter(p => !p.redeemable);
+    const redeemable = visiblePositions.filter(p => p.redeemable);
 
     const enrichedHolding: EnrichedPosition[] = holding.map(p => {
       const result = calcApr(p);

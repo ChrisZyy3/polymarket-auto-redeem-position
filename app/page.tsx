@@ -23,7 +23,6 @@ import {
   Activity,
   AlertTriangle,
   X,
-  ShieldCheck,
   Zap,
   CalendarClock,
   Database,
@@ -35,8 +34,8 @@ import {
 } from "lucide-react";
 import { PortfolioHistoryChart } from "@/app/components/portfolio-history-chart";
 import type { PortfolioHistoryMetrics, PortfolioSnapshot } from "@/lib/portfolio-history";
-import { formatPriceForTick } from "@/lib/price-format";
-import type { PositionQuote } from "@/lib/position-quote";
+import { formatMarketPercentForTick } from "@/lib/price-format";
+import { buildTargetAprPlan, type PositionQuote } from "@/lib/position-quote";
 import type { EnrichedPosition } from "@/lib/types";
 
 // Structure definition for Dashboard statistics summary
@@ -47,7 +46,6 @@ interface Summary {
   totalBalance: number;
   availableBalance: number;
   avgHoldApr: number;
-  avgCostApr: number;
 }
 
 // Format API response payload
@@ -80,32 +78,6 @@ type Language = "zh" | "en";
 
 const LANGUAGE_KEY = "polymarket-dashboard-language";
 
-// User-friendly status labels mapping
-// 仓位状态友好名称映射字典
-const STATUS_LABEL: Record<Language, Record<EnrichedPosition["status"], string>> = {
-  zh: {
-    good: "收益极佳",
-    attention: "低年化",
-    losing: "当前亏损",
-    redeemable: "已结算可赎回",
-  },
-  en: {
-    good: "Good",
-    attention: "Low APR",
-    losing: "At risk",
-    redeemable: "Redeemable",
-  },
-};
-
-// Styling for status pills
-// 仓位状态胶囊标签的样式字典
-const STATUS_STYLE: Record<EnrichedPosition["status"], string> = {
-  good: "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[0_0_12px_rgba(16,185,129,0.1)]",
-  attention: "bg-amber-500/10 text-amber-400 border border-amber-500/20 shadow-[0_0_12px_rgba(245,158,11,0.1)]",
-  losing: "bg-rose-500/10 text-rose-400 border border-rose-500/20 shadow-[0_0_12px_rgba(244,63,94,0.1)]",
-  redeemable: "bg-sky-500/10 text-sky-400 border border-sky-500/20 shadow-[0_0_12px_rgba(14,165,233,0.1)]",
-};
-
 // LocalStorage Keys for state persistence
 // 本地状态存储字段常量定义
 const HISTORY_KEY = "polymarket-dashboard-address-history";
@@ -113,6 +85,22 @@ const MAX_HISTORY = 8;
 
 const HOLD_APR_THRESHOLD_KEY = "polymarket-dashboard-hold-apr-threshold";
 const DEFAULT_HOLD_APR_THRESHOLD = 8; // Default 8% APR alert threshold / 默认 8% 的 APR 预警阈值
+const TARGET_APR_BY_ASSET_KEY = "polymarket-dashboard-target-apr-by-asset-v1";
+const DUST_POSITION_VALUE_USD = 1;
+
+function parseTargetAprInput(value: string): number | null {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function serializeTargetAprInputs(inputs: Record<string, string>): string {
+  const validEntries = Object.entries(inputs).flatMap(([asset, value]) => {
+    const parsed = parseTargetAprInput(value);
+    return parsed === null ? [] : [[asset, parsed] as const];
+  });
+  return JSON.stringify(Object.fromEntries(validEntries));
+}
 
 /**
  * Shorten hex addresses to improve visual presentation
@@ -149,11 +137,6 @@ function formatMoneyCompact(value: number | null | undefined): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   })}`;
-}
-
-function formatPriceCents(value: number | null | undefined): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  return `$${(value * 100).toFixed(2).replace(/\.?0+$/, "")}`;
 }
 
 function formatDateTime(value: string, language: Language): string {
@@ -212,6 +195,7 @@ export default function Home() {
   const [language, setLanguage] = useState<Language>("zh");
   const [expandedPositionKey, setExpandedPositionKey] = useState<string | null>(null);
   const [quoteStates, setQuoteStates] = useState<Record<string, QuoteState>>({});
+  const [targetAprInputs, setTargetAprInputs] = useState<Record<string, string>>({});
   const quoteRequestVersion = useRef(0);
   const isEnglish = language === "en";
 
@@ -223,6 +207,18 @@ export default function Home() {
       if (raw) setHistory(JSON.parse(raw));
       const storedLanguage = localStorage.getItem(LANGUAGE_KEY);
       if (storedLanguage === "zh" || storedLanguage === "en") setLanguage(storedLanguage);
+      const storedTargetApr = localStorage.getItem(TARGET_APR_BY_ASSET_KEY);
+      if (storedTargetApr) {
+        const parsed = JSON.parse(storedTargetApr) as unknown;
+        if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+          const entries = Object.entries(parsed).flatMap(([asset, value]) =>
+            typeof value === "number" && Number.isFinite(value) && value >= 0
+              ? [[asset, String(value)] as const]
+              : [],
+          );
+          setTargetAprInputs(Object.fromEntries(entries));
+        }
+      }
     } catch {
       // Ignore invalid localStorage access / 忽略无法访问 localStorage 的异常情况
     }
@@ -298,7 +294,7 @@ export default function Home() {
   // Memoize positions from state payload
   // 缓存提取并解析的仓位数组
   const positions = useMemo(() => data?.positions ?? [], [data]);
-  const totalPortfolioValue = data?.summary.totalValue ?? 0;
+  const totalAssetValue = data?.summary.totalBalance ?? 0;
   const marketValues = useMemo(() => {
     const values = new Map<string, number>();
     positions.forEach((position) => {
@@ -363,6 +359,22 @@ export default function Home() {
           },
         };
       });
+    }
+  }
+
+  function handleTargetAprChange(asset: string, value: string) {
+    if (value && !/^\d*(?:\.\d*)?$/.test(value)) return;
+    const nextInputs = { ...targetAprInputs };
+    if (value) {
+      nextInputs[asset] = value;
+    } else {
+      delete nextInputs[asset];
+    }
+    setTargetAprInputs(nextInputs);
+    try {
+      localStorage.setItem(TARGET_APR_BY_ASSET_KEY, serializeTargetAprInputs(nextInputs));
+    } catch {
+      // Ignore unavailable localStorage.
     }
   }
 
@@ -432,11 +444,11 @@ export default function Home() {
                   type="button"
                   onClick={() => handleQuoteToggle(row.original)}
                   aria-expanded={quoteExpanded}
-                  aria-label={isEnglish ? "Show recommended buy and sell prices" : "展开推荐买入和卖出价格"}
+                  aria-label={isEnglish ? "Show live bid and ask APR" : "展开实时买一和卖一 APR"}
                   className="mt-2 inline-flex items-center gap-1 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2 py-1 text-[10px] font-semibold text-cyan-400 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/10 focus:outline-none focus:ring-1 focus:ring-cyan-400"
                 >
                   {quoteExpanded ? <ChevronUp className="h-3 w-3" aria-hidden="true" /> : <ChevronDown className="h-3 w-3" aria-hidden="true" />}
-                  {isEnglish ? "Trade quote" : "展开买卖建议"}
+                  {isEnglish ? "Market APR" : "查看盘口 APR"}
                 </button>
               ) : null}
             </div>
@@ -446,59 +458,24 @@ export default function Home() {
       {
         id: "pricePath",
         accessorFn: (row) => row.curPrice,
-        header: isEnglish ? "Entry → current" : "建仓价 → 当前价",
+        header: isEnglish ? "Entry → current (%)" : "建仓价 → 当前价 (%)",
         cell: ({ row }) => (
-          <span className="font-mono font-semibold text-cyan-300 whitespace-nowrap">
-            {formatPriceCents(row.original.avgPrice)} <span className="text-slate-500">→</span> {formatPriceCents(row.original.curPrice)}
+          <span className="whitespace-nowrap font-mono">
+            <span className="font-medium text-slate-400">{formatPercent(row.original.avgPrice, 1)}</span>
+            <span className="mx-1 text-slate-600">→</span>
+            <span className="font-bold text-cyan-300">{formatPercent(row.original.curPrice, 1)}</span>
           </span>
         ),
       },
       {
         accessorKey: "currentValue",
         header: isEnglish ? "Value ($)" : "持仓市值 ($)",
-        cell: ({ getValue }) => (
-          <span className="font-mono font-bold text-slate-200">
-            ${formatNumber(getValue<number>())}
-          </span>
-        ),
-      },
-      {
-        id: "holdingPerformance",
-        accessorFn: (row) => row.cashPnl,
-        header: isEnglish ? "P&L / return" : "持有收益 / 收益率",
-        cell: ({ row }) => {
-          const cashPnl = row.original.cashPnl;
-          const holdingReturn = calculateHoldingReturn(row.original);
-          if (typeof cashPnl !== "number" || !Number.isFinite(cashPnl)) {
-            return <span className="font-mono font-bold text-slate-500">—</span>;
-          }
-          return (
-            <span
-              title={isEnglish ? "Sort by holding P&L" : "按持有收益金额排序"}
-              className={`whitespace-nowrap font-mono font-bold ${cashPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}
-            >
-              {cashPnl >= 0 ? "+" : "-"}{formatMoneyCompact(Math.abs(cashPnl))}{" "}
-              <span className="text-slate-400">
-                ({typeof holdingReturn === "number" && Number.isFinite(holdingReturn)
-                  ? `${holdingReturn >= 0 ? "+" : ""}${formatPercent(holdingReturn)}`
-                  : "—"})
-              </span>
-            </span>
-          );
-        },
-      },
-      {
-        id: "positionWeight",
-        accessorFn: (row) => {
-          const marketKey = row.conditionId || row.eventSlug || row.slug || row.asset;
+        cell: ({ row, getValue }) => {
+          const marketKey = row.original.conditionId || row.original.eventSlug || row.original.slug || row.original.asset;
           const marketValue = marketValues.get(marketKey) ?? 0;
-          return totalPortfolioValue > 0 ? marketValue / totalPortfolioValue : 0;
-        },
-        header: isEnglish ? "Portfolio share" : "仓位占比",
-        cell: ({ getValue }) => {
-          const value = getValue<number>();
-          const isHighConcentration = value > 0.3;
-          const isConcentrated = value > 0.2;
+          const positionWeight = totalAssetValue > 0 ? marketValue / totalAssetValue : 0;
+          const isHighConcentration = positionWeight > 0.3;
+          const isConcentrated = positionWeight > 0.2;
           const riskLabel = isHighConcentration
             ? (isEnglish ? "High concentration" : "高集中风险")
             : isConcentrated
@@ -512,46 +489,86 @@ export default function Home() {
 
           return (
             <div
-              className="flex min-w-[92px] flex-col gap-0.5"
-              title={riskLabel || (isEnglish ? "Share of portfolio value" : "占全部持仓市值的比例")}
+              className="flex min-w-[120px] flex-col gap-0.5"
+              title={isEnglish
+                ? "Market position value as a share of total asset value"
+                : "该市场持仓市值占资产总价值的比例"}
             >
-              <span className={`flex items-center gap-1 font-mono font-semibold ${riskClass}`}>
-                {formatPercent(value)}
-                {isConcentrated && <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+              <span className="font-mono font-bold text-slate-200">
+                ${formatNumber(getValue<number>())}
               </span>
-              {riskLabel && (
-                <span className={`text-[10px] leading-tight ${riskClass}`}>
+              <span className="flex items-center gap-1 text-xs font-semibold">
+                <span className="text-slate-500">{isEnglish ? "Asset share" : "仓位占比"}</span>
+                <span className={`font-mono ${riskClass}`}>{formatPercent(positionWeight)}</span>
+              </span>
+              {riskLabel ? (
+                <span className={`flex items-center gap-1 text-[10px] font-semibold ${riskClass}`}>
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   {riskLabel}
                 </span>
-              )}
+              ) : null}
             </div>
           );
         },
       },
       {
-        accessorKey: "holdApr",
-        header: isEnglish ? "Hold APR" : "继续持有 APR",
-        cell: ({ getValue }) => {
-          const value = getValue<number | null>();
-          const isLow = value !== null && value * 100 <= holdAprThreshold;
+        id: "holdingPerformance",
+        accessorFn: (position) => position.cashPnl,
+        header: isEnglish ? "P&L / return" : "持有收益 / 收益率",
+        cell: ({ row }) => {
+          const { cashPnl } = row.original;
+          const holdingReturn = calculateHoldingReturn(row.original);
+          const hasCashPnl = typeof cashPnl === "number" && Number.isFinite(cashPnl);
+          const hasHoldingReturn = typeof holdingReturn === "number" && Number.isFinite(holdingReturn);
+          const cashPnlClass = hasCashPnl
+            ? cashPnl >= 0 ? "text-emerald-400" : "text-rose-400"
+            : "text-slate-500";
+          const holdingReturnClass = hasHoldingReturn
+            ? holdingReturn >= 0 ? "text-emerald-400" : "text-rose-400"
+            : "text-slate-500";
+
           return (
-            <span
-              className={`font-mono font-bold flex items-center gap-1 ${
-                isLow ? "text-rose-400 animate-pulse" : "text-emerald-400"
-              }`}
+            <div
+              title={isEnglish ? "Sort by holding P&L" : "按持有收益金额排序"}
+              className="flex min-w-28 flex-col gap-0.5 font-mono"
             >
-              {isLow && <AlertTriangle className="h-3.5 w-3.5" />}
-              {formatPercent(value)}
-            </span>
+              <span className={`whitespace-nowrap font-bold ${cashPnlClass}`}>
+                {hasCashPnl
+                  ? `${cashPnl >= 0 ? "+" : "-"}${formatMoneyCompact(Math.abs(cashPnl))}`
+                  : "—"}
+              </span>
+              <span className="flex items-center gap-1 text-xs">
+                <span className="font-sans font-medium text-slate-500">
+                  {isEnglish ? "Return" : "收益率"}
+                </span>
+                <span className={`font-semibold ${holdingReturnClass}`}>
+                  {hasHoldingReturn
+                    ? `${holdingReturn >= 0 ? "+" : ""}${formatPercent(holdingReturn)}`
+                    : "—"}
+                </span>
+              </span>
+            </div>
           );
         },
       },
       {
-        accessorKey: "costApr",
-        header: isEnglish ? "Entry APR" : "初始建仓 APR",
-        cell: ({ getValue }) => (
-          <span className="font-mono text-slate-400">{formatPercent(getValue<number | null>())}</span>
-        ),
+        id: "marketApr",
+        accessorFn: (position) => position.holdApr,
+        header: isEnglish ? "Market APR" : "市场 APR",
+        cell: ({ row }) => {
+          const { holdApr } = row.original;
+          const isLow = holdApr !== null && holdApr * 100 <= holdAprThreshold;
+          return (
+            <span
+              className={`flex min-w-24 items-center gap-1 font-mono font-bold ${
+                isLow ? "text-rose-400 animate-pulse" : "text-emerald-400"
+              }`}
+            >
+              {isLow && <AlertTriangle aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
+              {formatPercent(holdApr)}
+            </span>
+          );
+        },
       },
       {
         accessorKey: "daysToSettle",
@@ -569,36 +586,8 @@ export default function Home() {
           );
         },
       },
-      {
-        accessorKey: "expectedProfit",
-        header: isEnglish ? "Est. profit ($)" : "预估到期收益 ($)",
-        cell: ({ getValue }) => {
-          const val = getValue<number>();
-          return (
-            <span
-              className={`font-mono font-bold ${
-                val >= 0 ? "text-emerald-400" : "text-rose-400"
-              }`}
-            >
-              {val >= 0 ? "+" : ""}${formatNumber(val)}
-            </span>
-          );
-        },
-      },
-      {
-        accessorKey: "status",
-        header: isEnglish ? "Status" : "风控状态",
-        cell: ({ getValue }) => {
-          const status = getValue<EnrichedPosition["status"]>();
-          return (
-            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_STYLE[status]}`}>
-              {STATUS_LABEL[language][status]}
-            </span>
-          );
-        },
-      },
     ],
-    [expandedPositionKey, handleQuoteToggle, holdAprThreshold, isEnglish, language, marketValues, totalPortfolioValue]
+    [expandedPositionKey, handleQuoteToggle, holdAprThreshold, isEnglish, language, marketValues, totalAssetValue]
   );
 
   // Setup React Table instance
@@ -650,7 +639,7 @@ export default function Home() {
     setQuoteStates({});
     try {
       const [res, historyRes] = await Promise.all([
-        fetch(`/api/positions?address=${encodeURIComponent(addr)}&aprThreshold=${holdAprThreshold}`),
+        fetch(`/api/positions?address=${encodeURIComponent(addr)}&aprThreshold=${holdAprThreshold}&minValue=${DUST_POSITION_VALUE_USD}`),
         fetch(`/api/portfolio-history?address=${encodeURIComponent(addr)}`),
       ]);
       const json = await res.json();
@@ -788,7 +777,7 @@ export default function Home() {
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
               {isEnglish ? "Analyze" : "查询分析"}
             </button>
-            <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-slate-500">
+            <div className="hidden shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-slate-500">
               <Database className="h-3.5 w-3.5" />
               {fetchedAtLabel}
             </div>
@@ -872,7 +861,7 @@ export default function Home() {
         * 账户总体业绩卡片与统计分析结果：查询前保留完整页面骨架
         */}
       {/* Dashboard Summary Statistics Cards Grid / 指标概览区块 */}
-      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
             <SummaryCard
               label={isEnglish ? "Total portfolio value" : "资产总价值"}
               value={data ? `$${formatNumber(data.summary.totalBalance)}` : "—"}
@@ -895,18 +884,11 @@ export default function Home() {
               tooltip={isEnglish ? "Current market value of all positions" : "用户当前所有未结算的持仓当前市价总价值"}
             />
             <SummaryCard
-              label={isEnglish ? "Weighted hold APR" : "加权继续持有 APR"}
+              label={isEnglish ? "Weighted market APR" : "加权市场 APR"}
               value={data ? formatPercent(data.summary.avgHoldApr) : "—"}
               icon={<TrendingUp className="h-4 w-4 text-fuchsia-400" />}
               glowColor="red"
               tooltip={isEnglish ? "Expected annualized return, weighted by position value" : "以仓位当前市值为权重，加权计算的持仓预期年化收益率。评估继续锁定资金的性价比"}
-            />
-            <SummaryCard
-              label={isEnglish ? "Weighted entry APR" : "加权建仓初始 APR"}
-              value={data ? formatPercent(data.summary.avgCostApr) : "—"}
-              icon={<Percent className="h-4 w-4 text-amber-400" />}
-              glowColor="cyan"
-              tooltip={isEnglish ? "Annualized return at entry, weighted by position value" : "以仓位当前市值为权重，加权计算的买入成本初始年化收益率"}
             />
       </div>
 
@@ -952,18 +934,20 @@ export default function Home() {
         <div className="px-6 py-5 border-b border-slate-800 bg-slate-900/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5 text-emerald-400" />
-              {isEnglish ? "Position risk details" : "当前仓位风控明细"}
+              <Activity className="h-5 w-5 text-cyan-400" />
+              {isEnglish ? "Position yield and market APR" : "持仓收益与盘口 APR"}
             </h3>
             <p className="text-xs text-slate-400 mt-1">
               {isEnglish
-                ? "Click a column header to sort. Red Hold APR signals a high opportunity cost."
-                : "点击各列标题可进行多维排序。若继续持有 APR 变红，说明当前锁定资金的机会成本过高。"}
+                ? "Expand a market to compare the live best-bid and best-ask conditional APR."
+                : "展开市场即可比较实时买一、卖一价格对应的条件 APR。"}
             </p>
           </div>
           <div className="flex items-center gap-1.5 self-start sm:self-auto text-xs text-slate-500 font-semibold bg-slate-950/60 border border-slate-800 px-3 py-1.5 rounded-lg shadow-inner">
             <Info className="h-3.5 w-3.5 text-slate-400" />
-            {isEnglish ? "Positions below $0.10 are excluded" : "自动忽略大小低于 0.1 刀的尘埃仓位"}
+            {isEnglish
+              ? `Positions worth less than $${DUST_POSITION_VALUE_USD} are excluded`
+              : `自动忽略市值低于 ${DUST_POSITION_VALUE_USD} 美元的尘埃仓位`}
           </div>
         </div>
 
@@ -1013,8 +997,9 @@ export default function Home() {
                           <PositionQuotePanel
                             position={row.original}
                             quoteState={quoteStates[positionKey]}
-                            thresholdAprPercent={holdAprThreshold}
+                            targetAprInput={targetAprInputs[row.original.asset] ?? ""}
                             language={language}
+                            onTargetAprChange={(value) => handleTargetAprChange(row.original.asset, value)}
                             onRefresh={() => handleQuoteRefresh(row.original)}
                           />
                         </td>
@@ -1044,51 +1029,50 @@ export default function Home() {
 function PositionQuotePanel({
   position,
   quoteState,
-  thresholdAprPercent,
+  targetAprInput,
   language,
+  onTargetAprChange,
   onRefresh,
 }: {
   position: EnrichedPosition;
   quoteState?: QuoteState;
-  thresholdAprPercent: number;
+  targetAprInput: string;
   language: Language;
+  onTargetAprChange: (value: string) => void;
   onRefresh: () => void;
 }) {
   const isEnglish = language === "en";
   const quote = quoteState?.quote;
   const isLoading = quoteState?.status === "loading";
-  const actionLabel = quote?.action === "buy"
-    ? (isEnglish ? "BUY BIAS" : "偏向买入")
-    : quote?.action === "sell"
-      ? (isEnglish ? "SELL BIAS" : "偏向卖出")
-      : (isEnglish ? "UNAVAILABLE" : "暂不可用");
-  const actionStyle = quote?.action === "buy"
-    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-    : quote?.action === "sell"
-      ? "border-rose-500/30 bg-rose-500/10 text-rose-300"
-      : "border-slate-700 bg-slate-900/70 text-slate-400";
-
+  const targetAprPercent = parseTargetAprInput(targetAprInput);
+  const targetAprPlan = quote && targetAprPercent !== null
+    ? buildTargetAprPlan({
+        targetAprPercent,
+        daysToSettle: quote.daysToSettle,
+        bestBid: quote.bestBid,
+        bestAsk: quote.bestAsk,
+        tickSize: quote.tickSize,
+      })
+    : null;
+  const targetAprInputId = `target-apr-${position.asset}`;
+  const targetAprHelpId = `${targetAprInputId}-help`;
+  const hasInvalidTargetApr = targetAprInput.trim() !== "" && targetAprPercent === null;
   return (
-    <div className="rounded-xl border border-cyan-500/20 bg-slate-900/70 p-4 shadow-inner">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="rounded-xl border border-cyan-500/20 bg-slate-900/70 p-3 shadow-inner">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h4 className="text-sm font-bold text-slate-100">
-              {isEnglish ? "Read-only trade quote" : "只读买卖价格建议"}
+              {isEnglish ? "Live order-book conditional APR" : "实时盘口条件 APR"}
             </h4>
             <span className="rounded-full border border-slate-700 bg-slate-950/70 px-2 py-0.5 text-[10px] font-semibold text-slate-400">
               {position.outcome}
             </span>
-            {quote && (
-              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold tracking-wide ${actionStyle}`}>
-                {actionLabel}
-              </span>
-            )}
           </div>
-          <p className="mt-1 text-xs leading-relaxed text-slate-400">
+          <p className="mt-0.5 text-xs leading-5 text-slate-400">
             {isEnglish
-              ? `Target APR ${thresholdAprPercent.toFixed(2)}%. Prices are refreshed for this position only.`
-              : `目标 APR ${thresholdAprPercent.toFixed(2)}%。只刷新当前仓位的实时盘口，不执行下单。`}
+              ? "Gross annualized return if this outcome settles at $1. This panel never places orders."
+              : "假设该结果最终结算为 $1 的单利年化收益；这里只读取盘口，不执行下单。"}
           </p>
         </div>
         <button
@@ -1103,67 +1087,40 @@ function PositionQuotePanel({
       </div>
 
       {isLoading ? (
-        <div className="mt-4 flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-4 text-xs text-slate-400">
+        <div className="mt-3 flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-3 text-xs text-slate-400">
           <Loader2 className="h-4 w-4 animate-spin text-cyan-400" aria-hidden="true" />
           {isEnglish ? "Reading the live order book…" : "正在读取当前实时盘口…"}
         </div>
       ) : quoteState?.status === "error" ? (
-        <div className="mt-4 rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-3 text-xs text-rose-300">
+        <div className="mt-3 rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2.5 text-xs text-rose-300">
           {quoteState.error}
         </div>
       ) : quote ? (
         <>
-          <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
-            <QuoteMetric
-              label={isEnglish ? "Target APR" : "目标 APR"}
-              value={`${quote.thresholdAprPercent.toFixed(2)}%`}
-            />
-            <QuoteMetric
-              label={isEnglish ? "Threshold price" : "阈值价格"}
-              value={formatPriceForTick(quote.thresholdPrice, quote.tickSize)}
-              accent="cyan"
-            />
-            <QuoteMetric
-              label={isEnglish ? "Current Hold APR" : "当前继续持有 APR"}
-              value={formatPercent(quote.currentApr, 2)}
-              accent={quote.action === "sell" ? "rose" : "emerald"}
-            />
-            <QuoteMetric
-              label={isEnglish ? "Time to settlement" : "距结算"}
-              value={quote.daysToSettle === null ? "—" : `${quote.daysToSettle.toFixed(1)}d`}
-            />
-          </div>
-
-          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-            <QuotePriceCard
-              title={isEnglish ? "Recommended buy limit" : "推荐买入限价"}
-              price={quote.recommendedBuyPrice}
+          <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+            <OrderBookAprCard
+              label={isEnglish ? "Best bid" : "买一"}
+              price={quote.bestBid}
+              apr={quote.bestBidApr}
               tickSize={quote.tickSize}
               accent="emerald"
-              description={
-                quote.bestAsk !== null && quote.recommendedBuyPrice === quote.bestAsk
-                  ? (isEnglish ? "At or below target; current best ask is usable." : "未超过目标价，当前卖一可作为成交参考。")
-                  : (isEnglish ? "Do not bid above the threshold price." : "不要以高于阈值价格的价格买入。")
-              }
+              description={isEnglish ? "Maker bid reference" : "Maker 买单收益参考"}
+              language={language}
             />
-            <QuotePriceCard
-              title={isEnglish ? "Recommended sell limit" : "推荐卖出限价"}
-              price={quote.recommendedSellPrice}
+            <OrderBookAprCard
+              label={isEnglish ? "Best ask" : "卖一"}
+              price={quote.bestAsk}
+              apr={quote.bestAskApr}
               tickSize={quote.tickSize}
               accent="rose"
-              description={
-                quote.bestBid !== null && quote.recommendedSellPrice === quote.bestBid
-                  ? (isEnglish ? "Current best bid is usable as an exit reference." : "当前买一可作为卖出成交参考。")
-                  : (isEnglish ? "Use the threshold price as the minimum reference." : "以阈值价格作为最低参考，不低价卖出。")
-              }
+              description={isEnglish ? "Immediate buy reference" : "即时买入收益参考"}
+              language={language}
             />
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-slate-800 bg-slate-950/45 px-3 py-2.5 text-xs text-slate-400">
-            <span className="font-semibold text-slate-300">{isEnglish ? "Live book" : "实时盘口"}</span>
-            <span>{isEnglish ? "Best bid" : "买一"}: <strong className="font-mono text-emerald-300">{formatPriceForTick(quote.bestBid, quote.tickSize)}</strong></span>
-            <span>{isEnglish ? "Best ask" : "卖一"}: <strong className="font-mono text-rose-300">{formatPriceForTick(quote.bestAsk, quote.tickSize)}</strong></span>
-            <span>{isEnglish ? "Tick" : "最小价位"}: <strong className="font-mono text-slate-300">{formatPriceForTick(quote.tickSize, quote.tickSize)}</strong></span>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-slate-800 bg-slate-950/45 px-3 py-2 text-xs text-slate-400">
+            <span>{isEnglish ? "Time to settlement" : "距结算"}: <strong className="font-mono text-slate-200">{quote.daysToSettle === null ? "—" : `${quote.daysToSettle.toFixed(1)}d`}</strong></span>
+            <span>{isEnglish ? "Tick" : "最小价位"}: <strong className="font-mono text-slate-300">{formatMarketPercentForTick(quote.tickSize, quote.tickSize)}</strong></span>
             <span className={quote.orderBookAvailable ? "text-emerald-400" : "text-amber-400"}>
               {quote.orderBookAvailable
                 ? (isEnglish ? "Live book available" : "已读取实时盘口")
@@ -1171,17 +1128,62 @@ function PositionQuotePanel({
             </span>
           </div>
 
+          <div className="mt-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3">
+            <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+              <div className="max-w-xl">
+                <label htmlFor={targetAprInputId} className="text-sm font-bold text-slate-100">
+                  {isEnglish ? "Target APR for this outcome" : "该 Outcome 的目标 APR"}
+                </label>
+                <p id={targetAprHelpId} className="mt-0.5 text-xs leading-5 text-slate-400">
+                  {isEnglish
+                    ? "Saved in this browser for this token only. It is separate from the global Alert APR."
+                    : "仅针对当前 token 保存在此浏览器中，与全局 Alert APR 预警阈值相互独立。"}
+                </p>
+              </div>
+              <div className="relative w-full max-w-44 shrink-0">
+                <input
+                  id={targetAprInputId}
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  inputMode="decimal"
+                  value={targetAprInput}
+                  onChange={(event) => onTargetAprChange(event.target.value)}
+                  aria-describedby={targetAprHelpId}
+                  aria-invalid={hasInvalidTargetApr}
+                  placeholder="12.0"
+                  className="h-10 w-full rounded-lg border border-slate-700 bg-slate-950/80 px-3 pr-9 font-mono text-base font-bold text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20"
+                />
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-500">%</span>
+              </div>
+            </div>
+
+            {hasInvalidTargetApr ? (
+              <p className="mt-2 text-xs font-semibold text-rose-300" role="alert">
+                {isEnglish ? "Enter a non-negative APR." : "请输入不小于 0 的 APR。"}
+              </p>
+            ) : targetAprPlan ? (
+              <TargetAprPlanPanel plan={targetAprPlan} tickSize={quote.tickSize} language={language} />
+            ) : (
+              <p className="mt-2 rounded-lg border border-dashed border-slate-700 px-3 py-2 text-xs text-slate-400">
+                {isEnglish
+                  ? "Set a Target APR to calculate the target probability and maker bid."
+                  : "输入 Target APR 后，将计算目标概率与 Maker 建议挂价。"}
+              </p>
+            )}
+          </div>
+
           {quote.note && (
-            <p className="mt-2 text-[11px] leading-relaxed text-amber-300/80">{quote.note}</p>
+            <p className="mt-1.5 text-[11px] leading-5 text-amber-300/80">{quote.note}</p>
           )}
-          <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+          <p className="mt-1.5 text-[11px] leading-5 text-slate-500">
             {isEnglish
-              ? "Reference only. This panel never places or cancels orders."
-              : "以上仅为价格参考；此面板不会创建、撤销或修改任何订单。"}
+              ? "APR excludes fees and is realized only if the outcome settles at $1."
+              : "APR 未计手续费，且仅在该结果最终结算为 $1 时成立。"}
           </p>
         </>
       ) : (
-        <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-4 text-xs text-slate-500">
+        <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-3 text-xs text-slate-500">
           {isEnglish ? "Preparing quote…" : "正在准备报价…"}
         </div>
       )}
@@ -1189,53 +1191,116 @@ function PositionQuotePanel({
   );
 }
 
-function QuoteMetric({
-  label,
-  value,
-  accent = "slate",
+function TargetAprPlanPanel({
+  plan,
+  tickSize,
+  language,
 }: {
-  label: string;
-  value: string;
-  accent?: "slate" | "cyan" | "emerald" | "rose";
+  plan: NonNullable<ReturnType<typeof buildTargetAprPlan>>;
+  tickSize: number | null;
+  language: Language;
 }) {
-  const accentClass = {
-    slate: "text-slate-100",
-    cyan: "text-cyan-300",
-    emerald: "text-emerald-300",
-    rose: "text-rose-300",
-  }[accent];
+  const isEnglish = language === "en";
+  const status = plan.bestBidMeetsTarget === true
+    ? {
+        label: isEnglish ? "Best bid meets target" : "当前买一满足目标 APR",
+        detail: isEnglish ? "Join the current best bid as a maker." : "建议以当前买一作为 Maker 挂价。",
+        className: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300",
+      }
+    : plan.bestBidMeetsTarget === false
+      ? {
+          label: isEnglish ? "Best bid is below target yield" : "当前买一 APR 未达到目标",
+          detail: isEnglish ? "Use the lower target-APR price as a maker bid." : "建议降低挂价至目标 APR 对应价格。",
+          className: "border-amber-500/25 bg-amber-500/10 text-amber-300",
+        }
+      : {
+          label: isEnglish ? "No best bid available" : "当前暂无买一",
+          detail: isEnglish ? "The suggestion uses the target APR and best ask only." : "建议价仅根据目标 APR 与卖一计算。",
+          className: "border-slate-700 bg-slate-900/70 text-slate-300",
+        };
 
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-950/45 px-3 py-2.5">
-      <div className="text-[10px] font-semibold text-slate-500">{label}</div>
-      <div className={`mt-1 font-mono text-sm font-bold ${accentClass}`}>{value}</div>
+    <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)]">
+      <TargetAprMetric
+        label={isEnglish ? "Target probability" : "目标 APR 对应概率"}
+        value={formatMarketPercentForTick(plan.targetPrice, tickSize)}
+      />
+      <TargetAprMetric
+        label={isEnglish ? "Suggested maker bid" : "Maker 建议挂价"}
+        value={formatMarketPercentForTick(plan.suggestedMakerBuyPrice, tickSize)}
+        supportingValue={isEnglish
+          ? `APR ${formatPercent(plan.suggestedMakerApr, 2)}`
+          : `对应 APR ${formatPercent(plan.suggestedMakerApr, 2)}`}
+      />
+      <div className={`rounded-lg border px-3 py-2.5 ${status.className}`}>
+        <div className="text-xs font-bold">{status.label}</div>
+        <div className="mt-1 text-xs leading-relaxed opacity-80">{status.detail}</div>
+      </div>
     </div>
   );
 }
 
-function QuotePriceCard({
-  title,
+function TargetAprMetric({
+  label,
+  value,
+  supportingValue,
+}: {
+  label: string;
+  value: string;
+  supportingValue?: string;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950/55 px-3 py-2.5">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</div>
+      <div className="mt-1 font-mono text-lg font-black text-cyan-300">{value}</div>
+      {supportingValue ? <div className="mt-1 text-xs text-slate-400">{supportingValue}</div> : null}
+    </div>
+  );
+}
+
+function OrderBookAprCard({
+  label,
   price,
+  apr,
   tickSize,
   accent,
   description,
+  language,
 }: {
-  title: string;
+  label: string;
   price: number | null;
+  apr: number | null;
   tickSize: number | null;
   accent: "emerald" | "rose";
   description: string;
+  language: Language;
 }) {
-  const borderClass = accent === "emerald" ? "border-emerald-500/20" : "border-rose-500/20";
-  const priceClass = accent === "emerald" ? "text-emerald-300" : "text-rose-300";
+  const isEnglish = language === "en";
+  const borderClass = accent === "emerald" ? "border-emerald-500/25" : "border-rose-500/25";
+  const accentClass = accent === "emerald" ? "text-emerald-300" : "text-rose-300";
 
   return (
-    <div className={`rounded-lg border ${borderClass} bg-slate-950/45 px-3.5 py-3`}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-semibold text-slate-400">{title}</span>
-        <span className={`font-mono text-lg font-black ${priceClass}`}>{formatPriceForTick(price, tickSize)}</span>
+    <div className={`rounded-lg border ${borderClass} bg-slate-950/55 px-3 py-2.5`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className={`text-sm font-bold ${accentClass}`}>{label}</div>
+          <div className="mt-0.5 text-xs text-slate-400">{description}</div>
+        </div>
+        <div className="text-right">
+          <div className="font-mono text-lg font-black text-slate-100">{formatMarketPercentForTick(price, tickSize)}</div>
+          <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            {isEnglish ? "Market probability" : "市场概率"}
+          </div>
+        </div>
       </div>
-      <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">{description}</p>
+      <div className="mt-2 flex items-end justify-between gap-3 border-t border-slate-800 pt-2">
+        <div className="pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+          {isEnglish ? "Conditional APR" : "条件 APR"}
+        </div>
+        <div className={`font-mono text-xl font-black ${accentClass}`}>
+          {formatPercent(apr, 2)}
+        </div>
+      </div>
     </div>
   );
 }

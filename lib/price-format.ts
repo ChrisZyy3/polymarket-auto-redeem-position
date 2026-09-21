@@ -16,7 +16,8 @@ export function priceDecimalsForTick(tickSize: number | null | undefined): numbe
   return Math.min(20, decimalPlaces(tickSize));
 }
 
-export function formatPriceForTick(value: number | null | undefined, tickSize: number | null | undefined): string {
+export function formatMarketPercentForTick(value: number | null | undefined, tickSize: number | null | undefined): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  return `$${value.toFixed(priceDecimalsForTick(tickSize))}`;
+  const percentDecimals = Math.max(0, priceDecimalsForTick(tickSize) - 2);
+  return `${(value * 100).toFixed(percentDecimals)}%`;
 }

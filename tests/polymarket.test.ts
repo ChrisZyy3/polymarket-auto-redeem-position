@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseCashBalanceResponse } from "../lib/polymarket";
+import { filterPositionsByMinimumValue, parseCashBalanceResponse } from "../lib/polymarket";
 
 test("parseCashBalanceResponse decodes six-decimal token balances", () => {
   assert.equal(parseCashBalanceResponse({ result: "0xf4240" }), 1);
@@ -24,4 +24,18 @@ test("parseCashBalanceResponse rejects missing or malformed results", () => {
     () => parseCashBalanceResponse({ result: "not-hex" }),
     /no valid cash balance/,
   );
+});
+
+test("filterPositionsByMinimumValue excludes positions worth less than one dollar", () => {
+  const positions = [
+    { currentValue: 0.99 },
+    { currentValue: 1 },
+    { currentValue: 12.5 },
+    { currentValue: Number.NaN },
+  ];
+
+  assert.deepEqual(filterPositionsByMinimumValue(positions, 1), [
+    { currentValue: 1 },
+    { currentValue: 12.5 },
+  ]);
 });
