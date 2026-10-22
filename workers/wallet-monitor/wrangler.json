@@ -1,0 +1,33 @@
+{
+  "name": "polymarket-wallet-monitor",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-22",
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  },
+  "vars": {
+    "WALLET_ADDRESS": "0x052f4191cd324a348835a846d34df5b0061e53fb",
+    "MIN_POSITION_USD": "5"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MONITOR",
+        "class_name": "WalletMonitor"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "WalletMonitor"
+      ]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

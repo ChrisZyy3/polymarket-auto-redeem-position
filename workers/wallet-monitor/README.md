@@ -1,0 +1,96 @@
+# Polymarket 每分钟地址提醒
+
+独立的 Cloudflare Worker，不依赖 Dashboard、Vercel 或钱包私钥。
+
+默认监控地址：0x052f4191cd324a348835a846d34df5b0061e53fb
+
+## 通知范围
+
+- BUY/SELL 成交：每条新活动通知，包含方向、份数、成交金额、价格和交易链接。
+- 新变为可赎回：提醒手动处理。
+- 实际 REDEEM：通知实际到账金额；到账金额不等于利润。零回款赎回也会提示。
+- 结算归零：仅当 Data API 的 redeemable 为 true 且 curPrice 为 0 时触发；单纯浮亏或低价不触发。
+- 仓位提醒默认忽略投入/价值均小于 $5 的仓位；结算归零时保留之前记录的投入，避免零市值被过滤。成交提醒没有 $5 门槛，避免漏掉拆分成交。
+
+首次运行只建立基线，不补发历史成交或已经可赎回/归零的仓位。
+上线前已经赎回且消失的仓位不会补报。
+若归零后在两次轮询之间已赎回而从持仓消失，会通过 REDEEM 活动提示零回款。
+
+## 部署
+
+需要 Node.js 22+ 和 Cloudflare 账号。SQLite Durable Objects 可用于 Workers Free 计划；
+实际额度以账号和平台最新限制为准，不保证长期零成本。
+
+在本目录执行：
+
+~~~bash
+node test.mjs
+npx wrangler@4 login
+npx wrangler@4 secret put PUSH_URL
+npx wrangler@4 secret put MONITOR_SECRET
+npx wrangler@4 deploy
+~~~
+
+PUSH_URL 输入你的完整推送地址：
+https://<uid>.push.ft07.com/send/<sendkey>.send
+
+MONITOR_SECRET 自行设为一个随机长字符串，用于保护手动测试/状态查询入口。
+不要把 PUSH_URL 或 MONITOR_SECRET 提交到 GitHub。无需把浏览器的 Cookie、Origin、
+Referer、User-Agent 等请求头复制过来；推送只需 JSON POST。
+
+wrangler.json 已设置默认钱包地址、$5 仓位门槛、每分钟 Cron、SQLite Durable Object 绑定和迁移。
+部署会自动创建存储，不需要手建 KV。
+Cron 配置传播可能需要约 15 分钟。实际提醒延迟还受 Polymarket 索引和推送通道影响，
+并不保证交易发生后恰好 60 秒内送达。
+
+## 手动验证
+
+用实际部署地址替换 worker.example.workers.dev。先在终端设置 MONITOR_SECRET，
+下面的变量不会写进源代码。
+
+~~~bash
+curl -X POST -H "Authorization: Bearer $MONITOR_SECRET" https://worker.example.workers.dev/test
+curl -X POST -H "Authorization: Bearer $MONITOR_SECRET" https://worker.example.workers.dev/poll
+curl -H "Authorization: Bearer $MONITOR_SECRET" https://worker.example.workers.dev/status
+~~~
+
+/test 仅发送测试通知；/poll 执行一轮检查；/status 返回初始化、检查时间和待发送数量。
+首次 /poll 返回 initialized:true；之后没有新事件属于正常状态。
+
+部署后查看 Workers Logs 确认没有持续错误。数据或推送失败会抛出错误并记录日志，
+后续 Cron 重试。监控自身停机不能依靠同一个推送服务保证通知，必要时另配外部可用性监控。
+
+## 去重与重试
+
+每个钱包使用一个 Durable Object，合并同一实例内重叠的检查请求。
+活动按交易哈希、类型、结果 token、方向、时间、金额、价格等字段去重；
+一笔链上交易中的不同结果不会只因哈希相同而被丢弃。
+
+活动从上次检查点向前重查 15 分钟，处理常见索引延迟；超过该窗口才被索引的记录可能漏报。
+断线期间检查点不前进，恢复后从上次检查点补查；分页超限会明确失败，
+不会默默截断数据。长时间离线且活动量极大时需要拆分时间窗口恢复。
+
+检测结果与待发送内容先一起写入持久存储，推送成功后才移出待发送列表。
+数据 API 失败不会推进检查点。手机推送服务没有幂等键，因此若推送已被服务接收，
+但响应丢失或在确认落盘前进程中断，重试仍可能造成重复，不能保证 exactly-once。
+
+API 某些字段完全相同且无独立日志序号的重复成交可能无法彼此区分。
+仓位列表使用偏移分页，在翻页期间快速变动时可能短暂重复或遗漏，下一轮再次检查。
+本工具基于公开 Data API，提醒不等于链上最终审计结果。
+
+## 文件
+
+- worker.mjs：Cron、受保护的测试/查询接口、Durable Object。
+- monitor.mjs：分页、基线、事件识别、持久 outbox、推送。
+- test.mjs：模拟数据与推送的行为检查。
+- wrangler.json：Cloudflare 部署配置。
+
+没有真实交易、撤单或赎回权限；仅查询和通知。
+
+## 官方参考
+
+- https://docs.polymarket.com/api-reference/core/get-user-activity
+- https://docs.polymarket.com/api-reference/core/get-current-positions-for-a-user
+- https://developers.cloudflare.com/workers/configuration/cron-triggers/
+- https://developers.cloudflare.com/durable-objects/
+- https://doc.sc3.ft07.com/en/serverchan3/server/api
