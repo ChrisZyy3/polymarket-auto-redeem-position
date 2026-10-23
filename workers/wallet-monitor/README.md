@@ -15,7 +15,7 @@
 ## 通知范围
 
 - BUY/SELL 成交：每条新活动通知，包含方向、单笔份数、成交金额、价格和市场链接；不再展示交易哈希链接。
-- 新变为可赎回：提醒手动处理。
+- 新变为可赎回：区分 WIN（每份回款约 1 pUSD）、PARTIAL（正回款不足 1 pUSD）并提醒手动处理；LOSS（每份回款 0）单独提示。
 - 实际 REDEEM：通知实际到账金额；到账金额不等于利润。零回款赎回也会提示。
 - 结算归零：仅当 Data API 的 redeemable 为 true 且 curPrice 为 0 时触发；单纯浮亏或低价不触发。
 - 仓位提醒默认忽略投入/价值均小于 $5 的仓位；结算归零时保留之前记录的投入，避免零市值被过滤。成交提醒没有 $5 门槛，避免漏掉拆分成交。
@@ -146,3 +146,15 @@ endDate 只有日期时注明「仅提供日期」；缺失或占位符标注「
 不再展示 Polygonscan 交易哈希链接；保留 Polymarket 事件市场链接。
 旧的持久化待发送消息也会移除交易哈希链接，但不能为历史消息反向补齐缺失的持仓快照。
 钱包的 Durable Object ID、检查点、推送审计、Cron 和密钥均不变。
+
+## 新版 Server酱通知格式
+
+- 锁屏标题 title：🟢 BUY / 🟠 SELL / 🏆 WIN / 🔴 LOSS / 🟣 PARTIAL / 💰 REDEEM + 钱包名称 + 主要金额。
+- 通知摘要 short：市场名称、YES/NO、成交份数和单价或预计盈亏。
+- 正文 desp：支持 Markdown 的市场、成交/结算信息、持仓摘要、预计结束时间与市场链接；不包含交易哈希链接。
+- 若 redeemable=true 且 curPrice=1，则 WIN；curPrice=0 为 LOSS；0<curPrice<1 为 PARTIAL，需以最终规则为准。
+- 结算盈亏仅在 Data API 的 grossInitialValue 或 initialValue 提供可用的剩余仓位成本时计算，属于估算，非历史全部净盈利。
+- 每条推送尾部增加 **💳 钱包余额（链上 pUSD）**：通过 Polygon RPC 的 ERC-20 balanceOf 读取 Polymarket V2 的 pUSD（6 位小数），最多尝试两个 RPC 节点，查询失败只显示暂时无法获取，不阻止成交通知。
+- 该余额不等于真正 Available balance：挂单占用可能使可下单金额更低；准确的 CLOB 可用余额需额外授权认证，本工具不收集任何钱包签名/密钥。
+- 仅在有待推送消息时查询 pUSD，不增加每分钟空闲 Cron 的链上请求；同一轮推送共享余额结果。
+- 修改不触碰 Durable Object 命名、存储结构、Cron、既有消息队列和计数。旧待发通知发送时也附加余额，但不会虚构历史成交数据。
