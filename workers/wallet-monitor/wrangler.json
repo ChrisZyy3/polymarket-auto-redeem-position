@@ -10,6 +10,7 @@
   "vars": {
     "WALLET_ADDRESS": "0x052f4191cd324a348835a846d34df5b0061e53fb",
     "MIN_POSITION_USD": "5",
+    "V2_SHADOW_ENABLED": "true",
     "WALLET_ADDRESSES": "0x9f7eb5bc88342f01d18754be0439fad79ec282ce,0x24816c037cdc2c9bd979e69d777541cf560a9b79,0x052f4191cd324a348835a846d34df5b0061e53fb"
   },
   "durable_objects": {
