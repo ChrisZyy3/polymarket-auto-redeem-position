@@ -96,7 +96,7 @@ export async function push(env, fetcher, title, desp) {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title, desp, tags: "Polymarket" }),
-    redirect: "error",
+    redirect: "manual",
   });
   if (result.code !== 0 && result.data?.error !== "SUCCESS") {
     throw new Error("ServerChan rejected notification");
