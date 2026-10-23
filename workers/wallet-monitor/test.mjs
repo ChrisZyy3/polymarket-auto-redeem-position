@@ -262,11 +262,16 @@ assert(sold.title.startsWith("🟠 SELL · PigsWallet") &&
 const redemption = tradeAlert({ transactionHash: "redeem", type: "REDEEM",
   asset: "z", title: market.title, outcome: "Yes", size: 10, usdcSize: 10, timestamp: 1910 },
   market, lines, "RealChris", marketLink);
-assert(redemption.title.startsWith("💰 REDEEM · RealChris") &&
+assert(redemption.title.startsWith("💰 已赎回 · RealChris") &&
   redemption.short.includes("到账 $10.00"), "REDEEM card and preview");
 const zeroRedemption = tradeAlert({ type: "REDEEM", size: 10, usdcSize: 0, timestamp: 1910 },
   market, lines, "RealChris", marketLink);
-assert(zeroRedemption.desp.includes("零回款赎回"), "zero payout redemption clearly labeled");
+assert(zeroRedemption.desp.includes("零回款赎回") &&
+  !zeroRedemption.title.includes("已赎回"), "zero payout must not falsely claim positive redemption");
+const unverifiedRedemption=tradeAlert({type:"REDEEM",size:10,
+  timestamp:1910,usdcSize:null},market,lines,"RealChris",marketLink);
+assert(unverifiedRedemption.title.includes("赎回记录（到账待核实）"),
+  "missing redeem payout never claims confirmed funds");
 
 // The balance query is optional; public RPC failure must not interfere with push.
 const noRpc = async () => ({ ok: false, status: 503 });
