@@ -1,4 +1,5 @@
 import { poll, activityKey, positionStatus, auditSnapshot, walletLabel, expectedEnd, marketContextLines } from "./monitor.mjs";
+import { tradeAlert, settlementAlert, settlementKind, estimatePnl, walletPusdBalance } from "./notification.mjs";
 import worker, { walletAddresses, WalletMonitor } from "./worker.mjs";
 
 const assert = (v, m) => { if (!v) throw new Error(m); };
@@ -10,6 +11,7 @@ let positions = [{ asset: "a", conditionId: "c", size: 100, avgPrice: .9,
 let activity = [];
 let sent = 0;
 const delivered = [];
+let rpcCalls = 0;
 let rejectPush = false;
 const auditEvents = [];
 const priorConsoleInfo = console.info;
@@ -21,6 +23,16 @@ const storage = {
 };
 const fetcher = async (url, init) => {
   const s = String(url);
+  if (s.includes("polygon-bor-rpc.publicnode.com") || s.includes("polygon.drpc.org")) {
+    rpcCalls++;
+    const rpcRequest = JSON.parse(init.body);
+    assert(rpcRequest.method === "eth_call", "chain balance read is eth_call");
+    assert(rpcRequest.params[0].to.toLowerCase() === "0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb",
+      "Polymarket pUSD contract used");
+    assert(rpcRequest.params[0].data.endsWith(env.WALLET_ADDRESS.slice(2).toLowerCase()),
+      "wallet address encoded");
+    return { ok: true, json: async () => ({ jsonrpc: "2.0", id: 1, result: "0x075bcd15" }) };
+  }
   if (s.includes("push.ft07.com")) {
     assert(init.method === "POST", "push uses POST");
     assert(init.redirect === "manual", "Worker fetch uses supported redirect policy");
@@ -37,7 +49,12 @@ activity = [{ transactionHash: "tx", type: "TRADE", asset: "a",
   timestamp: 1020, side: "BUY", size: 5, usdcSize: 4.5, price: .9 }];
 let result = await poll(storage, env, fetcher, 1060);
 assert(sent === 1 && result.alerts === 1, "new buy sends one notification");
-assert(delivered[0].desp.includes("钱包：ChrisZyy"), "wallet label in sent notification");
+assert(delivered[0].title.startsWith("🟢 BUY · ChrisZyy"), "rich notification title");
+assert(delivered[0].desp.includes("账户：** ChrisZyy"), "wallet in detailed notification");
+assert(delivered[0].short.includes("5 份 @ $0.9"), "short mobile preview includes fill");
+assert(delivered[0].desp.includes("**💳 钱包余额（链上 pUSD）：123.46 pUSD**"),
+  "correct Polygon pUSD balance in footer");
+assert(rpcCalls === 1, "balance is queried only when an alert exists");
 assert(delivered[0].desp.includes("预计结束：2026-12-31"), "end date populated");
 assert(delivered[0].desp.includes("当前该选项总持仓：100 份"), "total shares not trade fill");
 assert(delivered[0].desp.includes("当前持仓市值：$95.00"), "current USD holdings");
@@ -47,6 +64,7 @@ assert(!delivered[0].desp.includes("交易：") && !delivered[0].desp.includes("
   "tx explorer link removed");
 await poll(storage, env, fetcher, 1120);
 assert(sent === 1, "same trade is not sent twice");
+assert(rpcCalls === 1, "no needless chain queries without alerts");
 assert(activityKey(activity[0]) !== activityKey({ ...activity[0], asset: "b" }),
   "different outcomes in same tx remain distinct");
 positions = [{ ...positions[0], redeemable: true, curPrice: 0, currentValue: 0 }];
@@ -60,6 +78,8 @@ rejectPush = false;
 await poll(storage, env, fetcher, 1240);
 assert(sent === 2 && db.get("monitor").pending.length === 0,
   "zero value loss is delivered even after position disappears");
+assert(delivered[1].title.startsWith("🔴 LOSS · ChrisZyy"), "loss title is visually distinct");
+assert(delivered[1].desp.includes("-$90.00"), "loss inferred only using remaining entry basis");
 assert(positionStatus({ redeemable: false, curPrice: 0 }) === "open",
   "open market priced zero is not a settlement loss");
 assert(positionStatus({ redeemable: true, curPrice: .5 }) === "redeemable",
@@ -196,3 +216,68 @@ assert(ambiguousContext.some(line => line.includes("暂无数据")), "different 
 assert(delivered.every(m => !m.desp.includes("交易：") &&
   !m.desp.includes("polygonscan.com/tx")), "all notifications lack tx explorer links");
 console.log("Passed: wallet labels, planned end, holding summaries, unknown market, tx URL removal");
+
+
+// Rich event card generator tests. A redeemable price of 0.5 is PARTIAL, not WIN.
+const market = { asset: "z", conditionId: "zz", title: "Will Z happen?",
+  outcome: "Yes", endDate: "2026-12-31", eventSlug: "will-z-happen",
+  size: 100, currentValue: 100, avgPrice: 0.82, grossInitialValue: 82,
+  initialValue: 82, redeemable: true, curPrice: 1 };
+const lines = marketContextLines(market, [market]);
+const marketLink = "https://polymarket.com/event/will-z-happen";
+const won = settlementAlert(market, lines, "RealChris", 1900, marketLink);
+assert(settlementKind(market) === "WIN" && won.title.startsWith("🏆 WIN · RealChris"),
+  "100% payout classified as WIN");
+assert(won.desp.includes("+ $18.00") === false && won.desp.includes("+$18.00"),
+  "WIN expected position profit");
+assert(won.desp.includes("+21.95%"), "profit ROI based on remaining cost");
+assert(won.short.includes("预估盈亏 +$18.00"), "settlement preview contains profit");
+const partial = settlementAlert({ ...market, curPrice: 0.5 }, lines, "PigsWallet", 1900, marketLink);
+assert(partial.title.startsWith("🟣 PARTIAL · PigsWallet") &&
+  partial.desp.includes("部分回款"), "partial resolution never classified as WIN");
+const loss = settlementAlert({ ...market, curPrice: 0, currentValue: 0,
+  grossInitialValue: 24, initialValue: 24 }, lines, "PigsWallet", 1900, marketLink);
+assert(loss.title.startsWith("🔴 LOSS · PigsWallet") &&
+  loss.desp.includes("-$24.00"), "LOSS and remaining-cost estimate");
+assert(settlementKind({ ...market, redeemable: false, curPrice: 0 }) === null,
+  "open mark at zero is not resolved loss");
+const noBasis = { ...market, grossInitialValue: null, initialValue: null };
+assert(estimatePnl(noBasis) === null &&
+  settlementAlert(noBasis, lines, "RealChris", 1900, marketLink).desp.includes("未估算盈亏"),
+  "missing cost never fabricates a profit");
+const sold = tradeAlert({ ...activity[0], side: "SELL", title: market.title,
+  outcome: "Yes", usdcSize: 4.5 }, market, lines, "PigsWallet", marketLink);
+assert(sold.title.startsWith("🟠 SELL · PigsWallet") &&
+  sold.short.includes("份 @ "), "SELL card and short preview");
+const redemption = tradeAlert({ transactionHash: "redeem", type: "REDEEM",
+  asset: "z", title: market.title, outcome: "Yes", size: 10, usdcSize: 10, timestamp: 1910 },
+  market, lines, "RealChris", marketLink);
+assert(redemption.title.startsWith("💰 REDEEM · RealChris") &&
+  redemption.short.includes("到账 $10.00"), "REDEEM card and preview");
+const zeroRedemption = tradeAlert({ type: "REDEEM", size: 10, usdcSize: 0, timestamp: 1910 },
+  market, lines, "RealChris", marketLink);
+assert(zeroRedemption.desp.includes("零回款赎回"), "zero payout redemption clearly labeled");
+
+// The balance query is optional; public RPC failure must not interfere with push.
+const noRpc = async () => ({ ok: false, status: 503 });
+assert(await walletPusdBalance(noRpc, env.WALLET_ADDRESS) === null,
+  "RPC outage returns unavailable rather than a fabricated zero");
+const rpcFallback = async (url) => ({
+  ok: String(url).includes("polygon.drpc.org"),
+  json: async () => ({ result: "0x0" })
+});
+assert(await walletPusdBalance(rpcFallback, env.WALLET_ADDRESS) === "0.00 pUSD",
+  "secondary RPC fallback reads an actual zero balance");
+// Legacy queued message is reformatted safely at send time without resetting checkpoints.
+const beforeLegacy = delivered.length;
+const legacyStored = legacyMap.get("monitor");
+legacyStored.pending = [{ title: "Polymarket · 买入成交",
+  desp: "Old market\n\n交易：https://polygonscan.com/tx/0xlegacy\n\nOld body" }];
+legacyMap.set("monitor", legacyStored);
+await poll(legacyStorage, env, fetcher, 1600);
+assert(delivered.length === beforeLegacy + 1 &&
+  delivered[beforeLegacy].desp.includes("钱包：ChrisZyy") &&
+  delivered[beforeLegacy].desp.includes("💳 钱包余额") &&
+  !delivered[beforeLegacy].desp.includes("polygonscan.com/tx"),
+  "old queued alerts retain wallet labels, gain balance, and strip explorer URLs");
+console.log("Passed: BUY SELL WIN LOSS PARTIAL REDEEM, short, Markdown, RPC balance and fallback");
