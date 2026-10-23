@@ -1,0 +1,26 @@
+name: Wallet Monitor Tests
+
+on:
+  push:
+    branches:
+      - feat/wallet-alerts-minute
+    paths:
+      - 'workers/wallet-monitor/**'
+      - '.github/workflows/wallet-monitor-test.yml'
+  pull_request:
+    paths:
+      - 'workers/wallet-monitor/**'
+      - '.github/workflows/wallet-monitor-test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run wallet monitor unit tests
+        run: node workers/wallet-monitor/test.mjs
