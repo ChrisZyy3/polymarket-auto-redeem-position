@@ -189,3 +189,29 @@ endDate 只有日期时注明「仅提供日期」；缺失或占位符标注「
 - 监控站点：`https://polymarket-wallet-monitor.chriszyy3.workers.dev/health`。
 - GitHub Actions 故障 Issue 通知由用户 GitHub 通知设置决定，**并不等于 Server酱消息或独立推送服务 SLA**；GitHub 定时工作流有延迟或无法触发的可能，需在高可靠要求下接入其他第三方 uptime 平台。
 - 默认保持 `/status`、`/poll`、`/test` 的鉴权不变。不新增任何 API 密钥和钱包签名权限。
+
+
+## Asset digest, redeem and market-risk alerts
+
+**Daily (Beijing ~09:00)**: existing 5-minute Cron triggers a single three-wallet summary during the 09:00 hour. Each wallet stores a fresh compact position snapshot after a successful poll; a separate coordinator Durable Object `_system_daily_digest_v1` accepts at most one report per Beijing calendar day. The message is persisted in the existing Outbox mechanism and retried if ServerChan is unavailable. No additional Cron schedules, database or API keys are needed.
+
+The daily report separates on-chain wallet pUSD (not order-adjusted available balance), live/unresolved market-value estimates and potential unredeemed payouts. Their sums do not double-count redeemable positions. Gross floating PnL is a mark-to-market estimate based on currentValue and initialValue/avgPrice; it is not a fee-inclusive or realized net profit. Missing RPC/valuation data yields `unavailable`, not an invented zero.
+
+**Redeemable cash**: a position must remain redeemable with positive estimated payout for at least 6 hours and be worth at least $5 before a `💰 CLAIM` reminder is emitted for the wallet. The same token can be reminded no more often than every 24 hours. All qualifying tokens in a wallet are grouped into a single alert per poll. Loss outcomes with zero payout are not advertised as reclaimable cash. Existing wallets seed new tracking state on rollout, preventing a wave of historical notices.
+
+**Market price risk**: current, open, non-dust holdings from the Data API are monitored on the existing 5-minute poll. A risk event occurs when the *observed reference price* crosses below 0.90; or falls at least 5% below the wallet's average entry price; or falls by at least $0.05 in one successful polling interval. Multiple reasons per token and multiple tokens per wallet are grouped in one risk message, with a 24-hour per-token cooldown. On upgrade, observed marks silently initialize their baseline. These are price-based triggers, not executable order prices or liquidation advice.
+
+Default Wrangler text vars:
+
+- `DAILY_REPORT_ENABLED=true`
+- `REDEEM_REMINDER_ENABLED=true`, `REDEEM_DELAY_HOURS=6`, `REDEEM_COOLDOWN_HOURS=24`, `MIN_REDEEM_USD=5`
+- `RISK_ALERT_ENABLED=true`, `PRICE_ALERT_FLOOR=0.90`, `COST_DRAWDOWN_PCT=5`, `RAPID_DROP_POINTS=0.05`, `RISK_COOLDOWN_HOURS=24`
+
+The default public `GET /health` still provides no personal portfolio values. New internal DO-only `/digest-snapshot`, `/digest-state`, `/digest-enqueue` routes are not exposed by the Worker's public HTTP routing. Existing protected `/status`, `/test` and `/poll` are unchanged. New storage fields only extend existing wallet DO state; no wallets, secrets, transaction permissions or checkpoints are reset.
+
+## Tests
+
+```bash
+node workers/wallet-monitor/test.mjs
+node workers/wallet-monitor/test-digest.mjs
+```

@@ -23,4 +23,4 @@ jobs:
         with:
           node-version: '22'
       - name: Run wallet monitor unit tests
-        run: node workers/wallet-monitor/test.mjs
+        run: node workers/wallet-monitor/test.mjs && node workers/wallet-monitor/test-digest.mjs

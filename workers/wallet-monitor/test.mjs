@@ -148,7 +148,7 @@ assert(polled.map(p => p.name).join(",") === originals.join(","), "DO ids preser
 const unauthorized = await worker.fetch(new Request("https://example.com/status"), protectedEnv);
 assert(unauthorized.status === 401, "status endpoint is protected");
 let scheduled = null;
-worker.scheduled({}, protectedEnv, { waitUntil: task => { scheduled = task; } });
+worker.scheduled({ scheduledTime: Date.UTC(2026,9,23,3,0,0) }, protectedEnv, { waitUntil: task => { scheduled = task; } });
 await scheduled;
 assert(polled.length === 6, "single Cron checks each wallet once");
 console.log("Passed: multi-wallet parser, duplicate elimination, single-wallet fallback, validation, authorization, independent DO routing, Cron fan-out");
