@@ -1,3 +1,4 @@
+import { tradeAlert, settlementAlert, walletPusdBalance } from "./notification.mjs";
 const API = "https://data-api.polymarket.com";
 const PAGE = 500;
 const OVERLAP = 15 * 60;
@@ -161,7 +162,7 @@ async function pages(fetcher, path, params, cap) {
   throw new Error("Pagination cap reached: " + path + "; split the time window before continuing");
 }
 
-export async function push(env, fetcher, title, desp) {
+export async function push(env, fetcher, title, desp, short) {
   if (!env.PUSH_URL) throw new Error("PUSH_URL secret is required");
   const url = new URL(env.PUSH_URL);
   if (url.protocol !== "https:" || !/^\d+\.push\.ft07\.com$/.test(url.hostname)) {
@@ -170,7 +171,7 @@ export async function push(env, fetcher, title, desp) {
   const result = await json(fetcher, url.href, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title, desp, tags: "Polymarket" }),
+    body: JSON.stringify({ title, desp, tags: "Polymarket", ...(short ? { short } : {}) }),
     redirect: "manual",
   });
   if (result.code !== 0 && result.data?.error !== "SUCCESS") {
@@ -192,6 +193,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     state.audit.lastPollAccepted = 0;
   }
   let pushedThisPoll = 0;
+  let cashInfo; // one optional Polygon RPC read per round with notifications
   // Persist the outbox and per-wallet push receipt together.
   const flush = async () => {
     while (state.pending.length) {
@@ -201,7 +203,13 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
       await storage.put("monitor", state);
       auditLog("push_attempted", user, { at: now, type, pending: state.pending.length });
       try {
-        await push(env, fetcher, item.title, "钱包：" + walletLabel(user) + "\n\n" + removeTransactionUrl(item.desp));
+        const base = item.formatVersion === 2 ? item.desp :
+          "钱包：" + walletLabel(user) + "\n\n" + removeTransactionUrl(item.desp);
+        if (cashInfo === undefined) cashInfo = await walletPusdBalance(fetcher, user);
+        const footer = "\n\n---\n\n**💳 钱包余额（链上 pUSD）：" +
+          (cashInfo == null ? "暂时无法获取" : cashInfo) +
+          "**\n\n> 未扣除挂单占用，不等于可下单 Available balance。";
+        await push(env, fetcher, item.title, base + footer, item.short);
       } catch (error) {
         state.audit.pushFailureCount += 1;
         state.audit.lastPushErrorAt = now;
@@ -253,19 +261,13 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     seen[key] = num(a.timestamp);
     if (!["TRADE", "REDEEM"].includes(a.type)) continue;
     // Trade alerts have no value floor: a large order can fill in tiny pieces.
-    const kind = a.type === "TRADE" ? (a.side === "BUY" ? "买入成交" : "卖出成交") : "实际赎回";
-    const zeroRedemption = a.type === "REDEEM" && num(a.usdcSize) === 0 && num(a.size) > 0;
-    const title = "Polymarket · " + (zeroRedemption ? "零回款赎回" : kind);
     const holding = matchingPosition(a, positions);
     const market = { ...holding, ...a, title: a.title || holding?.title,
-      outcome: a.outcome || holding?.outcome, eventSlug: a.eventSlug || holding?.eventSlug };
-    const desp = [label(market), "数量：" + num(a.size),
-      (a.type === "TRADE" ? "成交金额：" : "赎回到账：") + usd(a.usdcSize),
-      a.type === "TRADE" ? "成交价：" + num(a.price) : "到账金额不等于净利润",
-      "北京时间：" + new Date(num(a.timestamp) * 1000).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" }),
-      ...marketContextLines(a, positions),
-      link(market)].filter(Boolean).join("\n\n");
-    pending.push({ title, desp });
+      outcome: a.outcome || holding?.outcome,
+      eventSlug: a.eventSlug || holding?.eventSlug,
+      endDate: holding?.endDate ?? a.endDate };
+    pending.push(tradeAlert(a, market, marketContextLines(a, positions),
+      walletLabel(user), link(market)));
   }
   const tracked = { ...state.positions };
   for (const p of positions) {
@@ -277,16 +279,9 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     if (exposure < minimum) continue;
     const status = positionStatus(p);
     if (["lost", "redeemable"].includes(status) && before?.status !== status) {
-      pending.push({
-        title: "Polymarket · " + (status === "lost" ? "仓位结算归零" : "仓位可赎回"),
-        desp: [label(p), "持仓：" + num(p.size) + " 份",
-          "当前价值：" + usd(p.currentValue),
-          "剩余成本（费用口径以 API 为准）：" + usd(p.grossInitialValue ?? p.initialValue),
-          status === "lost" ? "Data API 标记可结算，持有结果的结算价格为 0。"
-            : "可以赎回；本监控不会替你执行赎回。",
-          ...marketContextLines(p, positions),
-          link(p)].filter(Boolean).join("\n\n")
-      });
+      const item = settlementAlert(p, marketContextLines(p, positions), walletLabel(user),
+        now, link(p));
+      if (item) pending.push(item);
     }
     tracked[p.asset] = { status, exposure, conditionId: p.conditionId, outcome: p.outcome };
   }
