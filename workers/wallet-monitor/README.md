@@ -3,7 +3,7 @@
 独立的 Cloudflare Worker，不依赖 Dashboard、Vercel 或钱包私钥。
 
 支持每分钟监控多个钱包，每个钱包独立持久化检查点、待发通知和去重状态。
-通知内容会标记钱包地址。升级前单钱包地址对应的 Durable Object 名称不变，历史检查进度继续保留。
+推送按地址显示自定义钱包名称，未匹配时仍显示原钱包地址。升级前单钱包地址对应的 Durable Object 名称不变，历史检查进度继续保留。
 
 默认监控地址（3 个）：
 - 0x9f7eb5bc88342f01d18754be0439fad79ec282ce
@@ -14,7 +14,7 @@
 
 ## 通知范围
 
-- BUY/SELL 成交：每条新活动通知，包含方向、份数、成交金额、价格和交易链接。
+- BUY/SELL 成交：每条新活动通知，包含方向、单笔份数、成交金额、价格和市场链接；不再展示交易哈希链接。
 - 新变为可赎回：提醒手动处理。
 - 实际 REDEEM：通知实际到账金额；到账金额不等于利润。零回款赎回也会提示。
 - 结算归零：仅当 Data API 的 redeemable 为 true 且 curPrice 为 0 时触发；单纯浮亏或低价不触发。
@@ -126,3 +126,23 @@ Existing checkpoint/outbox state is preserved. Historic notifications before
 auditSince cannot be reconstructed, so pushCount and alertsDetectedCount start at
 zero when audit is first initialized. TRADE/REDEEM still have no USD minimum;
 only redeemable/lost position transitions use MIN_POSITION_USD.
+
+## 推送的钱包名称和当前持仓摘要
+
+通知中的钱包展示名称（不区分大小写）：
+- 0x9f7eb5bc88342f01d18754be0439fad79ec282ce → PigsWallet
+- 0x052f4191cd324a348835a846d34df5b0061e53fb → ChrisZyy
+- 0x24816c037cdc2c9bd979e69d777541cf560a9b79 → RealChris
+- 其他钱包地址 → 原样显示地址。
+
+成交、实际赎回、结算/可赎回通知均附加：预计结束、当前该选项总持仓（份）、
+当前持仓市值（USDC）和买入均价（USDC/份）。信息来自同一轮
+Data API /positions 的 size、currentValue、avgPrice、endDate。
+这里的「总持仓」指本钱包在该市场 outcome/选项上的剩余份额，而不是单笔成交量；
+不同市场选项不会被错误合并。预计结束日期属于市场元数据，不保证结算时间。
+endDate 只有日期时注明「仅提供日期」；缺失或占位符标注「暂无数据」。
+卖出全部持仓或持仓接口还没索引到时，数量、市值与均价会标注暂无数据，绝不拿单笔成交量代替。
+
+不再展示 Polygonscan 交易哈希链接；保留 Polymarket 事件市场链接。
+旧的持久化待发送消息也会移除交易哈希链接，但不能为历史消息反向补齐缺失的持仓快照。
+钱包的 Durable Object ID、检查点、推送审计、Cron 和密钥均不变。
