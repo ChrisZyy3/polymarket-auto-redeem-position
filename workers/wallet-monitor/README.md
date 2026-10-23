@@ -1,8 +1,8 @@
-# Polymarket 每分钟地址提醒
+# Polymarket 钱包交易与结算提醒（5分钟聚合监控）
 
 独立的 Cloudflare Worker，不依赖 Dashboard、Vercel 或钱包私钥。
 
-支持每分钟监控多个钱包，每个钱包独立持久化检查点、待发通知和去重状态。
+支持每 5 分钟监控多个钱包，每个钱包独立持久化检查点、待发通知和去重状态。
 推送按地址显示自定义钱包名称，未匹配时仍显示原钱包地址。升级前单钱包地址对应的 Durable Object 名称不变，历史检查进度继续保留。
 
 默认监控地址（3 个）：
@@ -46,7 +46,7 @@ MONITOR_SECRET 自行设为一个随机长字符串，用于保护手动测试/�
 不要把 PUSH_URL 或 MONITOR_SECRET 提交到 GitHub。无需把浏览器的 Cookie、Origin、
 Referer、User-Agent 等请求头复制过来；推送只需 JSON POST。
 
-wrangler.json 已设置 3 个默认钱包地址、$5 仓位门槛、每分钟 Cron、SQLite Durable Object 绑定和迁移。
+wrangler.json 已设置 3 个默认钱包地址、$5 仓位门槛、每 5 分钟 Cron、SQLite Durable Object 绑定和迁移。
 部署会自动创建存储，不需要手建 KV。
 Cron 配置传播可能需要约 15 分钟。实际提醒延迟还受 Polymarket 索引和推送通道影响，
 并不保证交易发生后恰好 60 秒内送达。
@@ -65,8 +65,8 @@ curl -H "Authorization: Bearer $MONITOR_SECRET" https://worker.example.workers.d
 /test 仅发送测试通知；/poll 执行一轮检查；/status 返回初始化、检查时间和待发送数量。
 首次 /poll 返回 initialized:true；之后没有新事件属于正常状态。
 
-部署后查看 Workers Logs 确认没有持续错误。数据或推送失败会抛出错误并记录日志，
-后续 Cron 重试。监控自身停机不能依靠同一个推送服务保证通知，必要时另配外部可用性监控。
+部署后查看 Workers Logs 确认没有持续错误。Data API 查询失败会保留原检查点并记录错误，后续 Cron 重试；
+推送失败则保留 Outbox，不阻塞正常轮询，由 Durable Object Alarm 独立退避重试。监控自身停机不能依靠同一个推送服务保证通知，必要时另配外部可用性监控。
 
 ## 去重与重试
 
@@ -74,8 +74,8 @@ curl -H "Authorization: Bearer $MONITOR_SECRET" https://worker.example.workers.d
 活动按交易哈希、类型、结果 token、方向、时间、金额、价格等字段去重；
 一笔链上交易中的不同结果不会只因哈希相同而被丢弃。
 
-活动从上次检查点向前重查 15 分钟，处理常见索引延迟；超过该窗口才被索引的记录可能漏报。
-断线期间检查点不前进，恢复后从上次检查点补查；分页超限会明确失败，
+活动从上次检查点向前重查 60 分钟，处理常见索引延迟；超过该窗口才被索引的记录可能漏报。
+API 断线期间检查点不前进，恢复后从上次检查点补查；分页超限会明确失败，
 不会默默截断数据。长时间离线且活动量极大时需要拆分时间窗口恢复。
 
 检测结果与待发送内容先一起写入持久存储，推送成功后才移出待发送列表。
@@ -158,3 +158,14 @@ endDate 只有日期时注明「仅提供日期」；缺失或占位符标注「
 - 该余额不等于真正 Available balance：挂单占用可能使可下单金额更低；准确的 CLOB 可用余额需额外授权认证，本工具不收集任何钱包签名/密钥。
 - 仅在有待推送消息时查询 pUSD，不增加每分钟空闲 Cron 的链上请求；同一轮推送共享余额结果。
 - 修改不触碰 Durable Object 命名、存储结构、Cron、既有消息队列和计数。旧待发通知发送时也附加余额，但不会虚构历史成交数据。
+
+## V2 可靠性升级（2026-10-23）
+
+- **每 5 分钟 Cron**：`*/5 * * * *`。同钱包、同 outcome token、同 BUY/SELL 方向、同五分钟 UTC bucket 内的拆单合并成一条通知；成交金额/份数求和，成交价格按金额加权。REDEEM 与结算事件始终独立提醒。
+- **可靠 Outbox**：先将检测到的事件、checkpoint 与待发消息存储到原 Durable Object，再尝试 Server酱。推送失败不会阻断新数据检测，原消息持久留队，由 DO Alarm 进行退避重试。
+- **60 分钟活动回查窗口**：针对索引延迟保留 60 分钟重叠，结合逐 fill 的 activityKey 去重；极端超过窗口的索引延迟仍需更深的定期回查。
+- **429/503 恢复**：对 Data API 429/502/503/504 进行最多两次短退避重试，支持 Retry-After，超过短等待预算则交给下一轮 Cron 补查；三个钱包请求错峰 800ms。
+- **健康指标**：同钱包连续 3 轮失败发送一次故障告警，恢复后发一条恢复通知；不等于 Worker 全局停机监测，后者需要独立健康检查服务。
+- **Data API v2 Shadow**：每个钱包每六小时对 `/v2/positions` 进行一次只读游标分页查询，与当前 v1 仓位做 token 集合和 share 数量对照。仅记录数量与差异，不修改结算判断、PnL、Outbox 或检查点。`V2_SHADOW_ENABLED=true` 开启，设置为 false 关闭。v2 故障不会影响 v1 通知。
+- **状态兼容**：本升级继续沿用全部钱包独立的 DO ID、pending、seen、checkpoint、audit，密钥和历史账本不需要迁移/重置。
+- **状态接口**：原 `/status` 返回推送审计、数据连续失败次数、健康告警状态和最近一次 v2 shadow 对比报告。
