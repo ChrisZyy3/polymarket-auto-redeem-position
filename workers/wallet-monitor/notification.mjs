@@ -108,7 +108,7 @@ export function settlementAlert(p, lines, walletLabel, checkedAt, marketUrl) {
       estimate ? row("预估盈亏", "**" + sign(estimate.pnl) +
         "（" + pct(estimate.percent) + "）**") : "",
       estimate ? "> 仅基于剩余持仓及 API 成本估算，不代表全部历史净收益。" :
-        "> API 未提供可靠剩余成本，因此不计算盈亏。",
+        "> API 未提供可靠剩余成本，因此未估算盈亏。",
       kind === "WIN" ? "> 需实际赎回后资金才会进入钱包。" :
         kind === "LOSS" ? "> 该持有结果归零。" : "> 部分回款，不能等同全额 WIN。",
       "",
