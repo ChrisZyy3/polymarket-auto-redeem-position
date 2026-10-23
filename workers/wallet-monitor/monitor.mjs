@@ -20,6 +20,81 @@ const label = p => (p.title || p.conditionId || "未知市场") + " / " + (p.out
 const link = p => p.eventSlug ? "https://polymarket.com/event/" + encodeURIComponent(p.eventSlug) : "";
 const num = n => Number.isFinite(Number(n)) ? Number(n) : 0;
 
+// Display names only: the normalized address remains the Durable Object ID.
+const WALLET_LABELS = {
+  "0x9f7eb5bc88342f01d18754be0439fad79ec282ce": "PigsWallet",
+  "0x052f4191cd324a348835a846d34df5b0061e53fb": "ChrisZyy",
+  "0x24816c037cdc2c9bd979e69d777541cf560a9b79": "RealChris"
+};
+export function walletLabel(address) {
+  const raw = String(address || "").trim();
+  return WALLET_LABELS[raw.toLowerCase()] || raw;
+}
+const knownNumber = value => value !== undefined && value !== null &&
+  value !== "" && Number.isFinite(Number(value));
+const shares = value => Number(value).toLocaleString("en-US", { maximumFractionDigits: 8 });
+const price = value => "$" + Number(value).toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+
+export function expectedEnd(raw) {
+  if (typeof raw !== "string") return "暂无数据";
+  const text = raw.trim();
+  if (!text || text.startsWith("1970-01-01") || text.startsWith("0000-00-00")) return "暂无数据";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text + "（仅提供日期）";
+  const time = Date.parse(text);
+  if (!Number.isFinite(time)) return "暂无数据";
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+  }).format(new Date(time)) + "（北京时间）";
+}
+
+function matchingPosition(item, positions) {
+  // Outcome-token ID is the primary key; never mix holdings of unrelated outcomes.
+  const token = item.asset ?? item.tokenId ?? item.token_id;
+  if (token !== undefined && token !== null) {
+    const exact = positions.find(p => p.asset != null && String(p.asset) === String(token));
+    if (exact) return exact;
+  }
+  const condition = item.conditionId ?? item.condition_id;
+  if (!condition) return null;
+  const group = positions.filter(p =>
+    String(p.conditionId ?? p.condition_id ?? "").toLowerCase() === String(condition).toLowerCase());
+  if (item.outcomeIndex !== undefined && item.outcomeIndex !== null) {
+    const byIndex = group.filter(p => Number(p.outcomeIndex) === Number(item.outcomeIndex));
+    if (byIndex.length === 1) return byIndex[0];
+  }
+  if (item.outcome) {
+    const byOutcome = group.filter(p =>
+      String(p.outcome || "").toLowerCase() === String(item.outcome).toLowerCase());
+    if (byOutcome.length === 1) return byOutcome[0];
+  }
+  // Do not substitute the opposite outcome after a full sell-off.
+  return token == null && group.length === 1 ? group[0] : null;
+}
+
+export function marketContextLines(item, positions) {
+  const holding = matchingPosition(item, positions);
+  const end = holding?.endDate ?? holding?.end_date ?? item.endDate ?? item.end_date;
+  const qty = holding && knownNumber(holding.size)
+    ? shares(holding.size) + " 份" : "暂无数据（可能已清仓或尚未同步）";
+  const currentValue = holding && knownNumber(holding.currentValue)
+    ? usd(holding.currentValue) : "暂无数据";
+  const avg = holding && knownNumber(holding.avgPrice) ? price(holding.avgPrice) + " / 份" : "暂无数据";
+  return [
+    "预计结束：" + expectedEnd(end) + "（仅供参考，实际以市场规则与结算为准）",
+    "当前该选项总持仓：" + qty,
+    "当前持仓市值：" + currentValue,
+    "买入均价：" + avg
+  ];
+}
+
+// Strip old queued explorer links as well; never send a Polygonscan tx URL.
+function removeTransactionUrl(body) {
+  return String(body || "").split("\n\n").filter(line =>
+    !/^交易\s*[:：]\s*https?:\/\/(?:www\.)?polygonscan\.com\/tx\//i.test(line.trim())
+  ).join("\n\n");
+}
+
 function newAudit(now) {
   return {
     auditSince: now,
@@ -126,7 +201,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
       await storage.put("monitor", state);
       auditLog("push_attempted", user, { at: now, type, pending: state.pending.length });
       try {
-        await push(env, fetcher, item.title, "钱包：" + user + "\n\n" + item.desp);
+        await push(env, fetcher, item.title, "钱包：" + walletLabel(user) + "\n\n" + removeTransactionUrl(item.desp));
       } catch (error) {
         state.audit.pushFailureCount += 1;
         state.audit.lastPushErrorAt = now;
@@ -181,12 +256,15 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     const kind = a.type === "TRADE" ? (a.side === "BUY" ? "买入成交" : "卖出成交") : "实际赎回";
     const zeroRedemption = a.type === "REDEEM" && num(a.usdcSize) === 0 && num(a.size) > 0;
     const title = "Polymarket · " + (zeroRedemption ? "零回款赎回" : kind);
-    const desp = [label(a), "数量：" + num(a.size),
+    const holding = matchingPosition(a, positions);
+    const market = { ...holding, ...a, title: a.title || holding?.title,
+      outcome: a.outcome || holding?.outcome, eventSlug: a.eventSlug || holding?.eventSlug };
+    const desp = [label(market), "数量：" + num(a.size),
       (a.type === "TRADE" ? "成交金额：" : "赎回到账：") + usd(a.usdcSize),
       a.type === "TRADE" ? "成交价：" + num(a.price) : "到账金额不等于净利润",
       "北京时间：" + new Date(num(a.timestamp) * 1000).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" }),
-      a.transactionHash ? "交易：https://polygonscan.com/tx/" + a.transactionHash : "",
-      link(a)].filter(Boolean).join("\n\n");
+      ...marketContextLines(a, positions),
+      link(market)].filter(Boolean).join("\n\n");
     pending.push({ title, desp });
   }
   const tracked = { ...state.positions };
@@ -206,6 +284,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
           "剩余成本（费用口径以 API 为准）：" + usd(p.grossInitialValue ?? p.initialValue),
           status === "lost" ? "Data API 标记可结算，持有结果的结算价格为 0。"
             : "可以赎回；本监控不会替你执行赎回。",
+          ...marketContextLines(p, positions),
           link(p)].filter(Boolean).join("\n\n")
       });
     }
