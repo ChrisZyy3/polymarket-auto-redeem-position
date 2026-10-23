@@ -5,6 +5,9 @@ import { mergeTradeFills } from "./trade-batch.mjs";
 import { drainOutbox } from "./outbox.mjs";
 import { dataApiJson } from "./data-client.mjs";
 import { compareV2Positions } from "./v2-shadow.mjs";
+import { summarizeWalletPositions } from "./asset-digest.mjs";
+import { findRedeemReminders, redemptionReminder } from "./redeem-reminders.mjs";
+import { inspectPriceRisk, priceRiskMessage } from "./price-risk.mjs";
 const API = "https://data-api.polymarket.com";
 const PAGE = 500;
 const OVERLAP = 60 * 60; // 60-minute late-indexing overlap for five-minute polling
@@ -323,7 +326,11 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
       };
     }
     state = { user, startedAt: now, checkpoint: now, positions: tracked,
-      positionSnapshots: snapshotHoldings(positions), seen: {}, pending: [],
+      positionSnapshots: snapshotHoldings(positions),
+      dailySnapshot: summarizeWalletPositions(positions,now),
+      redeemTrackers: findRedeemReminders(positions,null,now).trackers,
+      priceRiskTrackers: inspectPriceRisk(positions,null,now).trackers,
+      seen: {}, pending: [],
       lastSuccessAt: now, audit: { ...newAudit(now), lastPollAt: now } };
     await storage.put("monitor", state);
     auditLog("wallet_poll_success", user, { at: now, initialized: true,
@@ -412,6 +419,29 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
       if (item) pending.push(item);
     }
   }
+  // Both rule engines are stateful and noise-conscious. First upgraded poll only
+  // seeds baselines; old open/redeemable holdings must not flood notifications.
+  const reminders = findRedeemReminders(positions,state.redeemTrackers,now,{
+    delayHours:Number(env.REDEEM_DELAY_HOURS??6),
+    cooldownHours:Number(env.REDEEM_COOLDOWN_HOURS??24),
+    minUsd:Number(env.MIN_REDEEM_USD??5)
+  });
+  if(String(env.REDEEM_REMINDER_ENABLED??"true")==="true"){
+    const item = redemptionReminder(walletLabel(user),reminders.due,now);
+    if(item)pending.push(item);
+  }
+  const risks = inspectPriceRisk(positions,state.priceRiskTrackers,now,{
+    floor:Number(env.PRICE_ALERT_FLOOR??0.90),
+    drawdownPct:Number(env.COST_DRAWDOWN_PCT??5),
+    rapidPoints:Number(env.RAPID_DROP_POINTS??0.05),
+    cooldownHours:Number(env.RISK_COOLDOWN_HOURS??24),
+    minUsd:minimum
+  });
+  if(String(env.RISK_ALERT_ENABLED??"true")==="true"){
+    const item = priceRiskMessage(walletLabel(user),risks.raised,now);
+    if(item)pending.push(item);
+  }
+  const dailySnapshot = summarizeWalletPositions(positions,now);
   for (const key of Object.keys(seen)) {
     if (seen[key] < now - OVERLAP) delete seen[key];
   }
@@ -419,6 +449,9 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
   const alertCount = pending.length;
   state = { ...state, checkpoint: now, positions: tracked,
     positionSnapshots: currentSnapshots, seen,
+    redeemTrackers: reminders.trackers,
+    priceRiskTrackers: risks.trackers,
+    dailySnapshot,
     pending: [...(state.pending || []), ...pending], lastSuccessAt: now,
     audit: {
       ...state.audit,
