@@ -29,8 +29,6 @@ assert(normalized.asset==="id-YES" && normalized.size===120 &&
   normalized.eventSlug==="test-outcome" && normalized.realizedPnl===12,
   "v2 positions map to stable v1-style monitor fields, including fee basis");
 assert(normalized.size!==300,"lifetime total_size never masquerades as current holdings");
-assert(normalizeV2Position(v2Position({current_size:null}))===null ? false : true,
-  "valid normalizer returns a position"); // Intentionally followed by malformed-row test.
 let badPosition=false;
 try{normalizeV2Position(v2Position({current_size:null}))}catch{badPosition=true}
 assert(badPosition,"invalid missing position size fails rather than looking like zero holdings");
