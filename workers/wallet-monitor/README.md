@@ -169,3 +169,13 @@ endDate 只有日期时注明「仅提供日期」；缺失或占位符标注「
 - **Data API v2 Shadow**：每个钱包每六小时对 `/v2/positions` 进行一次只读游标分页查询，与当前 v1 仓位做 token 集合和 share 数量对照。仅记录数量与差异，不修改结算判断、PnL、Outbox 或检查点。`V2_SHADOW_ENABLED=true` 开启，设置为 false 关闭。v2 故障不会影响 v1 通知。
 - **状态兼容**：本升级继续沿用全部钱包独立的 DO ID、pending、seen、checkpoint、audit，密钥和历史账本不需要迁移/重置。
 - **状态接口**：原 `/status` 返回推送审计、数据连续失败次数、健康告警状态和最近一次 v2 shadow 对比报告。
+
+
+## V2 position lifecycle + winning ROI/APR + settlement net (2026-10-23)
+
+1. Snapshot all nonzero /positions share sizes per token after each successful polling round. Classify a grouped BUY or SELL only if previous/current snapshots match the new fill quantity within tolerance; if API indexing is late, a transfer overlaps, or the wallet lacks a prior snapshot, keep generic BUY/SELL. Never infer EXIT from an absent row alone.
+2. One same-token direction group across the entire polling round may become OPEN, ADD, TRIM or EXIT. Mixed sides or multiple 5-minute buckets remain BUY/SELL to avoid attribution errors. Confirmed EXIT displays 0 remaining shares.
+3. Every BUY, including OPEN/ADD, displays conditional full-win GROSS ROI = (1 / current_avg_price - 1) x 100%, and SIMPLE annual APR = gross ROI x 365 / estimated remaining days. This assumes that specific outcome wins and each share redeems for $1; it is NOT probability-weighted expected return or guaranteed yield. Buy fees, gas and slippage are excluded. If Gamma only reports YYYY-MM-DD, APR uses end of that UTC date as a rough placeholder, not a settlement promise. Invalid/expired/<1 day windows suppress APR.
+4. For new WIN/LOSS/PARTIAL transitions only, query Data API v2 /v2/positions with status=REDEEMABLE to obtain total_cost_usdc, an inclusive remaining-entry basis. Estimated net profit on still-held shares = shares x resolved payout price - total_cost_usdc. Display entry_fees_usdc for disclosure only (already included in basis; do NOT subtract twice). Any realized_pnl is separate historical realized PnL. Net excludes wallet gas and other off-platform expenses, and not earlier realized trading PnL.
+5. If v2 is unavailable, cost missing or share amounts disagree with the v1 indexer, do not display a fabricated net figure. Optional gross-only estimate is clearly identified, without preventing the settlement notification.
+6. Persist precise resolutionKind alongside legacy status to detect PARTIAL -> WIN changes. Existing redeemable/lost records migrate without duplicate historical settlement alerts. Wallet identity, current Durable Object checkpoint/outbox, 5-minute Cron, ServerChan and pUSD footer remain unchanged.
