@@ -1,4 +1,4 @@
-import { poll, push } from "./monitor.mjs";
+import { poll, push, auditSnapshot } from "./monitor.mjs";
 
 // One configured wallet per Durable Object. Preserve the legacy address as a fallback.
 export function walletAddresses(env) {
@@ -39,7 +39,8 @@ export class WalletMonitor {
         initialized: !!s,
         checkpoint: s?.checkpoint,
         lastSuccessAt: s?.lastSuccessAt,
-        pending: s?.pending?.length ?? 0
+        pending: s?.pending?.length ?? 0,
+        ...auditSnapshot(s)
       });
     }
     if (url.pathname !== "/poll") return new Response("Not found", { status: 404 });
@@ -108,6 +109,8 @@ export default {
     if (path === "/test" && request.method === "POST") {
       try {
         await push(env, fetch, "Polymarket · 推送测试", "多钱包地址监控通知通道测试成功。");
+        console.info("push_accepted", JSON.stringify({ kind: "test", provider: "serverchan",
+          at: Math.floor(Date.now() / 1000) }));
         return Response.json({ ok: true });
       } catch {
         return Response.json({ ok: false, error: "Push failed" }, { status: 502 });
