@@ -512,6 +512,22 @@ assert(winNetAlert.title.startsWith("🏆 WIN · ChrisZyy · +$17.50")&&
   winNetAlert.desp.includes("已包含的买入手续费")&&
   winNetAlert.desp.includes("历史已实现盈亏（另列）"),
   "settlement card shows net, accounted buy fee and separately reported realized PnL");
+const netLossPosition={...settlementPosition,curPrice:0};
+const netLoss=settlementNet(netLossPosition,economicsFixture);
+const netLossAlert=settlementAlert(netLossPosition,
+  marketContextLines(netLossPosition,[netLossPosition]),
+  "PigsWallet",now2,"https://polymarket.com/event/sample-2026-market",
+  {net:netLoss});
+assert(Math.abs(netLoss.net+82.5)<EPS2 &&
+  netLossAlert.title.startsWith("🔴 LOSS · PigsWallet · -$82.50") &&
+  netLossAlert.desp.includes("该剩余仓位预计净收益") &&
+  netLossAlert.desp.includes("-$82.50"),
+  "LOSS uses same fee-inclusive basis and reports remaining net loss");
+const ambiguousTrade=tradeAlert(fillA,position2,marketContextLines(position2,[position2]),
+  "ChrisZyy",marketLink,{reconciliationAttempted:true});
+assert(ambiguousTrade.title.startsWith("🟢 BUY")&&
+  ambiguousTrade.desp.includes("暂不能与本轮成交一一对应"),
+  "unsynced positions keep a generic BUY instead of false OPEN/ADD");
 assert(settlementNet(settlementPosition,{...economicsFixture,current_size:99})===null,
   "indexing drift makes settlement net unavailable instead of using stale basis");
 assert(settlementNet(settlementPosition,{...economicsFixture,total_cost_usdc:null,
