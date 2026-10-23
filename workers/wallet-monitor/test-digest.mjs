@@ -122,7 +122,7 @@ const storage={
 let positions=[atPrice(.96)],activity=[],notifications=[];
 const env={WALLET_ADDRESS:walletA,
   MIN_POSITION_USD:"5",PUSH_URL:"https://11310.push.ft07.com/send/test.send",
-  V2_SHADOW_ENABLED:"false"};
+  V2_SHADOW_ENABLED:"false",REDEEM_REMINDER_ENABLED:"true"};
 const fakeFetch=async(url,init)=>{
   const s=String(url);
   if(s.includes("push.ft07.com")){
@@ -154,6 +154,32 @@ await poll(rpStorage,env,fakeFetch,now+6*3600+300);
 assert(notifications.length===1&&notifications[0].title.startsWith("💰 CLAIM") &&
   rpMap.get("monitor").redeemTrackers.r2.lastReminderAt===now+6*3600+300,
   "actual poll emits delayed claim reminder with saved cooldown state");
+
+
+// Automatic-redemption accounts: suppress pending-claim notifications but
+// send exactly one real redemption alert upon a new REDEEM activity.
+const disabledDB=new Map(), disabledStorage={
+  get:async key=>structuredClone(disabledDB.get(key)),
+  put:async(key,value)=>{disabledDB.set(key,structuredClone(value))}
+};
+const autoEnv={...env,REDEEM_REMINDER_ENABLED:"false"};
+positions=[settle];activity=[];notifications=[];
+await poll(disabledStorage,autoEnv,fakeFetch,now);
+await poll(disabledStorage,autoEnv,fakeFetch,now+6*3600+300);
+assert(notifications.length===0,"auto-redeem wallets do not receive matured CLAIM");
+positions=[];activity=[{
+  type:"REDEEM",asset:"r2",conditionId:settle.conditionId,
+  title:settle.title,outcome:settle.outcome,eventSlug:settle.eventSlug,
+  transactionHash:"auto-redeem-tx",timestamp:now+6*3600+500,
+  size:90,usdcSize:90
+}];
+await poll(disabledStorage,autoEnv,fakeFetch,now+6*3600+600);
+assert(notifications.length===1 &&
+  notifications[0].title.startsWith("💰 已赎回 · ChrisZyy · $90.00") &&
+  notifications[0].desp.includes("实际到账"),
+  "actual REDEEM delivers one confirmed redemption notification");
+await poll(disabledStorage,autoEnv,fakeFetch,now+6*3600+900);
+assert(notifications.length===1,"same redeemed activity never sends twice");
 
 // Daily worker integration: three independent DO snapshots and one coordinator.
 // Simulate internal Cloudflare DO routing without any external pushes.
