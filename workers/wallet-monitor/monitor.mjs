@@ -1,6 +1,7 @@
 import { tradeAlert, settlementAlert, walletPusdBalance } from "./notification.mjs";
 import { mergeTradeFills } from "./trade-batch.mjs";
 import { drainOutbox } from "./outbox.mjs";
+import { dataApiJson } from "./data-client.mjs";
 const API = "https://data-api.polymarket.com";
 const PAGE = 500;
 const OVERLAP = 60 * 60; // 60-minute late-indexing overlap for five-minute polling
@@ -113,7 +114,11 @@ function newAudit(now) {
     lastPushError: null,
     lastPollAt: null,
     lastPollAlerts: 0,
-    lastPollAccepted: 0
+    lastPollAccepted: 0,
+    consecutivePollFailures: 0,
+    lastPollFailureAt: null,
+    lastPollError: null,
+    healthAlarmActive: false
   };
 }
 
@@ -133,7 +138,11 @@ export function auditSnapshot(state) {
     lastPushError: a.lastPushError ?? null,
     lastPollAt: a.lastPollAt ?? null,
     lastPollAlerts: a.lastPollAlerts ?? 0,
-    lastPollAccepted: a.lastPollAccepted ?? 0
+    lastPollAccepted: a.lastPollAccepted ?? 0,
+    consecutivePollFailures: a.consecutivePollFailures ?? 0,
+    lastPollFailureAt: a.lastPollFailureAt ?? null,
+    lastPollError: a.lastPollError ?? null,
+    healthAlarmActive: a.healthAlarmActive ?? false
   };
 }
 
@@ -155,7 +164,7 @@ async function pages(fetcher, path, params, cap) {
   const rows = [];
   for (let offset = 0; offset <= cap; offset += PAGE) {
     const q = new URLSearchParams({ ...params, offset: String(offset), limit: String(PAGE) });
-    const page = await json(fetcher, API + path + "?" + q);
+    const page = await dataApiJson(fetcher, API + path + "?" + q);
     if (!Array.isArray(page)) throw new Error("Invalid Data API response: " + path);
     rows.push(...page);
     if (page.length < PAGE) return rows;
@@ -194,6 +203,57 @@ export async function deliverPending(storage, env, fetcher = fetch,
       "**\n\n> 未扣除挂单占用，不等于可下单 Available balance。";
     await push(env, fetcher, item.title, base + footer, item.short);
   }, { origin });
+}
+
+
+function safePollError(error) {
+  const message = String(error?.message || "");
+  return /^(HTTP [1-5][0-9]{2} from data-api\.polymarket\.com|Network\/timeout error from data-api\.polymarket\.com|Pagination cap reached: .*?)$/.test(message)
+    ? message.slice(0, 160) : "Polymarket query failed (details withheld)";
+}
+
+// Record failures separately from healthy data checkpoints.
+// After 3 consecutive failed 5-minute rounds, enqueue one health warning.
+// Successful polling enqueues a single recovery notice.
+export async function recordPollFailure(storage, env, fetcher = fetch,
+  now = Math.floor(Date.now() / 1000), error = null) {
+  const state = await storage.get("monitor");
+  if (!state) return { alerted: false, failures: 0 };
+  state.audit ??= newAudit(now);
+  state.audit.consecutivePollFailures = (state.audit.consecutivePollFailures || 0) + 1;
+  state.audit.lastPollFailureAt = now;
+  state.audit.lastPollError = safePollError(error);
+  const failures = state.audit.consecutivePollFailures;
+  let alerted = false;
+  if (failures >= 3 && !state.audit.healthAlarmActive) {
+    alerted = true;
+    state.audit.healthAlarmActive = true;
+    state.pending ??= [];
+    state.pending.push({
+      formatVersion: 2,
+      title: "⚠️ MONITOR · " + walletLabel(state.user),
+      short: "连续 " + failures + " 次轮询失败；检查 Data API 与 Cloudflare 日志",
+      desp: [
+        "### ⚠️ 钱包监控异常",
+        "**账户：** " + walletLabel(state.user),
+        "**连续失败：** " + failures + " 次（5分钟轮询）",
+        "**最后成功时间：** " + (state.lastSuccessAt
+          ? new Date(state.lastSuccessAt * 1000).toLocaleString("zh-CN", {timeZone:"Asia/Shanghai"})
+          : "暂无"),
+        "**错误：** " + state.audit.lastPollError,
+        "",
+        "> 系统会继续轮询，恢复后自动发送恢复通知。"
+      ].join("\n")
+    });
+    state.audit.alertsDetectedCount = (state.audit.alertsDetectedCount || 0) + 1;
+    state.audit.lastAlertAt = now;
+    state.audit.lastAlertType = "MONITOR_UNHEALTHY";
+  }
+  await storage.put("monitor", state);
+  auditLog("wallet_poll_failure", state.user,
+    {at: now, failures, error: state.audit.lastPollError, alerted});
+  if (alerted) await deliverPending(storage, env, fetcher, now, "alarm");
+  return { alerted, failures };
 }
 
 export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.now() / 1000), walletAddress = env.WALLET_ADDRESS) {
@@ -249,6 +309,19 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
   }
   const pending = mergeTradeFills(newEvents).map(a =>
     tradeAlert(a, a, marketContextLines(a, positions), walletLabel(user), link(a)));
+  const recovering = Boolean(state.audit.healthAlarmActive);
+  if (recovering) {
+    pending.push({
+      formatVersion: 2,
+      title: "✅ MONITOR 恢复 · " + walletLabel(user),
+      short: "钱包监控已恢复正常，交易数据检查点保持连续",
+      desp: "### ✅ 钱包监控恢复\n\n**账户：** " + walletLabel(user) +
+        "\n\n**北京时间：** " + new Date(now * 1000).toLocaleString("zh-CN", {timeZone:"Asia/Shanghai"}) +
+        "\n\n> 已恢复正常查询，历史活动仍通过重叠窗口补查。"
+    });
+  }
+  state.audit.consecutivePollFailures = 0;
+  state.audit.healthAlarmActive = false;
   const tracked = { ...state.positions };
   for (const p of positions) {
     if (!p.asset || num(p.size) <= 0) continue;
