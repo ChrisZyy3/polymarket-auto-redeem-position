@@ -4,6 +4,8 @@ import { readRedeemableEconomics, settlementNet } from "./settlement-economics.m
 import { mergeTradeFills } from "./trade-batch.mjs";
 import { drainOutbox } from "./outbox.mjs";
 import { dataApiJson } from "./data-client.mjs";
+import { primaryV2Positions, primaryV2Activity,
+  legacyActivityIdentities, cutoverIdentity } from "./data-api-v2-primary.mjs";
 import { compareV2Positions } from "./v2-shadow.mjs";
 import { summarizeWalletPositions } from "./asset-digest.mjs";
 import { findRedeemReminders, redemptionReminder } from "./redeem-reminders.mjs";
@@ -20,6 +22,7 @@ export function activityKey(a) {
 
 export function positionStatus(p) {
   if (p.redeemable !== true) return "open";
+  if (!knownNumber(p.curPrice)) return "unknown";
   if (Number(p.curPrice) === 0) return "lost";
   if (Number(p.curPrice) > 0) return "redeemable";
   return "unknown";
@@ -278,6 +281,7 @@ export async function recordPollFailure(storage, env, fetcher = fetch,
 
 
 export async function auditV2Shadow(storage, env, fetcher, user, v1Positions, now) {
+  if (String(env.DATA_API_PRIMARY || "v1") === "v2") return { skipped: "primary_v2" };
   if (String(env.V2_SHADOW_ENABLED || "false") !== "true") return { skipped: "disabled" };
   const state = await storage.get("monitor");
   if (!state || Number(state.shadowV2AttemptAt || 0) > now - 6 * 3600)
@@ -310,6 +314,9 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
   const user = (walletAddress || "").toLowerCase();
   if (!/^0x[a-f0-9]{40}$/.test(user)) throw new Error("Invalid WALLET_ADDRESS");
   if (!env.PUSH_URL) throw new Error("PUSH_URL secret is required");
+  const apiVersion = String(env.DATA_API_PRIMARY || "v1");
+  if (!["v1","v2"].includes(apiVersion)) throw new Error("Invalid DATA_API_PRIMARY");
+  const useV2 = apiVersion === "v2";
   const minimum = Number(env.MIN_POSITION_USD ?? 5);
   if (!Number.isFinite(minimum) || minimum < 0) throw new Error("Invalid MIN_POSITION_USD");
   let state = await storage.get("monitor");
@@ -319,9 +326,10 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     state.audit ??= newAudit(now);
     state.audit.lastPollAccepted = 0;
   }
-  const positions = await pages(fetcher, "/positions", {
-    user, sizeThreshold: "0", includeArchived: "true", sortBy: "TOKENS", sortDirection: "DESC"
-  }, 10000);
+  const positions = useV2 ? await primaryV2Positions(fetcher, user) :
+    await pages(fetcher, "/positions", {
+      user, sizeThreshold: "0", includeArchived: "true", sortBy: "TOKENS", sortDirection: "DESC"
+    }, 10000);
   if (!state) {
     const tracked = {};
     for (const p of positions) {
@@ -331,7 +339,8 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
         status: positionStatus(p), exposure, conditionId: p.conditionId, outcome: p.outcome
       };
     }
-    state = { user, startedAt: now, checkpoint: now, positions: tracked,
+    state = { user, startedAt: now, checkpoint: now, dataApiPrimary: apiVersion,
+      positions: tracked,
       positionSnapshots: snapshotHoldings(positions),
       dailySnapshot: summarizeWalletPositions(positions,now),
       redeemTrackers: findRedeemReminders(positions,null,now).trackers,
@@ -347,15 +356,27 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
   // for this first upgraded poll. Existing checkpoints and sent notifications stay intact.
   const previousSnapshots = state.positionSnapshots ?? null;
   const currentSnapshots = snapshotHoldings(positions);
-  const activity = await pages(fetcher, "/activity", {
-    user, type: "TRADE,REDEEM", start: String(Math.max(state.startedAt, state.checkpoint - OVERLAP)),
-    end: String(now), sortBy: "TIMESTAMP", sortDirection: "ASC"
-  }, 5000);
+  const since = Math.max(state.startedAt, state.checkpoint - OVERLAP);
+  const activity = useV2 ? await primaryV2Activity(fetcher, user, since) :
+    await pages(fetcher, "/activity", {
+      user, type: "TRADE,REDEEM", start: String(since),
+      end: String(now), sortBy: "TIMESTAMP", sortDirection: "ASC"
+    }, 5000);
+  const migration = useV2 && state.dataApiPrimary !== "v2";
+  const legacyIdentities = migration ? legacyActivityIdentities(state.seen) : null;
+  let bridgedActivities = 0;
   const newEvents = [];
   const seen = { ...state.seen };
   for (const a of activity) {
     const key = activityKey(a);
     if (seen[key] !== undefined || num(a.timestamp) < state.startedAt) continue;
+    // Suppress old v1 activities already notified before the API cutover.
+    // Stable tx/token/side/timestamp/size match survives fee/amount rounding.
+    if (legacyIdentities?.has(cutoverIdentity(a))) {
+      seen[key] = num(a.timestamp);
+      bridgedActivities++;
+      continue;
+    }
     seen[key] = num(a.timestamp);
     if (!["TRADE", "REDEEM"].includes(a.type)) continue;
     // Trade alerts have no value floor: a large order can fill in tiny pieces.
@@ -436,7 +457,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     const item = redemptionReminder(walletLabel(user),reminders.due,now);
     if(item)pending.push(item);
   }
-  const risks = inspectPriceRisk(positions,state.priceRiskTrackers,now,{
+  const risks = inspectPriceRisk(positions, migration ? null : state.priceRiskTrackers, now,{
     floor:Number(env.PRICE_ALERT_FLOOR??0.90),
     drawdownPct:Number(env.COST_DRAWDOWN_PCT??5),
     rapidPoints:Number(env.RAPID_DROP_POINTS??0.05),
@@ -453,7 +474,8 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
   }
   // Persist both detection state and outbox before sending. A crash cannot lose an alert.
   const alertCount = pending.length;
-  state = { ...state, checkpoint: now, positions: tracked,
+  state = { ...state, checkpoint: now, dataApiPrimary: apiVersion,
+    positions: tracked,
     positionSnapshots: currentSnapshots, seen,
     redeemTrackers: reminders.trackers,
     priceRiskTrackers: risks.trackers,
@@ -471,6 +493,10 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
   };
   // Persist detection before sending so a process crash cannot erase alerts.
   await storage.put("monitor", state);
+  if (migration) {
+    auditLog("wallet_data_api_cutover", user,
+      {at:now,version:apiVersion,bridgedActivities});
+  }
   if (alertCount) {
     const types = {};
     for (const item of pending) {
@@ -483,7 +509,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
   // Shadow reads never drive push events, PnL or legacy checkpoints.
   await auditV2Shadow(storage, env, fetcher, user, positions, now);
   auditLog("wallet_poll_success", user, { at: now, initialized: false,
-    positions: positions.length, alertsDetected: alertCount, pushesAccepted: delivery.accepted,
+    positions: positions.length, apiVersion, alertsDetected: alertCount, pushesAccepted: delivery.accepted,
     pending: delivery.pending, pushDeferred: delivery.failed });
   return { initialized: false, positions: positions.length,
     alerts: alertCount, pushesAccepted: delivery.accepted, pending: delivery.pending,

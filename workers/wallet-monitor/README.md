@@ -223,3 +223,17 @@ node workers/wallet-monitor/test-digest.mjs
 - 零回款标为“零回款赎回”，没有可核实的金额则标为“赎回记录（到账待核实）”，不会误报已到账正数金额。
 - WIN / LOSS / PARTIAL 结算结果仍按原机制单独提醒，不能取代链上实际赎回。日报保留“待赎回金额”作为统计，不再因此触发催办推送。
 - 已持久化的交易去重记录和 Outbox 保留；不重置任何钱包状态，不更改 Cron 频率。
+
+
+## 2026-10-24: Data API v2 主接口切换（旧版接口退役）
+
+Polymarket 数据 API v1 官方迁移时间表标注 2026-10-24 退役。此 Worker 现已支持独立 `DATA_API_PRIMARY=v2` 主数据读取，且原 v1 读取逻辑保留为临时回滚选项。
+
+- `DATA_API_PRIMARY=v2`：核心仓位查询走 `/v2/positions`，核心买卖/实际赎回查询走 `/v2/activity`。接口使用标准 `{data,pagination}`、`pagination.next_cursor` 游标分页，禁止旧 `offset`；429/503 重试沿用原 `data-client.mjs`。
+- 字段适配：`token_id -> asset`、`current_size -> size`、`avg_price -> avgPrice`、`current_price -> curPrice`、`total_cost_usdc -> grossInitialValue`、`entry_cost_usdc -> initialValue`、`usdc_size -> usdcSize`、`transaction_hash -> transactionHash`，保留费用字段和市场标题、选项信息。
+- `current_size` 是剩余份数，`total_size` 是累计买入份数，绝不能混用。缺失的仓位数量、活动身份、或游标异常直接失败，不当作零仓位并推进 checkpoint。
+- 新老版本迁移第一轮，对已有 Durable Object 的近 60 分钟已通知事件按交易哈希、资产、方向、成交份数及时间进行兼容去重。旧队列、历史检查点、钱包标签、持仓快照和审计字段均不重置。
+- 进入 v2 的第一轮，风险价格监控只更新当前基线，不把新旧来源的参考价格差异误报为风险事件。
+- 原 `V2_SHADOW_ENABLED` 只用于 v1 主接口与 v2 并行对照；v2 已为主接口时自动跳过重复影子读取。
+- 若需要快速回滚，仅可把 `DATA_API_PRIMARY` 改为 `v1`（前提是旧 API 尚可用）。不建议长期回滚到即将退役的 v1；应优先修复 v2。
+- 测试：`node workers/wallet-monitor/test-v2-primary.mjs`，包括多页游标、旧事件桥接去重、真实 BUY/ADD/WIN/REDEEM、无损 checkpoint 以及异常数据失败保护。
