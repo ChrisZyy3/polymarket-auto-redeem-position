@@ -56,8 +56,8 @@ export async function push(env, fetcher, title, desp) {
   }
 }
 
-export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.now() / 1000)) {
-  const user = (env.WALLET_ADDRESS || "").toLowerCase();
+export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.now() / 1000), walletAddress = env.WALLET_ADDRESS) {
+  const user = (walletAddress || "").toLowerCase();
   if (!/^0x[a-f0-9]{40}$/.test(user)) throw new Error("Invalid WALLET_ADDRESS");
   if (!env.PUSH_URL) throw new Error("PUSH_URL secret is required");
   const minimum = Number(env.MIN_POSITION_USD ?? 5);
@@ -68,7 +68,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
   const flush = async () => {
     while (state.pending.length) {
       const item = state.pending[0];
-      await push(env, fetcher, item.title, item.desp);
+      await push(env, fetcher, item.title, "钱包：" + user + "\n\n" + item.desp);
       state.pending.shift();
       await storage.put("monitor", state);
     }
