@@ -1,4 +1,4 @@
-import { poll, push, auditSnapshot, deliverPending } from "./monitor.mjs";
+import { poll, push, auditSnapshot, deliverPending, recordPollFailure } from "./monitor.mjs";
 
 // One configured wallet per Durable Object. Preserve the legacy address as a fallback.
 export function walletAddresses(env) {
@@ -63,6 +63,14 @@ export class WalletMonitor {
     try {
       return Response.json({ ok: true, ...await this.running });
     } catch (error) {
+      // Best-effort health tracking must not obscure the original failure.
+      try {
+        await recordPollFailure(this.ctx.storage, this.env, fetch,
+          Math.floor(Date.now() / 1000), error);
+      } catch (healthError) {
+        console.error("Wallet health bookkeeping failed for " + wallet,
+          healthError?.message || "Unknown error");
+      }
       // Do not log request URLs: PUSH_URL contains the send key.
       console.error("Wallet poll failed for " + wallet, error?.message || "Unknown error");
       return Response.json({ ok: false, error: "Poll failed; check Worker logs" }, { status: 502 });
@@ -77,7 +85,11 @@ function instance(env, wallet) {
 
 async function runAll(env, route) {
   const wallets = walletAddresses(env);
-  const results = await Promise.all(wallets.map(async wallet => {
+  const results = await Promise.all(wallets.map(async (wallet, index) => {
+    // Spread API calls over ~2 seconds to avoid a 3-wallet synchronized burst.
+    if (route === "poll" && index > 0) {
+      await new Promise(resolve => setTimeout(resolve, index * 800));
+    }
     try {
       const response = await instance(env, wallet).fetch(
         "https://internal/" + route + "?wallet=" + wallet,
