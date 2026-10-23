@@ -360,7 +360,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     const forecast = a.type === "TRADE" && a.side === "BUY" && holding
       ? winningPayoutForecast(holding, now) : null;
     return tradeAlert(a, a, marketContextLines(a, positions),
-      walletLabel(user), link(a), { lifecycle, forecast });
+      walletLabel(user), link(a), { lifecycle, forecast, reconciliationAttempted: previousSnapshots !== null });
   });
   const recovering = Boolean(state.audit.healthAlarmActive);
   if (recovering) {
