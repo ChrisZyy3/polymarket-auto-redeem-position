@@ -48,6 +48,7 @@ export function tradeAlert(a, market, lines, walletLabel, marketUrl) {
     desp: [
       "### " + icon + " " + kind + " · " + word,
       "**" + safe(market.title || market.conditionId || "未知市场") + "**",
+      "**账户：** " + safe(walletLabel),
       "**选择：** " + safe(market.outcome || "未知选项"),
       "",
       "#### " + (redeem ? "💰 赎回到账" : "💵 本次成交"),
@@ -97,6 +98,7 @@ export function settlementAlert(p, lines, walletLabel, checkedAt, marketUrl) {
     desp: [
       "### " + icon + " " + kind + " · " + word,
       "**" + safe(p.title || p.conditionId || "未知市场") + "**",
+      "**账户：** " + safe(walletLabel),
       "**选择：** " + safe(p.outcome || "未知选项"),
       "",
       "#### 🏁 结算结果",
