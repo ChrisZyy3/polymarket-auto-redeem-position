@@ -3,6 +3,8 @@ import { compareV2Positions } from "./v2-shadow.mjs";
 import { dataApiJson, retryAfterMs } from "./data-client.mjs";
 import { drainOutbox } from "./outbox.mjs";
 import { tradeAlert, settlementAlert, settlementKind, estimatePnl, walletPusdBalance } from "./notification.mjs";
+import { snapshotHoldings, positionAction, winningPayoutForecast } from "./position-lifecycle.mjs";
+import { settlementNet, readRedeemableEconomics } from "./settlement-economics.mjs";
 import { mergeTradeFills } from "./trade-batch.mjs";
 import worker, { walletAddresses, WalletMonitor } from "./worker.mjs";
 
@@ -238,7 +240,7 @@ assert(settlementKind(market) === "WIN" && won.title.startsWith("🏆 WIN · Rea
 assert(won.desp.includes("+ $18.00") === false && won.desp.includes("+$18.00"),
   "WIN expected position profit");
 assert(won.desp.includes("+21.95%"), "profit ROI based on remaining cost");
-assert(won.short.includes("预估盈亏 +$18.00"), "settlement preview contains profit");
+assert(won.short.includes("估算毛盈亏 +$18.00"), "fallback never calls unchecked gross PnL net");
 const partial = settlementAlert({ ...market, curPrice: 0.5 }, lines, "PigsWallet", 1900, marketLink);
 assert(partial.title.startsWith("🟣 PARTIAL · PigsWallet") &&
   partial.desp.includes("部分回款"), "partial resolution never classified as WIN");
@@ -433,3 +435,197 @@ assert(failShadow.ok===false && shadowState.get("monitor").checkpoint===5400 &&
   shadowState.get("monitor").audit.shadowV2LastError,
   "v2 provider failures are isolated and do not advance/checkpoint legacy state");
 console.log("Passed: Data API v2 shadow pagination, cooldown, opt-in and error isolation");
+
+
+// V2 position lifecycle and ROI / APR acceptance tests (2026-10-23).
+const EPS2=1e-8;
+const now2=Math.floor(Date.parse("2026-10-23T06:00:00Z") / 1000);
+const position2={
+  asset:"token-position-1",conditionId:"0x1234567812345678123456781234567812345678123456781234567812345678",
+  size:100,avgPrice:0.8,initialValue:80,currentValue:80,curPrice:0.8,
+  endDate:"2026-12-31",title:"Sample 2026 market",outcome:"Yes",eventSlug:"sample-2026-market",
+  redeemable:false
+};
+const projected=winningPayoutForecast(position2,now2);
+assert(Math.abs(projected.grossROI-25)<EPS2 && projected.grossProfit===20 &&
+  projected.simpleAPR>0 && projected.simpleAPR<150,"full-win gross ROI=25% and APR uses future date");
+const shownProjection=tradeAlert(
+  {type:"TRADE",side:"BUY",size:100,usdcSize:80,price:.8,timestamp:now2},
+  position2,marketContextLines(position2,[position2]),
+  "ChrisZyy","https://polymarket.com/event/sample-2026-market",
+  {lifecycle:{kind:"OPEN",previousSize:0,currentSize:100,deltaSize:100,deltaPercent:null},forecast:projected});
+assert(shownProjection.title.startsWith("🆕 OPEN · ChrisZyy") &&
+  shownProjection.desp.includes("预估 ROI") &&
+  shownProjection.desp.includes("25.00%") &&
+  shownProjection.desp.includes("预估 APR") &&
+  shownProjection.desp.includes("100 份") &&
+  shownProjection.desp.includes("该 UTC 日期末估算"),
+  "OPEN alert includes conditional ROI/APR, share count and correct date assumption");
+assert(winningPayoutForecast({...position2,endDate:"1970-01-01"},now2).simpleAPR===null &&
+  winningPayoutForecast({...position2,endDate:"1970-01-01"},now2).grossROI===25,
+  "missing end date omits APR but preserves ROI");
+assert(winningPayoutForecast({...position2,endDate:"2020-01-01"},now2).simpleAPR===null,
+  "expired end date never annualizes past expiration");
+assert(winningPayoutForecast({...position2,avgPrice:0},now2)===null,
+  "zero cost must not generate infinite APR");
+
+const baseShot=snapshotHoldings([position2]);
+const nextShot=snapshotHoldings([{...position2,size:150}]);
+const fillA={type:"TRADE",side:"BUY",asset:position2.asset,size:50};
+const addClass=positionAction(fillA,[fillA],baseShot,nextShot);
+assert(addClass.kind==="ADD"&&addClass.previousSize===100&&addClass.currentSize===150&&
+  Math.abs(addClass.deltaPercent-50)<EPS2,"corroborated add from exact previous shares");
+const sellA={type:"TRADE",side:"SELL",asset:position2.asset,size:50};
+assert(positionAction(sellA,[sellA],nextShot,baseShot).kind==="TRIM",
+  "partial reduction classified as TRIM");
+const exitFill={...sellA,size:100};
+assert(positionAction(exitFill,[exitFill],baseShot,{}).kind==="EXIT",
+  "SELL to zero classified as EXIT");
+assert(positionAction({...fillA,size:100},[{...fillA,size:100}],{},baseShot).kind==="OPEN",
+  "OPEN requires zero previous shares and a matching buy");
+assert(positionAction(fillA,[fillA],null,nextShot)===null,
+  "legacy wallet without size snapshots cannot be falsely called OPEN");
+assert(positionAction(fillA,[fillA],baseShot,baseShot)===null,
+  "index lag or a wallet transfer cannot be called ADD");
+assert(positionAction(fillA,[fillA,sellA],baseShot,baseShot)===null,
+  "mixed buy/sell activity cannot be misclassified");
+assert(positionAction(fillA,[fillA,fillA],baseShot,nextShot)===null,
+  "two distinct five-minute fill buckets prevent false add sizing");
+assert(positionAction(sellA,[sellA],baseShot,{})===null,
+  "unexplained disappearance without matching full sell cannot be called EXIT");
+
+// Net settlement uses v2 fee-INCLUSIVE remaining basis exactly once.
+const economicsFixture={
+  token_id:position2.asset,current_size:100,entry_cost_usdc:82,
+  entry_fees_usdc:0.5,total_cost_usdc:82.5,realized_pnl:4
+};
+const settlementPosition={...position2,redeemable:true,curPrice:1};
+const netResult=settlementNet(settlementPosition,economicsFixture);
+assert(Math.abs(netResult.net-17.5)<EPS2&&Math.abs(netResult.roi-(17.5/82.5*100))<EPS2&&
+  netResult.buyFees===.5&&netResult.realizedPnl===4,
+  "v2 fee-inclusive net=$17.50, not the unadjusted gross $18");
+const winNetAlert=settlementAlert(settlementPosition,marketContextLines(settlementPosition,[settlementPosition]),
+  "ChrisZyy",now2,"https://polymarket.com/event/sample-2026-market",{net:netResult});
+assert(winNetAlert.title.startsWith("🏆 WIN · ChrisZyy · +$17.50")&&
+  winNetAlert.desp.includes("该剩余仓位预计净收益")&&
+  winNetAlert.desp.includes("+$17.50")&&
+  winNetAlert.desp.includes("已包含的买入手续费")&&
+  winNetAlert.desp.includes("历史已实现盈亏（另列）"),
+  "settlement card shows net, accounted buy fee and separately reported realized PnL");
+assert(settlementNet(settlementPosition,{...economicsFixture,current_size:99})===null,
+  "indexing drift makes settlement net unavailable instead of using stale basis");
+assert(settlementNet(settlementPosition,{...economicsFixture,total_cost_usdc:null,
+  entry_cost_usdc:null,entry_fees_usdc:null})===null,
+  "missing gross cost never treated as zero");
+const unavailable=settlementAlert(settlementPosition,marketContextLines(settlementPosition,[settlementPosition]),
+  "ChrisZyy",now2,"https://polymarket.com/event/sample-2026-market");
+assert(unavailable.desp.includes("暂无法核实")&&unavailable.desp.includes("估算毛盈亏"),
+  "v2 outage never mislabels legacy estimate as net profit");
+
+let v2NetCalls=0;
+const netMock=async url=>{
+  v2NetCalls++;
+  const u=new URL(url);
+  assert(u.pathname==="/v2/positions"&&u.searchParams.get("status")==="REDEEMABLE" &&
+    u.searchParams.get("user")===env.WALLET_ADDRESS,"net request uses exact wallet redeemable cohort");
+  return {ok:true,json:async()=>({data:[economicsFixture],
+    pagination:{next_cursor:null,has_more:false}})};
+};
+const netMap=await readRedeemableEconomics(netMock,env.WALLET_ADDRESS);
+assert(v2NetCalls===1&&Math.abs(settlementNet(settlementPosition,
+  netMap.get(position2.asset)).net-17.5)<EPS2,"economics collection only one v2 request");
+
+// Simulate real per-wallet transition through initialized DO snapshots and original outbox.
+const lifecycleDB=new Map(),lifecycleSent=[];
+const lifecycleStorage={
+  get:async key=>structuredClone(lifecycleDB.get(key)),
+  put:async(key,value)=>{lifecycleDB.set(key,structuredClone(value))}
+};
+const lifecycleEnv={WALLET_ADDRESS:env.WALLET_ADDRESS,MIN_POSITION_USD:"5",
+  PUSH_URL:env.PUSH_URL,V2_SHADOW_ENABLED:"false"};
+let positionsNow=[],activityNow=[];
+const lifecycleFetcher=async(url,init)=>{
+  const addr=String(url);
+  if(addr.includes("push.ft07.com")){
+    lifecycleSent.push(JSON.parse(init.body));
+    return {ok:true,json:async()=>({code:0})};
+  }
+  if(addr.includes("polygon-bor-rpc.publicnode.com"))
+    return {ok:true,json:async()=>({result:"0x0"})};
+  if(addr.includes("/v2/positions?"))
+    return {ok:true,json:async()=>({
+      data:[{...economicsFixture,current_size:positionsNow[0]?.size||100,
+        total_cost_usdc:positionsNow[0]?.size===50 ? 41.25 : 82.5}],
+      pagination:{next_cursor:null,has_more:false}})};
+  return {ok:true,json:async()=>addr.includes("/positions?")?positionsNow:activityNow};
+};
+const fillAt=(tx,side,size,cost,ts)=>({
+  type:"TRADE",transactionHash:tx,asset:position2.asset,conditionId:position2.conditionId,
+  title:position2.title,eventSlug:position2.eventSlug,outcome:"Yes",side,
+  size,usdcSize:cost,price:cost/size,timestamp:ts
+});
+let clock=now2;
+// Start from empty holdings.
+await poll(lifecycleStorage,lifecycleEnv,lifecycleFetcher,clock);
+assert(lifecycleDB.get("monitor").positionSnapshots!=null,
+  "new wallet initializes complete positive-balance snapshot");
+// Open with 100 shares.
+clock+=300;positionsNow=[{...position2}];
+activityNow.push(fillAt("open-tx","BUY",100,80,clock-12));
+await poll(lifecycleStorage,lifecycleEnv,lifecycleFetcher,clock);
+assert(lifecycleSent.at(-1).title.startsWith("🆕 OPEN"),"opening trade is classified in real poll");
+assert(lifecycleSent.at(-1).desp.includes("预估 APR"),"real opening push includes APR");
+// Add 50 shares.
+clock+=300;positionsNow=[{...position2,size:150,avgPrice:.82,initialValue:123,currentValue:123}];
+activityNow.push(fillAt("add-tx","BUY",50,43,clock-12));
+await poll(lifecycleStorage,lifecycleEnv,lifecycleFetcher,clock);
+assert(lifecycleSent.at(-1).title.startsWith("📈 ADD") &&
+  lifecycleSent.at(-1).desp.includes("100 份 → **150 份**"),
+  "real poll sends ADD with before-after holding shares");
+// Reduce 50 shares.
+clock+=300;positionsNow=[{...position2,size:100,avgPrice:.82,initialValue:82,currentValue:82}];
+activityNow.push(fillAt("trim-tx","SELL",50,43,clock-12));
+await poll(lifecycleStorage,lifecycleEnv,lifecycleFetcher,clock);
+assert(lifecycleSent.at(-1).title.startsWith("📉 TRIM"),"real poll sends TRIM");
+// Exit all.
+clock+=300;positionsNow=[];
+activityNow.push(fillAt("exit-tx","SELL",100,81,clock-12));
+await poll(lifecycleStorage,lifecycleEnv,lifecycleFetcher,clock);
+assert(lifecycleSent.at(-1).title.startsWith("🚪 EXIT") &&
+  lifecycleDB.get("monitor").positionSnapshots[position2.asset]===undefined,
+  "real poll sends EXIT and clears snapshot without wiping checkpoint");
+
+// Seed separate wallet with positive open holding and test PARTIAL -> WIN.
+const settlesDB=new Map(), settleSent=[];
+const settleStorage={
+  get:async k=>structuredClone(settlesDB.get(k)),
+  put:async(k,v)=>{settlesDB.set(k,structuredClone(v))}
+};
+let settledNow=[{...position2}],settledEvents=[];
+const settlesFetcher=async(url,init)=>{
+  const str=String(url);
+  if(str.includes("push.ft07.com")){
+    settleSent.push(JSON.parse(init.body));
+    return {ok:true,json:async()=>({code:0})};
+  }
+  if(str.includes("polygon-bor-rpc.publicnode.com"))
+    return {ok:true,json:async()=>({result:"0x0"})};
+  if(str.includes("/v2/positions?"))
+    return {ok:true,json:async()=>({data:[economicsFixture],
+      pagination:{has_more:false,next_cursor:null}})};
+  return {ok:true,json:async()=>str.includes("/positions?")?settledNow:settledEvents};
+};
+await poll(settleStorage,lifecycleEnv,settlesFetcher,now2);
+settledNow=[{...position2,redeemable:true,curPrice:0.5}];
+await poll(settleStorage,lifecycleEnv,settlesFetcher,now2+300);
+assert(settleSent.length===1&&settleSent[0].title.startsWith("🟣 PARTIAL") &&
+  settleSent[0].desp.includes("预计净收益")&&settleSent[0].desp.includes("-$32.50"),
+  "real settlement uses v2 net once, even for PARTIAL");
+settledNow=[{...position2,redeemable:true,curPrice:1}];
+await poll(settleStorage,lifecycleEnv,settlesFetcher,now2+600);
+assert(settleSent.length===2&&settleSent[1].title.startsWith("🏆 WIN") &&
+  settleSent[1].desp.includes("+$17.50"),
+  "PARTIAL -> WIN status transition emits new correctly netted alert");
+await poll(settleStorage,lifecycleEnv,settlesFetcher,now2+900);
+assert(settleSent.length===2,"stable settled position is not double-notified");
+console.log("Passed: real OPEN/ADD/TRIM/EXIT, full-win ROI/APR, fee-inclusive net WIN/PARTIAL and no replay");
