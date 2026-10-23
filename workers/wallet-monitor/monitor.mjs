@@ -432,7 +432,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     cooldownHours:Number(env.REDEEM_COOLDOWN_HOURS??24),
     minUsd:Number(env.MIN_REDEEM_USD??5)
   });
-  if(String(env.REDEEM_REMINDER_ENABLED??"true")==="true"){
+  if(String(env.REDEEM_REMINDER_ENABLED??"false")==="true"){
     const item = redemptionReminder(walletLabel(user),reminders.due,now);
     if(item)pending.push(item);
   }

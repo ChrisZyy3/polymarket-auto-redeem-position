@@ -215,3 +215,11 @@ The default public `GET /health` still provides no personal portfolio values. Ne
 node workers/wallet-monitor/test.mjs
 node workers/wallet-monitor/test-digest.mjs
 ```
+
+## 自动赎回钱包通知策略（2026-10-24）
+
+- 默认 `REDEEM_REMINDER_ENABLED=false`：停用“可赎回超过 6 小时”的 CLAIM 催办，适合已经自动赎回的钱包。该机制仍可按需手动开启。
+- 新的 `REDEEM` 活动继续触发通知：当 Data API 返回正数 `usdcSize`，标题展示 `💰 已赎回 · <钱包名称> · $到账金额`，正文继续包含市场、选择、份数、活动报告的赎回到账金额与链上钱包余额。
+- 零回款标为“零回款赎回”，没有可核实的金额则标为“赎回记录（到账待核实）”，不会误报已到账正数金额。
+- WIN / LOSS / PARTIAL 结算结果仍按原机制单独提醒，不能取代链上实际赎回。日报保留“待赎回金额”作为统计，不再因此触发催办推送。
+- 已持久化的交易去重记录和 Outbox 保留；不重置任何钱包状态，不更改 Cron 频率。

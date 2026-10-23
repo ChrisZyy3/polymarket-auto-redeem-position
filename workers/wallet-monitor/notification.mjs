@@ -37,8 +37,12 @@ export function tradeAlert(a, market, lines, walletLabel, marketUrl, options = {
   const icons = { OPEN:"🆕", ADD:"📈", TRIM:"📉", EXIT:"🚪", BUY:"🟢", SELL:"🟠", REDEEM:"💰" };
   const names = { OPEN:"首次建仓", ADD:"加仓", TRIM:"减仓", EXIT:"清仓", BUY:"买入成交", SELL:"卖出成交" };
   const icon = icons[kind] || "🔔";
-  const zeroRedeem = redeem && Number(a.usdcSize) === 0 && Number(a.size) > 0;
-  const word = redeem ? zeroRedeem ? "零回款赎回" : "实际赎回" : names[kind];
+  const zeroRedeem = redeem && known(a.usdcSize) && Number(a.usdcSize) === 0 &&
+    known(a.size) && Number(a.size) > 0;
+  const confirmedPayout = redeem && known(a.usdcSize) && Number(a.usdcSize) > 0;
+  const word = redeem ? zeroRedeem ? "零回款赎回" :
+    confirmedPayout ? "已赎回" : "赎回记录（到账待核实）" : names[kind];
+  const displayKind = redeem ? word : kind;
   const amount = known(a.usdcSize) ? money(a.usdcSize) : "暂无数据";
   const shares = known(a.size) ? qty(a.size) : "暂无数据";
   const unit = known(a.price) ? price(a.price) : "暂无数据";
@@ -84,13 +88,13 @@ export function tradeAlert(a, market, lines, walletLabel, marketUrl, options = {
   ] : []);
   return {
     formatVersion: 2,
-    title: icon + " " + kind + " · " + walletLabel + " · " + amount,
+    title: icon + " " + displayKind + " · " + walletLabel + " · " + amount,
     short: short(market.title) + " · " + (market.outcome || "未知") +
       " · " + (redeem ? "到账 " + amount :
         (merged ? count + "笔合并 · " : "") + shares + " @ " + unit) +
       (forecast ? " · ROI " + forecast.grossROI.toFixed(1) + "%" : ""),
     desp: [
-      "### " + icon + " " + kind + " · " + word,
+      "### " + icon + " " + displayKind + " · " + word,
       "**" + safe(market.title || market.conditionId || "未知市场") + "**",
       "**账户：** " + safe(walletLabel),
       "**选择：** " + safe(market.outcome || "未知选项"),
@@ -131,8 +135,8 @@ export function settlementAlert(p, lines, walletLabel, checkedAt, marketUrl, opt
   const kind = settlementKind(p);
   if (!kind) return null;
   const icon = kind === "WIN" ? "🏆" : kind === "LOSS" ? "🔴" : "🟣";
-  const word = kind === "WIN" ? "结算获胜 · 待赎回" :
-    kind === "LOSS" ? "结算归零" : "部分回款 · 待赎回";
+  const word = kind === "WIN" ? "结算获胜" :
+    kind === "LOSS" ? "结算归零" : "部分回款";
   const payout = known(p.size) && known(p.curPrice)
     ? Number(p.size) * Number(p.curPrice) : null;
   const gross = estimatePnl(p);
@@ -168,7 +172,7 @@ export function settlementAlert(p, lines, walletLabel, checkedAt, marketUrl, opt
       net ? "> 净收益来自 Data API v2：预计回款减去当前剩余仓位的含买入费成本；未扣 Gas、其他链外费用。"
         : "> Data API v2 成本缺失、滞后或无法访问；不能将估算毛盈亏称为净收益。",
       "> 历史已实现盈亏是另一项指标，不能直接当成此次剩余仓位的净收益。",
-      kind === "WIN" ? "> 需实际赎回后资金才会进入钱包。" :
+      kind === "WIN" ? "> 这里是结算结果；实际赎回与到账以 REDEEM 活动提醒为准。" :
         kind === "LOSS" ? "> 该持有结果归零。" : "> 部分回款，不能等同全额 WIN。",
       "",
       common(p, lines, checkedAt, marketUrl)
