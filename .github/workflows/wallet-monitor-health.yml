@@ -1,0 +1,93 @@
+name: Polymarket Wallet Monitor - External Health
+
+# This MUST live on the default branch: GitHub schedule only runs there.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/wallet-monitor-health.yml"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: polymarket-wallet-monitor-external-health
+  cancel-in-progress: false
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Probe Cloudflare Worker from outside Cloudflare
+        id: probe
+        shell: bash
+        run: |
+          # HTTP 503 indicates stale/uninitialized wallet checkpoint.
+          # A timeout, DNS outage, Worker crash or HTTP non-200 also fails.
+          HEALTH_URL="https://polymarket-wallet-monitor.chriszyy3.workers.dev/health"
+          HTTP_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' \
+            --connect-timeout 5 --max-time 10 \
+            --retry 2 --retry-delay 2 --retry-all-errors \
+            "$HEALTH_URL" || true)"
+          case "$HTTP_STATUS" in
+            200) echo "healthy=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "healthy=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+          echo "http_status=$HTTP_STATUS" >> "$GITHUB_OUTPUT"
+      - name: Open outage issue once and close on recovery
+        uses: actions/github-script@v8
+        env:
+          HEALTHY: ${{ steps.probe.outputs.healthy }}
+          HTTP_STATUS: ${{ steps.probe.outputs.http_status }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const title = "[wallet-monitor] Cloudflare monitor unhealthy";
+            const url = "https://polymarket-wallet-monitor.chriszyy3.workers.dev/health";
+            const healthy = process.env.HEALTHY === "true";
+            const status = process.env.HTTP_STATUS || "000";
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: "open", per_page: 100
+            });
+            const incident = issues.find(i => !i.pull_request && i.title === title);
+            if (!healthy && !incident) {
+              await github.rest.issues.create({
+                owner, repo, title,
+                assignees: ["ChrisZyy3"],
+                body: [
+                  "## Polymarket Wallet Monitor external health alert",
+                  "",
+                  "An independent GitHub Actions check could not confirm healthy wallet polling.",
+                  "",
+                  "- Target: " + url,
+                  "- HTTP result: " + status,
+                  "- Last check (UTC): " + new Date().toISOString(),
+                  "- Expected: HTTP 200 when every configured wallet has polled successfully within 20 minutes",
+                  "",
+                  "This may reflect a Worker outage, stale polling, an inaccessible Durable Object,",
+                  "or a transient connectivity issue. No wallet details or tokens are published.",
+                  "A later healthy check will automatically close this issue."
+                ].join("\n")
+              });
+              core.warning("Cloudflare wallet monitor unhealthy; opened one GitHub issue.");
+            } else if (healthy && incident) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: incident.number,
+                body: "✅ Health endpoint has recovered (HTTP 200). Checked at " +
+                  new Date().toISOString() + " UTC. Closing this incident automatically."
+              });
+              await github.rest.issues.update({
+                owner, repo, issue_number: incident.number, state: "closed"
+              });
+              core.info("Recovery: closed external health incident #" + incident.number);
+            } else {
+              core.info(healthy ? "All monitored wallets healthy." : "Incident already open.");
+            }
