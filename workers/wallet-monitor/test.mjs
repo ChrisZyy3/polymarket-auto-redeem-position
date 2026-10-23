@@ -1,4 +1,5 @@
-import { poll, activityKey, positionStatus, auditSnapshot, walletLabel, expectedEnd, marketContextLines, recordPollFailure } from "./monitor.mjs";
+import { poll, activityKey, positionStatus, auditSnapshot, walletLabel, expectedEnd, marketContextLines, recordPollFailure, auditV2Shadow } from "./monitor.mjs";
+import { compareV2Positions } from "./v2-shadow.mjs";
 import { dataApiJson, retryAfterMs } from "./data-client.mjs";
 import { drainOutbox } from "./outbox.mjs";
 import { tradeAlert, settlementAlert, settlementKind, estimatePnl, walletPusdBalance } from "./notification.mjs";
@@ -383,3 +384,52 @@ assert(delivered.length===beforeHealth+2 &&
   db.get("monitor").audit.healthAlarmActive===false,
   "recovery notification emitted only after full successful wallet poll");
 console.log("Passed: bounded 429/503 retries, durable alarm retry, streak health warning and recovery");
+
+
+// Data API v2 read-only comparison (cursor pages) without any side effects.
+const v1Fixtures=[{asset:"101",size:3},{asset:"202",size:5},{asset:"303",size:0}];
+let v2Reads=0;
+const v2Response=async url=>{
+  v2Reads++;
+  const parsed=new URL(url);
+  assert(parsed.pathname==="/v2/positions", "shadow uses only public v2 positions");
+  assert(parsed.searchParams.get("user")===env.WALLET_ADDRESS,"shadow user is same proxy wallet");
+  const second=Boolean(parsed.searchParams.get("cursor"));
+  return {ok:true,json:async()=>({
+    data:second
+      ? [{token_id:"404",current_size:7}]
+      : [{token_id:"101",current_size:3}],
+    pagination:{has_more:!second,next_cursor:second?null:"next-signed-cursor"}
+  })};
+};
+const v2Report=await compareV2Positions(v2Response,env.WALLET_ADDRESS,v1Fixtures);
+assert(v2Report.pages===2 && v2Report.v1Count===2 && v2Report.v2Count===2 &&
+  v2Report.matched===1 && v2Report.onlyV1===1 && v2Report.onlyV2===1 &&
+  v2Report.advice==="investigate_data_freshness", "shadow compares complete cursor-paginated data");
+const shadowState=new Map();
+shadowState.set("monitor", {user:env.WALLET_ADDRESS, audit:{}, pending:[], checkpoint:5400});
+const shadowStorage={
+  get:async k=>structuredClone(shadowState.get(k)),
+  put:async (k,v)=>{shadowState.set(k,structuredClone(v))}
+};
+let beforeReads=v2Reads;
+const firstCompare=await auditV2Shadow(shadowStorage,
+  {V2_SHADOW_ENABLED:"true"},v2Response,env.WALLET_ADDRESS,v1Fixtures,60_000);
+assert(firstCompare.ok && v2Reads===beforeReads+2 &&
+  shadowState.get("monitor").audit.shadowV2Report.v2Count===2,
+  "shadow report saved without changing native checkpoint");
+beforeReads=v2Reads;
+const skippedShadow=await auditV2Shadow(shadowStorage,
+  {V2_SHADOW_ENABLED:"true"},v2Response,env.WALLET_ADDRESS,v1Fixtures,60_000+3600);
+assert(skippedShadow.skipped==="interval" && v2Reads===beforeReads &&
+  shadowState.get("monitor").checkpoint===5400,"only one shadow scan every six hours");
+const disabledShadow=await auditV2Shadow(shadowStorage,
+  {V2_SHADOW_ENABLED:"false"},v2Response,env.WALLET_ADDRESS,v1Fixtures,100_000);
+assert(disabledShadow.skipped==="disabled","shadow flag disables all v2 queries");
+const failShadow=await auditV2Shadow(shadowStorage,
+  {V2_SHADOW_ENABLED:"true"},async()=>{throw Error("v2 provider down")},
+  env.WALLET_ADDRESS,v1Fixtures,100_000);
+assert(failShadow.ok===false && shadowState.get("monitor").checkpoint===5400 &&
+  shadowState.get("monitor").audit.shadowV2LastError,
+  "v2 provider failures are isolated and do not advance/checkpoint legacy state");
+console.log("Passed: Data API v2 shadow pagination, cooldown, opt-in and error isolation");

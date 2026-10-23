@@ -2,6 +2,7 @@ import { tradeAlert, settlementAlert, walletPusdBalance } from "./notification.m
 import { mergeTradeFills } from "./trade-batch.mjs";
 import { drainOutbox } from "./outbox.mjs";
 import { dataApiJson } from "./data-client.mjs";
+import { compareV2Positions } from "./v2-shadow.mjs";
 const API = "https://data-api.polymarket.com";
 const PAGE = 500;
 const OVERLAP = 60 * 60; // 60-minute late-indexing overlap for five-minute polling
@@ -118,7 +119,11 @@ function newAudit(now) {
     consecutivePollFailures: 0,
     lastPollFailureAt: null,
     lastPollError: null,
-    healthAlarmActive: false
+    healthAlarmActive: false,
+    shadowV2LastAttemptAt: null,
+    shadowV2LastSuccessAt: null,
+    shadowV2LastError: null,
+    shadowV2Report: null
   };
 }
 
@@ -142,7 +147,11 @@ export function auditSnapshot(state) {
     consecutivePollFailures: a.consecutivePollFailures ?? 0,
     lastPollFailureAt: a.lastPollFailureAt ?? null,
     lastPollError: a.lastPollError ?? null,
-    healthAlarmActive: a.healthAlarmActive ?? false
+    healthAlarmActive: a.healthAlarmActive ?? false,
+    shadowV2LastAttemptAt: a.shadowV2LastAttemptAt ?? null,
+    shadowV2LastSuccessAt: a.shadowV2LastSuccessAt ?? null,
+    shadowV2LastError: a.shadowV2LastError ?? null,
+    shadowV2Report: a.shadowV2Report ?? null
   };
 }
 
@@ -256,6 +265,36 @@ export async function recordPollFailure(storage, env, fetcher = fetch,
   return { alerted, failures };
 }
 
+
+export async function auditV2Shadow(storage, env, fetcher, user, v1Positions, now) {
+  if (String(env.V2_SHADOW_ENABLED || "false") !== "true") return { skipped: "disabled" };
+  const state = await storage.get("monitor");
+  if (!state || Number(state.shadowV2AttemptAt || 0) > now - 6 * 3600)
+    return { skipped: "interval" };
+  state.shadowV2AttemptAt = now;
+  state.audit ??= newAudit(now);
+  state.audit.shadowV2LastAttemptAt = now;
+  await storage.put("monitor", state);
+  try {
+    const result = await compareV2Positions(fetcher, user, v1Positions);
+    const updated = await storage.get("monitor");
+    updated.audit ??= newAudit(now);
+    updated.audit.shadowV2LastSuccessAt = now;
+    updated.audit.shadowV2LastError = null;
+    updated.audit.shadowV2Report = result;
+    await storage.put("monitor", updated);
+    auditLog("wallet_v2_shadow_success", user, { at: now, ...result });
+    return { ok: true, ...result };
+  } catch (error) {
+    const updated = await storage.get("monitor");
+    updated.audit ??= newAudit(now);
+    updated.audit.shadowV2LastError = "Read-only v2 comparison unavailable";
+    await storage.put("monitor", updated);
+    auditLog("wallet_v2_shadow_failed", user, { at: now, reason: "v2_comparison_unavailable" });
+    return { ok: false };
+  }
+}
+
 export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.now() / 1000), walletAddress = env.WALLET_ADDRESS) {
   const user = (walletAddress || "").toLowerCase();
   if (!/^0x[a-f0-9]{40}$/.test(user)) throw new Error("Invalid WALLET_ADDRESS");
@@ -366,6 +405,8 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     auditLog("wallet_alert_detected", user, { at: now, alerts: alertCount, types });
   }
   const delivery = await deliverPending(storage, env, fetcher, now, "poll");
+  // Shadow reads never drive push events, PnL or legacy checkpoints.
+  await auditV2Shadow(storage, env, fetcher, user, positions, now);
   auditLog("wallet_poll_success", user, { at: now, initialized: false,
     positions: positions.length, alertsDetected: alertCount, pushesAccepted: delivery.accepted,
     pending: delivery.pending, pushDeferred: delivery.failed });
