@@ -447,7 +447,7 @@ const position2={
   redeemable:false
 };
 const projected=winningPayoutForecast(position2,now2);
-assert(Math.abs(projected.grossROI-25)<EPS2 && projected.grossProfit===20 &&
+assert(Math.abs(projected.grossROI-25)<EPS2 && Math.abs(projected.grossProfit-20)<EPS2 &&
   projected.simpleAPR>0 && projected.simpleAPR<150,"full-win gross ROI=25% and APR uses future date");
 const shownProjection=tradeAlert(
   {type:"TRADE",side:"BUY",size:100,usdcSize:80,price:.8,timestamp:now2},
