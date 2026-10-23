@@ -1,13 +1,15 @@
-import { poll, activityKey, positionStatus, auditSnapshot } from "./monitor.mjs";
+import { poll, activityKey, positionStatus, auditSnapshot, walletLabel, expectedEnd, marketContextLines } from "./monitor.mjs";
 import worker, { walletAddresses, WalletMonitor } from "./worker.mjs";
 
 const assert = (v, m) => { if (!v) throw new Error(m); };
 const env = { WALLET_ADDRESS: "0x052f4191cd324a348835a846d34df5b0061e53fb",
   PUSH_URL: "https://11310.push.ft07.com/send/test.send" };
 let positions = [{ asset: "a", conditionId: "c", size: 100, avgPrice: .9,
-  initialValue: 90, currentValue: 95, curPrice: .95, redeemable: false }];
+  initialValue: 90, currentValue: 95, curPrice: .95, redeemable: false,
+  title: "Sample market", outcome: "Yes", endDate: "2026-12-31", eventSlug: "sample-market" }];
 let activity = [];
 let sent = 0;
+const delivered = [];
 let rejectPush = false;
 const auditEvents = [];
 const priorConsoleInfo = console.info;
@@ -23,6 +25,7 @@ const fetcher = async (url, init) => {
     assert(init.method === "POST", "push uses POST");
     assert(init.redirect === "manual", "Worker fetch uses supported redirect policy");
     if (rejectPush) return { ok: true, json: async () => ({ code: 1 }) };
+    delivered.push(JSON.parse(init.body));
     sent++;
     return { ok: true, json: async () => ({ code: 0 }) };
   }
@@ -34,6 +37,14 @@ activity = [{ transactionHash: "tx", type: "TRADE", asset: "a",
   timestamp: 1020, side: "BUY", size: 5, usdcSize: 4.5, price: .9 }];
 let result = await poll(storage, env, fetcher, 1060);
 assert(sent === 1 && result.alerts === 1, "new buy sends one notification");
+assert(delivered[0].desp.includes("钱包：ChrisZyy"), "wallet label in sent notification");
+assert(delivered[0].desp.includes("预计结束：2026-12-31"), "end date populated");
+assert(delivered[0].desp.includes("当前该选项总持仓：100 份"), "total shares not trade fill");
+assert(delivered[0].desp.includes("当前持仓市值：$95.00"), "current USD holdings");
+assert(delivered[0].desp.includes("买入均价：$0.9 / 份"), "position weighted entry average");
+assert(delivered[0].desp.includes("https://polymarket.com/event/sample-market"), "market link stays");
+assert(!delivered[0].desp.includes("交易：") && !delivered[0].desp.includes("polygonscan.com/tx"),
+  "tx explorer link removed");
 await poll(storage, env, fetcher, 1120);
 assert(sent === 1, "same trade is not sent twice");
 assert(activityKey(activity[0]) !== activityKey({ ...activity[0], asset: "b" }),
@@ -163,3 +174,25 @@ assert(migrated.audit.auditSince === 1550 && migrated.audit.pushCount === 0,
   "legacy wallet starts a new audit period without invented history");
 console.info = priorConsoleInfo;
 console.log("Passed: audit counts, push retries, safe structured logs, authenticated status and legacy migration");
+
+
+// Labels and safe end-date/position fallbacks.
+assert(walletLabel("0x9f7eb5bc88342f01d18754be0439fad79ec282ce") === "PigsWallet", "PigsWallet label");
+assert(walletLabel("0x24816C037CDc2c9BD979e69d777541cF560A9b79") === "RealChris", "RealChris mixed case");
+assert(walletLabel("0x052f4191cd324A348835A846d34dF5b0061e53fb") === "ChrisZyy", "ChrisZyy mixed case");
+const unknownWallet = "0x0000000000000000000000000000000000000123";
+assert(walletLabel(unknownWallet) === unknownWallet, "unknown wallet fallback");
+assert(expectedEnd("1970-01-01") === "暂无数据", "invalid sentinel excluded");
+assert(expectedEnd(undefined) === "暂无数据", "missing end date explicit");
+assert(expectedEnd("2026-12-31T16:00:00Z").includes("2027/01/01 00:00"),
+  "market end time formatted in Asia/Shanghai");
+const missingHoldings = marketContextLines({ asset: "missing", conditionId: "missing" }, positions);
+assert(missingHoldings.some(line => line.includes("暂无数据")), "missing holdings not invented");
+const ambiguousContext = marketContextLines({ conditionId: "ambiguous" }, [
+  { asset: "one", conditionId: "ambiguous", outcome: "Yes", size: 12, avgPrice: 0.2 },
+  { asset: "two", conditionId: "ambiguous", outcome: "No", size: 6, avgPrice: 0.9 }
+]);
+assert(ambiguousContext.some(line => line.includes("暂无数据")), "different outcomes are not merged");
+assert(delivered.every(m => !m.desp.includes("交易：") &&
+  !m.desp.includes("polygonscan.com/tx")), "all notifications lack tx explorer links");
+console.log("Passed: wallet labels, planned end, holding summaries, unknown market, tx URL removal");
