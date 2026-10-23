@@ -121,7 +121,7 @@ export async function primaryV2Positions(fetcher, wallet) {
 export async function primaryV2Activity(fetcher, wallet, since) {
   if (!Number.isFinite(Number(since)) || Number(since) < 1)
     throw new Error("Invalid v2 activity starting timestamp");
-  return walkV2(fetcher, "/v2/activity", {
+  const rows = await walkV2(fetcher, "/v2/activity", {
     user: walletAddress(wallet),
     type: "TRADE,REDEEM",
     start: String(Math.max(1, Math.floor(Number(since)))),
@@ -129,6 +129,8 @@ export async function primaryV2Activity(fetcher, wallet, since) {
     sort_direction: "DESC",
     limit: String(PAGE_SIZE)
   }, normalizeV2Activity, MAX_ACTIVITY_PAGES);
+  // Align chronological notification order with the retired v1 ASC feed.
+  return rows.sort((x,y)=>x.timestamp-y.timestamp);
 }
 
 // Backwards-compatible once-only cutover bridge: v1 and v2 may differ in
