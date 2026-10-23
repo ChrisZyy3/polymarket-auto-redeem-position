@@ -37,7 +37,8 @@ export function tradeAlert(a, market, lines, walletLabel, marketUrl, options = {
   const icons = { OPEN:"🆕", ADD:"📈", TRIM:"📉", EXIT:"🚪", BUY:"🟢", SELL:"🟠", REDEEM:"💰" };
   const names = { OPEN:"首次建仓", ADD:"加仓", TRIM:"减仓", EXIT:"清仓", BUY:"买入成交", SELL:"卖出成交" };
   const icon = icons[kind] || "🔔";
-  const zeroRedeem = redeem && Number(a.usdcSize) === 0 && Number(a.size) > 0;
+  const zeroRedeem = redeem && known(a.usdcSize) && Number(a.usdcSize) === 0 &&
+    known(a.size) && Number(a.size) > 0;
   const confirmedPayout = redeem && known(a.usdcSize) && Number(a.usdcSize) > 0;
   const word = redeem ? zeroRedeem ? "零回款赎回" :
     confirmedPayout ? "已赎回" : "赎回记录（到账待核实）" : names[kind];
