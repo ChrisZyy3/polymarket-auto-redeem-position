@@ -1,4 +1,7 @@
-import { poll, push, auditSnapshot, deliverPending, recordPollFailure } from "./monitor.mjs";
+import { poll, push, auditSnapshot, deliverPending, recordPollFailure, walletLabel } from "./monitor.mjs";
+import { walletPusdBalance } from "./notification.mjs";
+import { digestDate, digestWindow, composeDailyDigest,
+  validDailySnapshots, enqueueDigest } from "./asset-digest.mjs";
 import { healthSummary, HEALTH_STALE_SECONDS } from "./health.mjs";
 
 // One configured wallet per Durable Object. Preserve the legacy address as a fallback.
@@ -41,6 +44,27 @@ export class WalletMonitor {
 
   async fetch(request) {
     const url = new URL(request.url);
+    // These endpoints are reachable only through this Worker binding, not the
+    // public HTTP router. Use a dedicated DO name, never a monitored wallet ID.
+    if(url.pathname==="/digest-state"){
+      const state=await this.ctx.storage.get("monitor");
+      return Response.json({ok:true,date:state?.lastDailyDate??null});
+    }
+    if(url.pathname==="/digest-enqueue" && request.method==="POST"){
+      try{
+        const body=await request.json();
+        const queued=await enqueueDigest(this.ctx.storage,body.day,body.item,body.now);
+        if(queued.queued){
+          // All writes happen before the push. Alarm retries deferred messages.
+          const sent=await deliverPending(this.ctx.storage,this.env,fetch,body.now,"digest");
+          return Response.json({...queued,accepted:sent.accepted,pending:sent.pending});
+        }
+        return Response.json({...queued,accepted:0});
+      }catch(error){
+        console.error("wallet_digest_queue_failed",String(error?.message||"error").slice(0,140));
+        return Response.json({ok:false,error:"Digest enqueue failure"},{status:502});
+      }
+    }
     const wallet = url.searchParams.get("wallet");
     if (!wallet || !/^0x[a-f0-9]{40}$/.test(wallet)) {
       return Response.json({ ok: false, error: "Invalid wallet" }, { status: 400 });
@@ -49,6 +73,12 @@ export class WalletMonitor {
       const s = await this.ctx.storage.get("monitor");
       return Response.json({ ok: true, initialized: Boolean(s),
         lastSuccessAt: s?.lastSuccessAt ?? null });
+    }
+    if (url.pathname === "/digest-snapshot" && request.method === "GET") {
+      const state=await this.ctx.storage.get("monitor");
+      return Response.json({ok:Boolean(state?.dailySnapshot),
+        lastSuccessAt:state?.lastSuccessAt??null,
+        snapshot:state?.dailySnapshot??null});
     }
     if (url.pathname === "/status") {
       const s = await this.ctx.storage.get("monitor");
@@ -111,6 +141,46 @@ async function runAll(env, route) {
   return { ok: results.every(r => r.ok), wallets: results };
 }
 
+
+export async function runDailyDigest(env, fetcher=fetch, ms=Date.now()) {
+  if(String(env.DAILY_REPORT_ENABLED??"true")!=="true")
+    return {skipped:"disabled"};
+  if(!digestWindow(ms))return {skipped:"outside_window"};
+  const day=digestDate(ms),now=Math.floor(ms/1000);
+  const coordinator=env.MONITOR.get(env.MONITOR.idFromName("_system_daily_digest_v1"));
+  const statusResp=await coordinator.fetch("https://internal/digest-state");
+  if(!statusResp.ok)throw Error("Daily digest coordinator unavailable");
+  const status=await statusResp.json();
+  if(status.date===day)return {skipped:"already_queued",day};
+  const rows=await Promise.all(walletAddresses(env).map(async wallet=>{
+    const response=await instance(env,wallet).fetch(
+      "https://internal/digest-snapshot?wallet="+wallet,{method:"GET"});
+    if(!response.ok)throw Error("Daily digest wallet snapshot request failed");
+    const row=await response.json();
+    return {...row,label:walletLabel(wallet),balance:null,wallet};
+  }));
+  if(!validDailySnapshots(rows,now))
+    throw Error("Daily digest wallet data incomplete or stale; retry next five-minute tick");
+  // Balances do NOT determine whether the report is sent. A failed RPC shows
+  // unavailable, never a fabricated zero.
+  await Promise.all(rows.map(async row=>{
+    row.balance=await walletPusdBalance(fetcher,row.wallet);
+  }));
+  const item=composeDailyDigest(day,rows);
+  const done=await coordinator.fetch("https://internal/digest-enqueue",{
+    method:"POST",
+    headers:{"content-type":"application/json"},
+    body:JSON.stringify({day,item,now})
+  });
+  if(!done.ok)throw Error("Daily digest coordinator failed to queue report");
+  const result=await done.json();
+  console.info("wallet_daily_digest",JSON.stringify({
+    day,queued:result.queued===true,wallets:rows.length,
+    accepted:result.accepted??0,pending:result.pending??0
+  }));
+  return result;
+}
+
 export default {
   async scheduled(_event, env, ctx) {
     ctx.waitUntil((async () => {
@@ -118,6 +188,17 @@ export default {
       if (!result.ok) {
         const failed = result.wallets.filter(r => !r.ok).map(r => r.wallet);
         throw new Error("Wallet monitor poll failed for: " + failed.join(", "));
+      }
+      // Existing five-minute Cron doubles as the Beijing 09:00 daily scheduler.
+      // A singleton coordinator DO makes every tick safely idempotent.
+      try {
+        await runDailyDigest(env,fetch,Date.now());
+      } catch {
+        // The next five-minute tick within the 09:00 hour will retry.
+        // Never fail healthy wallet polling because of a digest/RPC outage.
+        console.error("wallet_daily_digest_deferred",JSON.stringify({
+          at:Math.floor(Date.now()/1000),reason:"snapshot_or_provider_unavailable"
+        }));
       }
     })());
   },
