@@ -209,6 +209,12 @@ export async function deliverPending(storage, env, fetcher = fetch,
   now = Math.floor(Date.now() / 1000), origin = "poll") {
   let cash;
   return drainOutbox(storage, now, async (item, user) => {
+    // Consolidated daily reports already contain per-wallet pUSD balances.
+    // Never append the legacy individual-wallet footer or query a fake wallet ID.
+    if (item.skipBalanceFooter === true) {
+      await push(env, fetcher, item.title, item.desp, item.short);
+      return;
+    }
     const base = item.formatVersion === 2 ? item.desp :
       "钱包：" + walletLabel(user) + "\n\n" + removeTransactionUrl(item.desp);
     if (cash === undefined) cash = await walletPusdBalance(fetcher, user);
