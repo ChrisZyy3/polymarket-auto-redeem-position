@@ -1,4 +1,6 @@
-import { poll, activityKey, positionStatus, auditSnapshot, walletLabel, expectedEnd, marketContextLines } from "./monitor.mjs";
+import { poll, activityKey, positionStatus, auditSnapshot, walletLabel, expectedEnd, marketContextLines, recordPollFailure } from "./monitor.mjs";
+import { dataApiJson, retryAfterMs } from "./data-client.mjs";
+import { drainOutbox } from "./outbox.mjs";
 import { tradeAlert, settlementAlert, settlementKind, estimatePnl, walletPusdBalance } from "./notification.mjs";
 import { mergeTradeFills } from "./trade-batch.mjs";
 import worker, { walletAddresses, WalletMonitor } from "./worker.mjs";
@@ -308,3 +310,76 @@ const groupedAlert=tradeAlert(combined[0], {...market,title:"Merged market",outc
 assert(groupedAlert.desp.includes("合并明细") && groupedAlert.short.includes("2笔合并"),
   "aggregation count visible in detailed and short notifications");
 console.log("Passed: five-minute fill aggregation, no cross-market/cross-side merging");
+
+
+// 429/503 API retries, backoff, Retry-After, and fail-fast on permanent errors.
+let attempts=0, waits=[];
+const retryResponse=async () => {
+  attempts++;
+  return attempts === 1
+    ? {ok:false,status:429,headers:{get:k=>k.toLowerCase()==="retry-after"?"1":null}}
+    : attempts === 2
+      ? {ok:false,status:503,headers:{get:k=>k.toLowerCase()==="retry-after"?"0":null}}
+      : {ok:true,json:async()=>({data:[]})};
+};
+const retried=await dataApiJson(retryResponse,"https://data-api.polymarket.com/positions",
+  {sleep:async ms=>{waits.push(ms)},random:()=>0});
+assert(attempts===3 && waits.length===2 && waits[0]===1000 && waits[1]===0 &&
+  Array.isArray(retried.data), "API honors Retry-After and retries transient errors");
+assert(retryAfterMs({get:()=>null})===null,"absent Retry-After handled");
+let tooLong=false, longAttempts=0;
+try{
+  await dataApiJson(async()=>{
+    longAttempts++;return {ok:false,status:429,headers:{get:()=> "30"}}},
+    "https://data-api.polymarket.com/activity",
+    {sleep:async()=>{throw Error("must not wait 30 seconds")},random:()=>0});
+}catch{tooLong=true}
+assert(tooLong && longAttempts===1,"long Retry-After defers to later Cron without busy wait");
+let bad400=0;
+try{
+  await dataApiJson(async()=>{bad400++;return {ok:false,status:400}}, 
+    "https://data-api.polymarket.com/activity",{sleep:async()=>{},random:()=>0});
+}catch{}
+assert(bad400===1,"permanent 400 failures are not retried");
+
+// Durable outbox: persistent item, scheduled alarm, recovery, and no false debit.
+const pendingMap=new Map();
+let nextAlarm=null, retryCalls=0;
+const queueStorage={
+  get:async k=>structuredClone(pendingMap.get(k)),
+  put:async(k,v)=>{pendingMap.set(k,structuredClone(v))},
+  getAlarm:async()=>nextAlarm,
+  setAlarm:async t=>{nextAlarm=t},
+  deleteAlarm:async()=>{nextAlarm=null}
+};
+pendingMap.set("monitor",{user:env.WALLET_ADDRESS,
+  pending:[{title:"🟢 BUY · ChrisZyy · $6.00",short:"fill",desp:"Test"}],
+  audit:{pushCount:0,pushFailureCount:0,lastPollAccepted:0}});
+const deferred=await drainOutbox(queueStorage,2000,async()=>{throw Error("ServerChan rejected notification")});
+assert(deferred.failed && deferred.pending===1 && nextAlarm>Date.now(),
+  "failed push stores pending message and schedules alarm");
+const succeeded=await drainOutbox(queueStorage,2030,async()=>{retryCalls++},{origin:"alarm"});
+assert(succeeded.accepted===1 && succeeded.pending===0 &&
+  pendingMap.get("monitor").audit.pushCount===1 && retryCalls===1,
+  "alarm retry delivers durable message and clears outbox");
+
+// API health warning and recovery are emitted once, even through ongoing failures.
+const beforeHealth=delivered.length;
+await recordPollFailure(storage,env,fetcher,2100,new Error("HTTP 429 from data-api.polymarket.com"));
+await recordPollFailure(storage,env,fetcher,2400,new Error("HTTP 429 from data-api.polymarket.com"));
+assert(delivered.length===beforeHealth && db.get("monitor").audit.consecutivePollFailures===2,
+  "no premature health notification");
+await recordPollFailure(storage,env,fetcher,2700,new Error("HTTP 429 from data-api.polymarket.com"));
+assert(delivered.length===beforeHealth+1 &&
+  delivered[beforeHealth].title.includes("MONITOR") &&
+  db.get("monitor").audit.healthAlarmActive,
+  "exactly one health warning after three failed five-minute rounds");
+await recordPollFailure(storage,env,fetcher,3000,new Error("HTTP 429 from data-api.polymarket.com"));
+assert(delivered.length===beforeHealth+1,"no repeated outage warning while still unhealthy");
+const recovered=await poll(storage,env,fetcher,3300);
+assert(delivered.length===beforeHealth+2 &&
+  delivered[beforeHealth+1].title.includes("MONITOR 恢复") &&
+  recovered.deliveryDeferred===false && db.get("monitor").audit.consecutivePollFailures===0 &&
+  db.get("monitor").audit.healthAlarmActive===false,
+  "recovery notification emitted only after full successful wallet poll");
+console.log("Passed: bounded 429/503 retries, durable alarm retry, streak health warning and recovery");
