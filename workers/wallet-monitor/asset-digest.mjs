@@ -109,7 +109,7 @@ export function composeDailyDigest(day, wallets) {
     "",
     "#### 💰 资产概况",
     "- **链上 pUSD**："+(completeBalances?dollar(free):"部分钱包余额暂不可用"),
-    "- **未结算仓位估算市值**："+(completePositions?dollar(open):"部分仓位市值缺失"),
+    "- **未结算持仓估算市值**："+(completePositions?dollar(open):"部分仓位市值缺失"),
     "- **待赎回预计金额**："+dollar(pending),
     "- **估算资产合计**："+(total==null?"暂不能完整估算": "**"+dollar(total)+"**"),
     "- **未结算持仓估算毛浮盈亏**："+(hasGross?dollar(gross):"成本或价格数据不足"),
