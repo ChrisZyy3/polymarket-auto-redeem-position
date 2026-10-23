@@ -45,6 +45,10 @@ export function tradeAlert(a, market, lines, walletLabel, marketUrl, options = {
   const count = Number(a.tradeCount) || 1;
   const merged = count > 1;
   const forecast = a.type === "TRADE" && a.side === "BUY" ? options.forecast : null;
+  const currentLines = lifecycle?.kind === "EXIT"
+    ? lines.map(line => line.startsWith("当前该选项总持仓：")
+      ? "当前该选项总持仓：0 份（已确认清仓）" : line)
+    : lines;
   const sizeDelta = lifecycle && known(lifecycle.currentSize) && known(lifecycle.previousSize) ? [
     "#### 📊 持仓变化",
     row("持仓份数", qty(lifecycle.previousSize) + " → **" + qty(lifecycle.currentSize) + "**"),
@@ -96,7 +100,7 @@ export function tradeAlert(a, market, lines, walletLabel, marketUrl, options = {
       "",
       ...sizeDelta,
       ...earnings,
-      common(market, lines, a.timestamp, marketUrl)
+      common(market, currentLines, a.timestamp, marketUrl)
     ].join("\n")
   };
 }
