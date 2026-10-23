@@ -7,6 +7,7 @@ import { snapshotHoldings, positionAction, winningPayoutForecast } from "./posit
 import { settlementNet, readRedeemableEconomics } from "./settlement-economics.mjs";
 import { mergeTradeFills } from "./trade-batch.mjs";
 import worker, { walletAddresses, WalletMonitor } from "./worker.mjs";
+import { healthSummary, HEALTH_STALE_SECONDS } from "./health.mjs";
 
 const assert = (v, m) => { if (!v) throw new Error(m); };
 const env = { WALLET_ADDRESS: "0x052f4191cd324a348835a846d34df5b0061e53fb",
@@ -674,3 +675,71 @@ assert(settleSent.length===2 &&
   settlesDB.get("monitor").positions[position2.asset].resolutionKind==="WIN",
   "old redeemable status is migrated without replaying settlement");
 console.log("Passed: migrated snapshots do not invent OPEN and legacy settlement is not replayed");
+
+
+// External-only availability watchdog: /health is a privacy-preserving aggregate.
+// It needs no MONITOR_SECRET and never starts a poll or exposes wallet addresses.
+const hsNow=12345678;
+assert(HEALTH_STALE_SECONDS===1200, "20-minute failure threshold for five-minute Cron");
+assert(healthSummary([{ok:true,initialized:true,lastSuccessAt:hsNow-300}],
+  hsNow).ok, "recently polled wallet healthy");
+assert(!healthSummary([{ok:true,initialized:true,lastSuccessAt:hsNow-1300}],
+  hsNow).ok, "stale wallet fails");
+assert(!healthSummary([
+  {ok:true,initialized:true,lastSuccessAt:hsNow-50},
+  {ok:false,initialized:true,lastSuccessAt:hsNow-10}
+],hsNow).ok,"one failed wallet makes aggregate status fail");
+assert(!healthSummary([{ok:true,initialized:false,lastSuccessAt:null}],hsNow).ok,
+  "uninitialized DO fails health");
+assert(!healthSummary([],hsNow).ok,"zero wallets never healthy");
+assert(!healthSummary([{ok:true,initialized:true,lastSuccessAt:hsNow+800}],hsNow).ok,
+  "invalid future timestamp does not produce fake freshness");
+let internalHealthReads=0;
+const healthMockBase=Math.floor(Date.now()/1000);
+const healthMock={
+  idFromName: address=>address,
+  get: address=>({
+    fetch:async(request)=>{
+      assert(new URL(String(request)).pathname==="/health","health never initiates polling");
+      internalHealthReads++;
+      return Response.json({
+        ok:true,initialized:true,
+        lastSuccessAt:healthMockBase-240
+      });
+    }
+  })
+};
+const healthEnv={WALLET_ADDRESSES:originals.join(","),MONITOR:healthMock};
+const publicHealthResponse=await worker.fetch(
+  new Request("https://example.com/health"),healthEnv);
+const healthBody=await publicHealthResponse.json();
+assert(publicHealthResponse.status===200 && healthBody.ok===true &&
+  healthBody.checked===3 && internalHealthReads===3,
+  "anonymous GET /health returns only aggregate freshness without authorization");
+assert(publicHealthResponse.headers.get("cache-control")==="no-store",
+  "health response cannot be publicly cached");
+assert(!JSON.stringify(healthBody).includes("0x") &&
+  !JSON.stringify(healthBody).includes("lastSuccessAt") &&
+  !JSON.stringify(healthBody).includes("push"),
+  "public health never reveals wallets, checkpoint, push details or secrets");
+const unauthorizedProtected=await worker.fetch(
+  new Request("https://example.com/status"),healthEnv);
+assert(unauthorizedProtected.status===401,"full authenticated /status remains protected");
+const staleHealthEnv={...healthEnv,MONITOR:{
+  idFromName:v=>v,
+  get:v=>({fetch:async()=>Response.json({
+    ok:true,initialized:true,lastSuccessAt:healthMockBase-2200
+  })})
+}};
+const staleResult=await worker.fetch(
+  new Request("https://example.com/health"),staleHealthEnv);
+assert(staleResult.status===503 && (await staleResult.json()).ok===false,
+  "stale data returns HTTP 503 for independent external watchdog");
+const noWalletHealth=await worker.fetch(
+  new Request("https://example.com/health"),{WALLET_ADDRESSES:"",MONITOR:healthMock});
+assert(noWalletHealth.status===503,"invalid monitor configuration is never healthy");
+const objectHealth=await new WalletMonitor({storage},env).fetch(
+  new Request("https://internal/health?wallet="+env.WALLET_ADDRESS));
+assert(objectHealth.status===200 && (await objectHealth.json()).initialized===true,
+  "internal DO health reads current stored checkpoint without altering it");
+console.log("Passed: independent /health fresh/stale, no secrets or wallet leakage, status auth preserved");

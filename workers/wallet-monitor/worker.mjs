@@ -1,4 +1,5 @@
 import { poll, push, auditSnapshot, deliverPending, recordPollFailure } from "./monitor.mjs";
+import { healthSummary, HEALTH_STALE_SECONDS } from "./health.mjs";
 
 // One configured wallet per Durable Object. Preserve the legacy address as a fallback.
 export function walletAddresses(env) {
@@ -43,6 +44,11 @@ export class WalletMonitor {
     const wallet = url.searchParams.get("wallet");
     if (!wallet || !/^0x[a-f0-9]{40}$/.test(wallet)) {
       return Response.json({ ok: false, error: "Invalid wallet" }, { status: 400 });
+    }
+    if (url.pathname === "/health") {
+      const s = await this.ctx.storage.get("monitor");
+      return Response.json({ ok: true, initialized: Boolean(s),
+        lastSuccessAt: s?.lastSuccessAt ?? null });
     }
     if (url.pathname === "/status") {
       const s = await this.ctx.storage.get("monitor");
@@ -93,7 +99,7 @@ async function runAll(env, route) {
     try {
       const response = await instance(env, wallet).fetch(
         "https://internal/" + route + "?wallet=" + wallet,
-        { method: route === "status" ? "GET" : "POST" }
+        { method: route === "status" || route === "health" ? "GET" : "POST" }
       );
       const body = await response.json();
       return { wallet, ...body, ok: response.ok && body.ok !== false };
@@ -117,11 +123,28 @@ export default {
   },
 
   async fetch(request, env) {
+    const path = new URL(request.url).pathname;
+    // Independent external watchdog: intentionally exposes only aggregate
+    // health and count. All other routes remain fully authenticated.
+    if (request.method === "GET" && path === "/health") {
+      try {
+        const result = await runAll(env, "health");
+        const publicHealth = healthSummary(result.wallets);
+        return Response.json(publicHealth, {
+          status: publicHealth.ok ? 200 : 503,
+          headers: { "cache-control": "no-store" }
+        });
+      } catch {
+        return Response.json({ ok: false, checked: 0 }, {
+          status: 503,
+          headers: { "cache-control": "no-store" }
+        });
+      }
+    }
     if (!env.MONITOR_SECRET ||
         request.headers.get("authorization") !== "Bearer " + env.MONITOR_SECRET) {
       return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
-    const path = new URL(request.url).pathname;
     if (path === "/status" && request.method === "GET") {
       return Response.json(await runAll(env, "status"));
     }

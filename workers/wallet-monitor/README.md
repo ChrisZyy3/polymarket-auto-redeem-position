@@ -179,3 +179,13 @@ endDate 只有日期时注明「仅提供日期」；缺失或占位符标注「
 4. For new WIN/LOSS/PARTIAL transitions only, query Data API v2 /v2/positions with status=REDEEMABLE to obtain total_cost_usdc, an inclusive remaining-entry basis. Estimated net profit on still-held shares = shares x resolved payout price - total_cost_usdc. Display entry_fees_usdc for disclosure only (already included in basis; do NOT subtract twice). Any realized_pnl is separate historical realized PnL. Net excludes wallet gas and other off-platform expenses, and not earlier realized trading PnL.
 5. If v2 is unavailable, cost missing or share amounts disagree with the v1 indexer, do not display a fabricated net figure. Optional gross-only estimate is clearly identified, without preventing the settlement notification.
 6. Persist precise resolutionKind alongside legacy status to detect PARTIAL -> WIN changes. Existing redeemable/lost records migrate without duplicate historical settlement alerts. Wallet identity, current Durable Object checkpoint/outbox, 5-minute Cron, ServerChan and pUSD footer remain unchanged.
+
+
+## 独立可用性检查（外部 watchdog）
+
+- Worker 公开但只读的 `GET /health` **无需 MONITOR_SECRET**，只返回 `{"ok":true|false,"checked":3}`，不会暴露钱包地址、持仓、检查点、余额、PUSH_URL、异常细节或其它私密数据。
+- 健康标准：三个钱包 Durable Object 均已初始化，且 `lastSuccessAt` 距离现在不超过 20 分钟；所有钱包正常才返回 HTTP 200，否则返回 HTTP 503（`Cache-Control: no-store`）。此接口**不执行交易查询**，不影响 Cron、现有审计和 Outbox。
+- 独立的 GitHub Actions `wallet-monitor-health.yml` 工作流在仓库默认 `main` 分支每十分钟探测该接口；若无法访问、超时、或返回非 200，自动新建/复用一个故障 Issue，恢复后留言并关闭。同一故障不反复创建 Issue。
+- 监控站点：`https://polymarket-wallet-monitor.chriszyy3.workers.dev/health`。
+- GitHub Actions 故障 Issue 通知由用户 GitHub 通知设置决定，**并不等于 Server酱消息或独立推送服务 SLA**；GitHub 定时工作流有延迟或无法触发的可能，需在高可靠要求下接入其他第三方 uptime 平台。
+- 默认保持 `/status`、`/poll`、`/test` 的鉴权不变。不新增任何 API 密钥和钱包签名权限。
