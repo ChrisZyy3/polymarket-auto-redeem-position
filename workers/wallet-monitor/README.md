@@ -102,3 +102,27 @@ API 某些字段完全相同且无独立日志序号的重复成交可能无法�
 - https://developers.cloudflare.com/workers/configuration/cron-triggers/
 - https://developers.cloudflare.com/durable-objects/
 - https://doc.sc3.ft07.com/en/serverchan3/server/api
+
+
+## Message delivery audit
+
+The worker stores per-wallet counters in each existing Durable Object (no reset):
+- `auditSince`: epoch seconds when this version first initialized audit (not historical data).
+- `alertsDetectedCount`, `lastAlertAt`, `lastAlertType`: alerts that met trigger conditions.
+- `pushCount`, `lastPushAt`, `lastPushType`: notifications accepted by the ServerChan API.
+- `pushFailureCount`, `lastPushErrorAt`, `lastPushError`: delivery attempts that failed.
+- `lastPushAttemptAt`, `lastPollAt`, `lastPollAlerts`, `lastPollAccepted`, `pending`:
+  inspection and queue status (lastPollAt is the latest successful data-fetch checkpoint).
+
+The protected `GET /status` returns these fields separately for each wallet. Worker Logs emit
+`wallet_poll_success`, `wallet_alert_detected`, `push_attempted`,
+`push_accepted`, and `push_failed`. These events include wallet, type, count
+and time, but never PUSH_URL, MONITOR_SECRET, notification body, or market details.
+A `push_accepted` means ServerChan acknowledged the API request, **not** that
+the phone displayed the message. A protected `POST /test` verifies the channel,
+and does not change a wallet's push counters.
+
+Existing checkpoint/outbox state is preserved. Historic notifications before
+auditSince cannot be reconstructed, so pushCount and alertsDetectedCount start at
+zero when audit is first initialized. TRADE/REDEEM still have no USD minimum;
+only redeemable/lost position transitions use MIN_POSITION_USD.
