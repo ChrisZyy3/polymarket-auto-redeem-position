@@ -457,7 +457,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     const item = redemptionReminder(walletLabel(user),reminders.due,now);
     if(item)pending.push(item);
   }
-  const risks = inspectPriceRisk(positions,state.priceRiskTrackers,now,{
+  const risks = inspectPriceRisk(positions, migration ? null : state.priceRiskTrackers, now,{
     floor:Number(env.PRICE_ALERT_FLOOR??0.90),
     drawdownPct:Number(env.COST_DRAWDOWN_PCT??5),
     rapidPoints:Number(env.RAPID_DROP_POINTS??0.05),
