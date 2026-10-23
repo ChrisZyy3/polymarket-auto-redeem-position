@@ -1,5 +1,5 @@
-import { poll, activityKey, positionStatus } from "./monitor.mjs";
-import worker, { walletAddresses } from "./worker.mjs";
+import { poll, activityKey, positionStatus, auditSnapshot } from "./monitor.mjs";
+import worker, { walletAddresses, WalletMonitor } from "./worker.mjs";
 
 const assert = (v, m) => { if (!v) throw new Error(m); };
 const env = { WALLET_ADDRESS: "0x052f4191cd324a348835a846d34df5b0061e53fb",
@@ -9,6 +9,9 @@ let positions = [{ asset: "a", conditionId: "c", size: 100, avgPrice: .9,
 let activity = [];
 let sent = 0;
 let rejectPush = false;
+const auditEvents = [];
+const priorConsoleInfo = console.info;
+console.info = (...args) => { auditEvents.push(args.map(String).join(" ")); };
 const db = new Map();
 const storage = {
   get: async k => db.has(k) ? JSON.parse(JSON.stringify(db.get(k))) : undefined,
@@ -107,3 +110,55 @@ worker.scheduled({}, protectedEnv, { waitUntil: task => { scheduled = task; } })
 await scheduled;
 assert(polled.length === 6, "single Cron checks each wallet once");
 console.log("Passed: multi-wallet parser, duplicate elimination, single-wallet fallback, validation, authorization, independent DO routing, Cron fan-out");
+
+
+// Durable receipt accounting: existing retry tests above exercise the complete lifecycle.
+const audit = auditSnapshot(db.get("monitor"));
+assert(audit.auditSince === 1000, "audit start timestamp tracks first audited run");
+assert(audit.alertsDetectedCount === 3, "three actual alerts detected");
+assert(audit.pushCount === 3, "only successfully accepted messages counted");
+assert(audit.pushFailureCount === 1, "failed delivery attempt was counted");
+assert(audit.lastPushAt === 1360 && audit.lastPollAt === 1360, "persistent timestamps");
+assert(audit.lastPollAlerts === 1 && audit.lastPollAccepted === 1, "last successful poll counters");
+assert(audit.lastAlertType === audit.lastPushType, "last alert is last successful delivery");
+assert(audit.lastPushErrorAt === 1180 && !audit.lastPushError.includes("test.send"),
+  "failed delivery is persisted without secret leakage");
+const expectedEvents = ["wallet_poll_success", "wallet_alert_detected", "push_attempted",
+  "push_accepted", "push_failed"];
+for (const name of expectedEvents) {
+  assert(auditEvents.some(line => line.startsWith(name + " ")), "audit log emitted: " + name);
+}
+assert(!auditEvents.some(line => line.includes("test.send")), "push secret not logged");
+
+// The Durable Object status route must surface audit fields without extra storage reads.
+const monitorObject = new WalletMonitor({ storage }, env);
+const objectStatus = await monitorObject.fetch(
+  new Request("https://internal/status?wallet=" + env.WALLET_ADDRESS));
+const objectView = await objectStatus.json();
+assert(objectStatus.status === 200 && objectView.pushCount === 3 &&
+  objectView.alertsDetectedCount === 3 && objectView.pending === 0,
+  "authorized per-wallet status provides durable audit counts");
+
+// A legacy wallet gains an audit record without losing its previous checkpoint.
+const legacyMap = new Map();
+const legacyState = structuredClone(db.get("monitor"));
+delete legacyState.audit;
+legacyState.startedAt = 1500;
+legacyState.checkpoint = 1500;
+legacyState.lastSuccessAt = 1500;
+legacyState.seen = {};
+legacyState.pending = [];
+legacyState.positions = {};
+legacyMap.set("monitor", legacyState);
+const legacyStorage = {
+  get: async key => structuredClone(legacyMap.get(key)),
+  put: async (key, value) => { legacyMap.set(key, structuredClone(value)); }
+};
+await poll(legacyStorage, env, fetcher, 1550);
+const migrated = legacyMap.get("monitor");
+assert(migrated.checkpoint === 1550 && migrated.startedAt === 1500,
+  "legacy checkpoints and start timestamps are preserved");
+assert(migrated.audit.auditSince === 1550 && migrated.audit.pushCount === 0,
+  "legacy wallet starts a new audit period without invented history");
+console.info = priorConsoleInfo;
+console.log("Passed: audit counts, push retries, safe structured logs, authenticated status and legacy migration");
