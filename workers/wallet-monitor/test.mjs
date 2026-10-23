@@ -1,5 +1,6 @@
 import { poll, activityKey, positionStatus, auditSnapshot, walletLabel, expectedEnd, marketContextLines } from "./monitor.mjs";
 import { tradeAlert, settlementAlert, settlementKind, estimatePnl, walletPusdBalance } from "./notification.mjs";
+import { mergeTradeFills } from "./trade-batch.mjs";
 import worker, { walletAddresses, WalletMonitor } from "./worker.mjs";
 
 const assert = (v, m) => { if (!v) throw new Error(m); };
@@ -70,9 +71,12 @@ assert(activityKey(activity[0]) !== activityKey({ ...activity[0], asset: "b" }),
 positions = [{ ...positions[0], redeemable: true, curPrice: 0, currentValue: 0 }];
 rejectPush = true;
 let failed = false;
-try { await poll(storage, env, fetcher, 1180); } catch { failed = true; }
-assert(failed && db.get("monitor").pending.length === 1,
-  "failed push leaves durable pending alert");
+const lossPoll = await poll(storage, env, fetcher, 1180);
+assert(lossPoll.deliveryDeferred === true &&
+  db.get("monitor").pending.length === 1,
+  "failed push leaves durable pending alert without blocking successful ingest");
+assert(db.get("monitor").checkpoint === 1180,
+  "push failure must NOT block activity checkpoint advancement");
 positions = [];
 rejectPush = false;
 await poll(storage, env, fetcher, 1240);
@@ -281,3 +285,26 @@ assert(delivered.length === beforeLegacy + 1 &&
   !delivered[beforeLegacy].desp.includes("polygonscan.com/tx"),
   "old queued alerts retain wallet labels, gain balance, and strip explorer URLs");
 console.log("Passed: BUY SELL WIN LOSS PARTIAL REDEEM, short, Markdown, RPC balance and fallback");
+
+
+// Five-minute fill aggregation preserves individual activity deduplication and settlement events.
+const fills = [
+  {type:"TRADE",side:"BUY",asset:"asset-a",timestamp:1800,size:10,usdcSize:8,price:0.8},
+  {type:"TRADE",side:"BUY",asset:"asset-a",timestamp:1810,size:20,usdcSize:18,price:0.9},
+  {type:"TRADE",side:"SELL",asset:"asset-a",timestamp:1820,size:5,usdcSize:4,price:0.8},
+  {type:"TRADE",side:"BUY",asset:"asset-b",timestamp:1825,size:5,usdcSize:4.5,price:0.9},
+  {type:"TRADE",side:"BUY",asset:"asset-a",timestamp:2100,size:10,usdcSize:9,price:0.9},
+  {type:"REDEEM",asset:"asset-a",timestamp:1830,size:10,usdcSize:10}
+];
+const combined=mergeTradeFills(fills);
+assert(combined.length===5,"merge only same token, side and 5-minute interval");
+assert(combined[0].tradeCount===2 && combined[0].size===30 &&
+  combined[0].usdcSize===26 && Math.abs(combined[0].price-26/30)<1e-9,
+  "aggregated fills have correct weighted execution price");
+assert(combined[1].side==="SELL" && combined[4].type==="REDEEM",
+  "sell and redeemed positions never merge into buy trades");
+const groupedAlert=tradeAlert(combined[0], {...market,title:"Merged market",outcome:"Yes"},
+  lines,"ChrisZyy",marketLink);
+assert(groupedAlert.desp.includes("合并明细") && groupedAlert.short.includes("2笔合并"),
+  "aggregation count visible in detailed and short notifications");
+console.log("Passed: five-minute fill aggregation, no cross-market/cross-side merging");

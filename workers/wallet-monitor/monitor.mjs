@@ -1,7 +1,9 @@
 import { tradeAlert, settlementAlert, walletPusdBalance } from "./notification.mjs";
+import { mergeTradeFills } from "./trade-batch.mjs";
+import { drainOutbox } from "./outbox.mjs";
 const API = "https://data-api.polymarket.com";
 const PAGE = 500;
-const OVERLAP = 15 * 60;
+const OVERLAP = 60 * 60; // 60-minute late-indexing overlap for five-minute polling
 
 export function activityKey(a) {
   // A transaction may contain several outcomes and fills. Never dedupe by tx alone.
@@ -179,6 +181,21 @@ export async function push(env, fetcher, title, desp, short) {
   }
 }
 
+
+export async function deliverPending(storage, env, fetcher = fetch,
+  now = Math.floor(Date.now() / 1000), origin = "poll") {
+  let cash;
+  return drainOutbox(storage, now, async (item, user) => {
+    const base = item.formatVersion === 2 ? item.desp :
+      "钱包：" + walletLabel(user) + "\n\n" + removeTransactionUrl(item.desp);
+    if (cash === undefined) cash = await walletPusdBalance(fetcher, user);
+    const footer = "\n\n---\n\n**💳 钱包余额（链上 pUSD）：" +
+      (cash == null ? "暂时无法获取" : cash) +
+      "**\n\n> 未扣除挂单占用，不等于可下单 Available balance。";
+    await push(env, fetcher, item.title, base + footer, item.short);
+  }, { origin });
+}
+
 export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.now() / 1000), walletAddress = env.WALLET_ADDRESS) {
   const user = (walletAddress || "").toLowerCase();
   if (!/^0x[a-f0-9]{40}$/.test(user)) throw new Error("Invalid WALLET_ADDRESS");
@@ -192,44 +209,6 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     state.audit ??= newAudit(now);
     state.audit.lastPollAccepted = 0;
   }
-  let pushedThisPoll = 0;
-  let cashInfo; // one optional Polygon RPC read per round with notifications
-  // Persist the outbox and per-wallet push receipt together.
-  const flush = async () => {
-    while (state.pending.length) {
-      const item = state.pending[0];
-      const type = alertType(item.title);
-      state.audit.lastPushAttemptAt = now;
-      await storage.put("monitor", state);
-      auditLog("push_attempted", user, { at: now, type, pending: state.pending.length });
-      try {
-        const base = item.formatVersion === 2 ? item.desp :
-          "钱包：" + walletLabel(user) + "\n\n" + removeTransactionUrl(item.desp);
-        if (cashInfo === undefined) cashInfo = await walletPusdBalance(fetcher, user);
-        const footer = "\n\n---\n\n**💳 钱包余额（链上 pUSD）：" +
-          (cashInfo == null ? "暂时无法获取" : cashInfo) +
-          "**\n\n> 未扣除挂单占用，不等于可下单 Available balance。";
-        await push(env, fetcher, item.title, base + footer, item.short);
-      } catch (error) {
-        state.audit.pushFailureCount += 1;
-        state.audit.lastPushErrorAt = now;
-        state.audit.lastPushError = safePushError(error);
-        await storage.put("monitor", state);
-        auditLog("push_failed", user, { at: now, type, reason: state.audit.lastPushError });
-        throw error;
-      }
-      state.pending.shift();
-      state.audit.pushCount += 1;
-      state.audit.lastPushAt = now;
-      state.audit.lastPushType = type;
-      state.audit.lastPollAccepted += 1;
-      pushedThisPoll += 1;
-      await storage.put("monitor", state);
-      auditLog("push_accepted", user, { at: now, type, pushCount: state.audit.pushCount,
-        pending: state.pending.length });
-    }
-  };
-  if (state) await flush();
   const positions = await pages(fetcher, "/positions", {
     user, sizeThreshold: "0", includeArchived: "true", sortBy: "TOKENS", sortDirection: "DESC"
   }, 10000);
@@ -253,7 +232,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     user, type: "TRADE,REDEEM", start: String(Math.max(state.startedAt, state.checkpoint - OVERLAP)),
     end: String(now), sortBy: "TIMESTAMP", sortDirection: "ASC"
   }, 5000);
-  const pending = [];
+  const newEvents = [];
   const seen = { ...state.seen };
   for (const a of activity) {
     const key = activityKey(a);
@@ -266,9 +245,10 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
       outcome: a.outcome || holding?.outcome,
       eventSlug: a.eventSlug || holding?.eventSlug,
       endDate: holding?.endDate ?? a.endDate };
-    pending.push(tradeAlert(a, market, marketContextLines(a, positions),
-      walletLabel(user), link(market)));
+    newEvents.push(market);
   }
+  const pending = mergeTradeFills(newEvents).map(a =>
+    tradeAlert(a, a, marketContextLines(a, positions), walletLabel(user), link(a)));
   const tracked = { ...state.positions };
   for (const p of positions) {
     if (!p.asset || num(p.size) <= 0) continue;
@@ -290,12 +270,13 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
   }
   // Persist both detection state and outbox before sending. A crash cannot lose an alert.
   const alertCount = pending.length;
-  state = { ...state, checkpoint: now, positions: tracked, seen, pending, lastSuccessAt: now,
+  state = { ...state, checkpoint: now, positions: tracked, seen,
+    pending: [...(state.pending || []), ...pending], lastSuccessAt: now,
     audit: {
       ...state.audit,
       lastPollAt: now,
       lastPollAlerts: alertCount,
-      lastPollAccepted: pushedThisPoll,
+      lastPollAccepted: 0,
       alertsDetectedCount: state.audit.alertsDetectedCount + alertCount,
       lastAlertAt: alertCount ? now : state.audit.lastAlertAt,
       lastAlertType: alertCount ? alertType(pending[alertCount - 1].title) : state.audit.lastAlertType
@@ -311,10 +292,11 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     }
     auditLog("wallet_alert_detected", user, { at: now, alerts: alertCount, types });
   }
-  await flush();
+  const delivery = await deliverPending(storage, env, fetcher, now, "poll");
   auditLog("wallet_poll_success", user, { at: now, initialized: false,
-    positions: positions.length, alertsDetected: alertCount, pushesAccepted: pushedThisPoll,
-    pending: state.pending.length });
+    positions: positions.length, alertsDetected: alertCount, pushesAccepted: delivery.accepted,
+    pending: delivery.pending, pushDeferred: delivery.failed });
   return { initialized: false, positions: positions.length,
-    alerts: alertCount, pushesAccepted: pushedThisPoll, checkedAt: now };
+    alerts: alertCount, pushesAccepted: delivery.accepted, pending: delivery.pending,
+    deliveryDeferred: delivery.failed, checkedAt: now };
 }

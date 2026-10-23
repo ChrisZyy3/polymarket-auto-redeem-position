@@ -1,4 +1,4 @@
-import { poll, push, auditSnapshot } from "./monitor.mjs";
+import { poll, push, auditSnapshot, deliverPending } from "./monitor.mjs";
 
 // One configured wallet per Durable Object. Preserve the legacy address as a fallback.
 export function walletAddresses(env) {
@@ -25,6 +25,17 @@ export class WalletMonitor {
     this.ctx = ctx;
     this.env = env;
     this.running = null;
+  }
+
+  async alarm() {
+    // Alarm is a separate delivery channel. Existing pending messages are
+    // retried independently of Polymarket Data API availability.
+    if (this.running) await this.running;
+    if (!this.running) {
+      this.running = deliverPending(this.ctx.storage, this.env, fetch, undefined, "alarm")
+        .finally(() => { this.running = null; });
+    }
+    await this.running;
   }
 
   async fetch(request) {

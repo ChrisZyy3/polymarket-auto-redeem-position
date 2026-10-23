@@ -40,11 +40,13 @@ export function tradeAlert(a, market, lines, walletLabel, marketUrl) {
   const amount = known(a.usdcSize) ? money(a.usdcSize) : "暂无数据";
   const shares = known(a.size) ? qty(a.size) : "暂无数据";
   const unit = known(a.price) ? price(a.price) : "暂无数据";
+  const count = Number(a.tradeCount) || 1;
+  const merged = count > 1;
   return {
     formatVersion: 2,
     title: icon + " " + kind + " · " + walletLabel + " · " + amount,
     short: short(market.title) + " · " + (market.outcome || "未知") +
-      " · " + (redeem ? "到账 " + amount : shares + " @ " + unit),
+      " · " + (redeem ? "到账 " + amount : (merged ? count + "笔合并 · " : "") + shares + " @ " + unit),
     desp: [
       "### " + icon + " " + kind + " · " + word,
       "**" + safe(market.title || market.conditionId || "未知市场") + "**",
@@ -54,6 +56,7 @@ export function tradeAlert(a, market, lines, walletLabel, marketUrl) {
       "#### " + (redeem ? "💰 赎回到账" : "💵 本次成交"),
       row(redeem ? "实际到账" : "成交金额", "**" + amount + "**"),
       row(redeem ? "赎回数量" : "成交数量", shares),
+      merged ? row("合并明细", count + " 笔，按同方向/同市场结果/5分钟分组") : "",
       redeem ? "> 赎回到账不等于全部净利润。" : row("成交价格", unit + " / 份"),
       "",
       common(market, lines, a.timestamp, marketUrl)
