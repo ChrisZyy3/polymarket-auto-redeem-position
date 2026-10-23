@@ -21,6 +21,7 @@ const fetcher = async (url, init) => {
   const s = String(url);
   if (s.includes("push.ft07.com")) {
     assert(init.method === "POST", "push uses POST");
+    assert(init.redirect === "manual", "Worker fetch uses supported redirect policy");
     if (rejectPush) return { ok: true, json: async () => ({ code: 1 }) };
     sent++;
     return { ok: true, json: async () => ({ code: 0 }) };
