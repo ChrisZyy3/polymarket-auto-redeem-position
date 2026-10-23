@@ -2,7 +2,15 @@
 
 独立的 Cloudflare Worker，不依赖 Dashboard、Vercel 或钱包私钥。
 
-默认监控地址：0x052f4191cd324a348835a846d34df5b0061e53fb
+支持每分钟监控多个钱包，每个钱包独立持久化检查点、待发通知和去重状态。
+通知内容会标记钱包地址。升级前单钱包地址对应的 Durable Object 名称不变，历史检查进度继续保留。
+
+默认监控地址（3 个）：
+- 0x9f7eb5bc88342f01d18754be0439fad79ec282ce
+- 0x24816c037cdc2c9bd979e69d777541cf560a9b79
+- 0x052f4191cd324a348835a846d34df5b0061e53fb
+
+在 Cloudflare Production `WALLET_ADDRESSES` 变量中用逗号隔开地址；兼容仅设置 `WALLET_ADDRESS` 的旧部署。
 
 ## 通知范围
 
@@ -38,7 +46,7 @@ MONITOR_SECRET 自行设为一个随机长字符串，用于保护手动测试/�
 不要把 PUSH_URL 或 MONITOR_SECRET 提交到 GitHub。无需把浏览器的 Cookie、Origin、
 Referer、User-Agent 等请求头复制过来；推送只需 JSON POST。
 
-wrangler.json 已设置默认钱包地址、$5 仓位门槛、每分钟 Cron、SQLite Durable Object 绑定和迁移。
+wrangler.json 已设置 3 个默认钱包地址、$5 仓位门槛、每分钟 Cron、SQLite Durable Object 绑定和迁移。
 部署会自动创建存储，不需要手建 KV。
 Cron 配置传播可能需要约 15 分钟。实际提醒延迟还受 Polymarket 索引和推送通道影响，
 并不保证交易发生后恰好 60 秒内送达。
