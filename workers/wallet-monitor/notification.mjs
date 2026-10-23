@@ -27,7 +27,7 @@ function common(market, lines, timestamp, marketUrl) {
     "",
     "🕒 北京时间：" + time(timestamp),
     marketUrl ? "[🔗 查看 Polymarket 市场](" + marketUrl + ")" : ""
-  ].filter(Boolean).join("\n");
+  ].join("\n");
 }
 
 export function tradeAlert(a, market, lines, walletLabel, marketUrl) {
@@ -57,7 +57,7 @@ export function tradeAlert(a, market, lines, walletLabel, marketUrl) {
       redeem ? "> 赎回到账不等于全部净利润。" : row("成交价格", unit + " / 份"),
       "",
       common(market, lines, a.timestamp, marketUrl)
-    ].filter(Boolean).join("\n")
+    ].join("\n")
   };
 }
 
@@ -113,7 +113,7 @@ export function settlementAlert(p, lines, walletLabel, checkedAt, marketUrl) {
         kind === "LOSS" ? "> 该持有结果归零。" : "> 部分回款，不能等同全额 WIN。",
       "",
       common(p, lines, checkedAt, marketUrl)
-    ].filter(Boolean).join("\n")
+    ].join("\n")
   };
 }
 
