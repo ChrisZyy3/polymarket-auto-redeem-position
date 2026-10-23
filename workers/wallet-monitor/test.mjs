@@ -592,6 +592,7 @@ clock+=300;positionsNow=[];
 activityNow.push(fillAt("exit-tx","SELL",100,81,clock-12));
 await poll(lifecycleStorage,lifecycleEnv,lifecycleFetcher,clock);
 assert(lifecycleSent.at(-1).title.startsWith("🚪 EXIT") &&
+  lifecycleSent.at(-1).desp.includes("0 份（已确认清仓）") &&
   lifecycleDB.get("monitor").positionSnapshots[position2.asset]===undefined,
   "real poll sends EXIT and clears snapshot without wiping checkpoint");
 
@@ -629,3 +630,31 @@ assert(settleSent.length===2&&settleSent[1].title.startsWith("🏆 WIN") &&
 await poll(settleStorage,lifecycleEnv,settlesFetcher,now2+900);
 assert(settleSent.length===2,"stable settled position is not double-notified");
 console.log("Passed: real OPEN/ADD/TRIM/EXIT, full-win ROI/APR, fee-inclusive net WIN/PARTIAL and no replay");
+
+
+// Compatibility with migrated Durable Objects: never invent OPEN on first upgraded
+// poll, and never duplicate existing WIN/LOSS that was alerted by the old status enum.
+const legacyWalletState=structuredClone(lifecycleDB.get("monitor"));
+delete legacyWalletState.positionSnapshots;
+const migrateDB=new Map([["monitor",legacyWalletState]]);
+const migrateStorage={
+  get:async key=>structuredClone(migrateDB.get(key)),
+  put:async(key,value)=>{migrateDB.set(key,structuredClone(value))}
+};
+positionsNow=[{...position2,size:15,avgPrice:0.85,currentValue:12.75,initialValue:12.75}];
+activityNow.push(fillAt("migration-buy","BUY",15,12.75,clock+290));
+const oldSentCount=lifecycleSent.length;
+await poll(migrateStorage,lifecycleEnv,lifecycleFetcher,clock+300);
+assert(lifecycleSent.length===oldSentCount+1 &&
+  lifecycleSent.at(-1).title.startsWith("🟢 BUY") &&
+  migrateDB.get("monitor").positionSnapshots[position2.asset].size===15,
+  "legacy checkpoint seeds a snapshot without an incorrect OPEN label");
+const prevResolved=structuredClone(settlesDB.get("monitor"));
+delete prevResolved.positions[position2.asset].resolutionKind;
+prevResolved.positions[position2.asset].status="redeemable";
+settlesDB.set("monitor",prevResolved);
+await poll(settleStorage,lifecycleEnv,settlesFetcher,now2+1200);
+assert(settleSent.length===2 &&
+  settlesDB.get("monitor").positions[position2.asset].resolutionKind==="WIN",
+  "old redeemable status is migrated without replaying settlement");
+console.log("Passed: migrated snapshots do not invent OPEN and legacy settlement is not replayed");
