@@ -1,4 +1,5 @@
 import { poll, activityKey, positionStatus } from "./monitor.mjs";
+import worker, { walletAddresses } from "./worker.mjs";
 
 const assert = (v, m) => { if (!v) throw new Error(m); };
 const env = { WALLET_ADDRESS: "0x052f4191cd324a348835a846d34df5b0061e53fb",
@@ -68,3 +69,41 @@ try { await poll(storage, env, fullPageApi, 1420); } catch { failed = true; }
 assert(failed && db.get("monitor").checkpoint === oldCheckpoint,
   "pagination overflow fails without advancing checkpoint");
 console.log("Passed: baseline, trade, dedupe, multi-outcome tx, zero-value loss, failed push retry, disappearing position, resolution gate, 50/50, dust, redemption, API failure, pagination overflow");
+
+
+// Multi-wallet routing: de-dupe mixed case, preserve the pre-upgrade DO identity.
+const originals = [
+  "0x9f7eb5bc88342f01d18754be0439fad79ec282ce",
+  "0x24816c037cdc2c9bd979e69d777541cf560a9b79",
+  "0x052f4191cd324a348835a846d34df5b0061e53fb"
+];
+const multi = { WALLET_ADDRESSES: originals.join(",") + "," + originals[2].toUpperCase().replace(/^0X/, "0x") };
+assert(JSON.stringify(walletAddresses(multi)) === JSON.stringify(originals), "multi-wallet parsing and case insensitive dedup");
+assert(JSON.stringify(walletAddresses({ WALLET_ADDRESS: originals[2] })) === JSON.stringify([originals[2]]), "legacy wallet fallback");
+let invalid = false;
+try { walletAddresses({ WALLET_ADDRESSES: "not-an-address" }); } catch { invalid = true; }
+assert(invalid, "invalid wallet rejected");
+
+const polled = [];
+const objectStub = {
+  idFromName: name => name,
+  get: name => ({
+    fetch: async (url) => {
+      polled.push({ name, url: String(url) });
+      return Response.json({ ok: true, initialized: true });
+    }
+  })
+};
+const protectedEnv = { ...multi, MONITOR: objectStub, MONITOR_SECRET: "unit-test-secret" };
+const authorized = new Request("https://example.com/status", { headers: { authorization: "Bearer unit-test-secret" } });
+const status = await worker.fetch(authorized, protectedEnv);
+const statusData = await status.json();
+assert(status.status === 200 && statusData.ok && statusData.wallets.length === 3, "all wallets appear in status");
+assert(polled.map(p => p.name).join(",") === originals.join(","), "DO ids preserve address ordering and legacy identity");
+const unauthorized = await worker.fetch(new Request("https://example.com/status"), protectedEnv);
+assert(unauthorized.status === 401, "status endpoint is protected");
+let scheduled = null;
+worker.scheduled({}, protectedEnv, { waitUntil: task => { scheduled = task; } });
+await scheduled;
+assert(polled.length === 6, "single Cron checks each wallet once");
+console.log("Passed: multi-wallet parser, duplicate elimination, single-wallet fallback, validation, authorization, independent DO routing, Cron fan-out");
