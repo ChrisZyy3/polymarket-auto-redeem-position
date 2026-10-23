@@ -252,7 +252,7 @@ assert(settlementKind({ ...market, redeemable: false, curPrice: 0 }) === null,
   "open mark at zero is not resolved loss");
 const noBasis = { ...market, grossInitialValue: null, initialValue: null };
 assert(estimatePnl(noBasis) === null &&
-  settlementAlert(noBasis, lines, "RealChris", 1900, marketLink).desp.includes("未估算盈亏"),
+  settlementAlert(noBasis, lines, "RealChris", 1900, marketLink).desp.includes("暂无法核实"),
   "missing cost never fabricates a profit");
 const sold = tradeAlert({ ...activity[0], side: "SELL", title: market.title,
   outcome: "Yes", usdcSize: 4.5 }, market, lines, "PigsWallet", marketLink);
