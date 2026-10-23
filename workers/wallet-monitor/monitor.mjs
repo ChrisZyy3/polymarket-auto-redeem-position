@@ -20,6 +20,53 @@ const label = p => (p.title || p.conditionId || "未知市场") + " / " + (p.out
 const link = p => p.eventSlug ? "https://polymarket.com/event/" + encodeURIComponent(p.eventSlug) : "";
 const num = n => Number.isFinite(Number(n)) ? Number(n) : 0;
 
+function newAudit(now) {
+  return {
+    auditSince: now,
+    alertsDetectedCount: 0,
+    lastAlertAt: null,
+    lastAlertType: null,
+    pushCount: 0,
+    lastPushAt: null,
+    lastPushType: null,
+    lastPushAttemptAt: null,
+    pushFailureCount: 0,
+    lastPushErrorAt: null,
+    lastPushError: null,
+    lastPollAt: null,
+    lastPollAlerts: 0,
+    lastPollAccepted: 0
+  };
+}
+
+export function auditSnapshot(state) {
+  const a = state?.audit || {};
+  return {
+    auditSince: a.auditSince ?? null,
+    alertsDetectedCount: a.alertsDetectedCount ?? 0,
+    lastAlertAt: a.lastAlertAt ?? null,
+    lastAlertType: a.lastAlertType ?? null,
+    pushCount: a.pushCount ?? 0,
+    lastPushAt: a.lastPushAt ?? null,
+    lastPushType: a.lastPushType ?? null,
+    lastPushAttemptAt: a.lastPushAttemptAt ?? null,
+    pushFailureCount: a.pushFailureCount ?? 0,
+    lastPushErrorAt: a.lastPushErrorAt ?? null,
+    lastPushError: a.lastPushError ?? null,
+    lastPollAt: a.lastPollAt ?? null,
+    lastPollAlerts: a.lastPollAlerts ?? 0,
+    lastPollAccepted: a.lastPollAccepted ?? 0
+  };
+}
+
+const alertType = title => String(title || "unknown").replace(/^Polymarket\s*\u00b7\s*/, "").slice(0, 64);
+const auditLog = (event, wallet, details) => console.info(event, JSON.stringify({ wallet, ...details }));
+function safePushError(error) {
+  const message = String(error?.message || "");
+  return /^(HTTP [1-5][0-9]{2} from [a-zA-Z0-9.-]+|ServerChan rejected notification|PUSH_URL secret is required|PUSH_URL must be a ServerChan3 HTTPS endpoint)$/.test(message)
+    ? message : "Push failed (details withheld)";
+}
+
 async function json(fetcher, url, init) {
   const r = await fetcher(url, { ...init, signal: AbortSignal.timeout(15000) });
   if (!r.ok) throw new Error("HTTP " + r.status + " from " + new URL(url).hostname);
@@ -64,13 +111,39 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
   if (!Number.isFinite(minimum) || minimum < 0) throw new Error("Invalid MIN_POSITION_USD");
   let state = await storage.get("monitor");
   if (state && state.user !== user) throw new Error("Wallet changed: use a new Durable Object instance");
-  // Deliver persisted outbox before requesting new data. Failed sends stay queued.
+  // Existing wallets retain their checkpoints and queues; only audit fields are new.
+  if (state) {
+    state.audit ??= newAudit(now);
+    state.audit.lastPollAccepted = 0;
+  }
+  let pushedThisPoll = 0;
+  // Persist the outbox and per-wallet push receipt together.
   const flush = async () => {
     while (state.pending.length) {
       const item = state.pending[0];
-      await push(env, fetcher, item.title, "钱包：" + user + "\n\n" + item.desp);
-      state.pending.shift();
+      const type = alertType(item.title);
+      state.audit.lastPushAttemptAt = now;
       await storage.put("monitor", state);
+      auditLog("push_attempted", user, { at: now, type, pending: state.pending.length });
+      try {
+        await push(env, fetcher, item.title, "钱包：" + user + "\n\n" + item.desp);
+      } catch (error) {
+        state.audit.pushFailureCount += 1;
+        state.audit.lastPushErrorAt = now;
+        state.audit.lastPushError = safePushError(error);
+        await storage.put("monitor", state);
+        auditLog("push_failed", user, { at: now, type, reason: state.audit.lastPushError });
+        throw error;
+      }
+      state.pending.shift();
+      state.audit.pushCount += 1;
+      state.audit.lastPushAt = now;
+      state.audit.lastPushType = type;
+      state.audit.lastPollAccepted += 1;
+      pushedThisPoll += 1;
+      await storage.put("monitor", state);
+      auditLog("push_accepted", user, { at: now, type, pushCount: state.audit.pushCount,
+        pending: state.pending.length });
     }
   };
   if (state) await flush();
@@ -87,9 +160,11 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
       };
     }
     state = { user, startedAt: now, checkpoint: now, positions: tracked, seen: {}, pending: [],
-      lastSuccessAt: now };
+      lastSuccessAt: now, audit: { ...newAudit(now), lastPollAt: now } };
     await storage.put("monitor", state);
-    return { initialized: true, positions: Object.keys(tracked).length, alerts: 0 };
+    auditLog("wallet_poll_success", user, { at: now, initialized: true,
+      positions: Object.keys(tracked).length, alertsDetected: 0, pushesAccepted: 0, pending: 0 });
+    return { initialized: true, positions: Object.keys(tracked).length, alerts: 0, pushesAccepted: 0 };
   }
   const activity = await pages(fetcher, "/activity", {
     user, type: "TRADE,REDEEM", start: String(Math.max(state.startedAt, state.checkpoint - OVERLAP)),
@@ -140,10 +215,32 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     if (seen[key] < now - OVERLAP) delete seen[key];
   }
   // Persist both detection state and outbox before sending. A crash cannot lose an alert.
-  state = { ...state, checkpoint: now, positions: tracked, seen,
-    pending, lastSuccessAt: now };
-  await storage.put("monitor", state);
   const alertCount = pending.length;
+  state = { ...state, checkpoint: now, positions: tracked, seen, pending, lastSuccessAt: now,
+    audit: {
+      ...state.audit,
+      lastPollAt: now,
+      lastPollAlerts: alertCount,
+      lastPollAccepted: pushedThisPoll,
+      alertsDetectedCount: state.audit.alertsDetectedCount + alertCount,
+      lastAlertAt: alertCount ? now : state.audit.lastAlertAt,
+      lastAlertType: alertCount ? alertType(pending[alertCount - 1].title) : state.audit.lastAlertType
+    }
+  };
+  // Persist detection before sending so a process crash cannot erase alerts.
+  await storage.put("monitor", state);
+  if (alertCount) {
+    const types = {};
+    for (const item of pending) {
+      const type = alertType(item.title);
+      types[type] = (types[type] || 0) + 1;
+    }
+    auditLog("wallet_alert_detected", user, { at: now, alerts: alertCount, types });
+  }
   await flush();
-  return { initialized: false, positions: positions.length, alerts: alertCount, checkedAt: now };
+  auditLog("wallet_poll_success", user, { at: now, initialized: false,
+    positions: positions.length, alertsDetected: alertCount, pushesAccepted: pushedThisPoll,
+    pending: state.pending.length });
+  return { initialized: false, positions: positions.length,
+    alerts: alertCount, pushesAccepted: pushedThisPoll, checkedAt: now };
 }
