@@ -58,6 +58,9 @@ export function tradeAlert(a, market, lines, walletLabel, marketUrl, options = {
       : row("净变动", "首次建立仓位"),
     ""
   ] : [];
+  const reconciliationNote = !redeem && !lifecycle && options.reconciliationAttempted
+    ? ["> 持仓净变化暂不能与本轮成交一一对应（可能存在同步延迟或多方向交易）；仍显示原始成交提醒。", ""]
+    : [];
   const earnings = forecast ? [
     "#### 🎯 全额获胜情景（毛收益）",
     row("每份假设赎回", "$1.00"),
@@ -99,6 +102,7 @@ export function tradeAlert(a, market, lines, walletLabel, marketUrl, options = {
       redeem ? "> 赎回到账不等于全部净利润。" : row("成交价格", unit + " / 份"),
       "",
       ...sizeDelta,
+      ...reconciliationNote,
       ...earnings,
       common(market, currentLines, a.timestamp, marketUrl)
     ].join("\n")
