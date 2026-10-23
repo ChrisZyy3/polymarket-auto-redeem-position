@@ -1,4 +1,6 @@
-import { tradeAlert, settlementAlert, walletPusdBalance } from "./notification.mjs";
+import { tradeAlert, settlementAlert, settlementKind, walletPusdBalance } from "./notification.mjs";
+import { snapshotHoldings, positionAction, winningPayoutForecast } from "./position-lifecycle.mjs";
+import { readRedeemableEconomics, settlementNet } from "./settlement-economics.mjs";
 import { mergeTradeFills } from "./trade-batch.mjs";
 import { drainOutbox } from "./outbox.mjs";
 import { dataApiJson } from "./data-client.mjs";
@@ -320,13 +322,18 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
         status: positionStatus(p), exposure, conditionId: p.conditionId, outcome: p.outcome
       };
     }
-    state = { user, startedAt: now, checkpoint: now, positions: tracked, seen: {}, pending: [],
+    state = { user, startedAt: now, checkpoint: now, positions: tracked,
+      positionSnapshots: snapshotHoldings(positions), seen: {}, pending: [],
       lastSuccessAt: now, audit: { ...newAudit(now), lastPollAt: now } };
     await storage.put("monitor", state);
     auditLog("wallet_poll_success", user, { at: now, initialized: true,
       positions: Object.keys(tracked).length, alertsDetected: 0, pushesAccepted: 0, pending: 0 });
     return { initialized: true, positions: Object.keys(tracked).length, alerts: 0, pushesAccepted: 0 };
   }
+  // Unknown before snapshots (legacy wallets) deliberately suppress classification
+  // for this first upgraded poll. Existing checkpoints and sent notifications stay intact.
+  const previousSnapshots = state.positionSnapshots ?? null;
+  const currentSnapshots = snapshotHoldings(positions);
   const activity = await pages(fetcher, "/activity", {
     user, type: "TRADE,REDEEM", start: String(Math.max(state.startedAt, state.checkpoint - OVERLAP)),
     end: String(now), sortBy: "TIMESTAMP", sortDirection: "ASC"
@@ -346,8 +353,15 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
       endDate: holding?.endDate ?? a.endDate };
     newEvents.push(market);
   }
-  const pending = mergeTradeFills(newEvents).map(a =>
-    tradeAlert(a, a, marketContextLines(a, positions), walletLabel(user), link(a)));
+  const mergedTrades = mergeTradeFills(newEvents);
+  const pending = mergedTrades.map(a => {
+    const holding = matchingPosition(a, positions);
+    const lifecycle = positionAction(a, mergedTrades, previousSnapshots, currentSnapshots);
+    const forecast = a.type === "TRADE" && a.side === "BUY" && holding
+      ? winningPayoutForecast(holding, now) : null;
+    return tradeAlert(a, a, marketContextLines(a, positions),
+      walletLabel(user), link(a), { lifecycle, forecast });
+  });
   const recovering = Boolean(state.audit.healthAlarmActive);
   if (recovering) {
     pending.push({
@@ -362,6 +376,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
   state.audit.consecutivePollFailures = 0;
   state.audit.healthAlarmActive = false;
   const tracked = { ...state.positions };
+  const settlementCandidates = [];
   for (const p of positions) {
     if (!p.asset || num(p.size) <= 0) continue;
     const before = tracked[p.asset];
@@ -370,19 +385,40 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
       num(p.grossInitialValue), num(p.size) * num(p.avgPrice), num(before?.exposure));
     if (exposure < minimum) continue;
     const status = positionStatus(p);
-    if (["lost", "redeemable"].includes(status) && before?.status !== status) {
-      const item = settlementAlert(p, marketContextLines(p, positions), walletLabel(user),
-        now, link(p));
+    const resolutionKind = settlementKind(p);
+    // Previously stored states lacked the precise kind; do not replay old
+    // WIN/PARTIAL/LOSS alerts while migrating. New PARTIAL -> WIN transitions do alert.
+    const lastResolution = before?.resolutionKind ??
+      (before?.status === "lost" ? "LOSS" :
+        before?.status === "redeemable" ? resolutionKind : null);
+    if (resolutionKind && lastResolution !== resolutionKind)
+      settlementCandidates.push(p);
+    tracked[p.asset] = { status, resolutionKind, exposure,
+      conditionId: p.conditionId, outcome: p.outcome };
+  }
+  if (settlementCandidates.length) {
+    let economicsByToken = null;
+    try {
+      economicsByToken = await readRedeemableEconomics(fetcher, user);
+    } catch {
+      // Never block actual settlement notifications when v2 economics is late.
+      auditLog("wallet_settlement_net_unavailable", user,
+        { at: now, count: settlementCandidates.length });
+    }
+    for (const p of settlementCandidates) {
+      const net = settlementNet(p, economicsByToken?.get(String(p.asset)));
+      const item = settlementAlert(p, marketContextLines(p, positions),
+        walletLabel(user), now, link(p), { net });
       if (item) pending.push(item);
     }
-    tracked[p.asset] = { status, exposure, conditionId: p.conditionId, outcome: p.outcome };
   }
   for (const key of Object.keys(seen)) {
     if (seen[key] < now - OVERLAP) delete seen[key];
   }
   // Persist both detection state and outbox before sending. A crash cannot lose an alert.
   const alertCount = pending.length;
-  state = { ...state, checkpoint: now, positions: tracked, seen,
+  state = { ...state, checkpoint: now, positions: tracked,
+    positionSnapshots: currentSnapshots, seen,
     pending: [...(state.pending || []), ...pending], lastSuccessAt: now,
     audit: {
       ...state.audit,
