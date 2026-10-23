@@ -192,7 +192,7 @@ export default {
       // Existing five-minute Cron doubles as the Beijing 09:00 daily scheduler.
       // A singleton coordinator DO makes every tick safely idempotent.
       try {
-        await runDailyDigest(env,fetch,Date.now());
+        await runDailyDigest(env,fetch,Number.isFinite(_event?.scheduledTime) ? _event.scheduledTime : Date.now());
       } catch {
         // The next five-minute tick within the 09:00 hour will retry.
         // Never fail healthy wallet polling because of a digest/RPC outage.
