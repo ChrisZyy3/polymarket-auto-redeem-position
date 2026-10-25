@@ -237,3 +237,17 @@ Polymarket 数据 API v1 官方迁移时间表标注 2026-10-24 退役。此 Wor
 - 原 `V2_SHADOW_ENABLED` 只用于 v1 主接口与 v2 并行对照；v2 已为主接口时自动跳过重复影子读取。
 - 若需要快速回滚，仅可把 `DATA_API_PRIMARY` 改为 `v1`（前提是旧 API 尚可用）。不建议长期回滚到即将退役的 v1；应优先修复 v2。
 - 测试：`node workers/wallet-monitor/test-v2-primary.mjs`，包括多页游标、旧事件桥接去重、真实 BUY/ADD/WIN/REDEEM、无损 checkpoint 以及异常数据失败保护。
+
+
+## 低 APY / 可考虑卖出提醒
+
+- 默认开启：`LOW_APY_ALERT_ENABLED=true`。
+- 阈值：`LOW_APY_THRESHOLD_PCT=10`，当持仓按当前 CLOB 买一价计算的剩余有效 APY 低于 10% 时提醒。
+- 恢复门槛：`LOW_APY_RECOVER_PCT=12`。触发后只有 APY 恢复到 12% 以上才重新武装，避免在阈值附近反复提示。
+- 检查频率：`LOW_APY_CHECK_MINUTES=30`。Wallet Monitor 仍每 5 分钟轮询，但低 APY 盘口最多每 30 分钟读取一次。
+- 重复提醒冷却：`LOW_APY_COOLDOWN_HOURS=24`。
+- 延续全局 `MIN_POSITION_USD=5` 过滤小仓位。
+- 有效 APY 使用当前持有 outcome token 的 CLOB 最高买一价计算，而不是 Data API 的参考价：
+  `APY = (1 / bestBid)^(365 / remainingDays) - 1`。
+- 推送包含钱包、市场、方向、买一价、剩余 APY、剩余 ROI、持仓份数、按买一估算的持仓价值、买一档深度、买入均价和预计结束日期。
+- 买一价只表示该档当前存在，不代表整个仓位都能以该价格成交。实际卖出前应结合买一档深度和完整盘口评估滑点。
