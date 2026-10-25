@@ -10,6 +10,7 @@ import { compareV2Positions } from "./v2-shadow.mjs";
 import { summarizeWalletPositions } from "./asset-digest.mjs";
 import { findRedeemReminders, redemptionReminder } from "./redeem-reminders.mjs";
 import { inspectPriceRisk, priceRiskMessage } from "./price-risk.mjs";
+import { inspectLowApy, lowApyMessage } from "./low-apy.mjs";
 const API = "https://data-api.polymarket.com";
 const PAGE = 500;
 const OVERLAP = 60 * 60; // 60-minute late-indexing overlap for five-minute polling
@@ -345,6 +346,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
       dailySnapshot: summarizeWalletPositions(positions,now),
       redeemTrackers: findRedeemReminders(positions,null,now).trackers,
       priceRiskTrackers: inspectPriceRisk(positions,null,now).trackers,
+      lowApyState: { lastCheckedAt: now, tokens: {} },
       seen: {}, pending: [],
       lastSuccessAt: now, audit: { ...newAudit(now), lastPollAt: now } };
     await storage.put("monitor", state);
@@ -468,6 +470,18 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     const item = priceRiskMessage(walletLabel(user),risks.raised,now);
     if(item)pending.push(item);
   }
+  const lowApy = await inspectLowApy(positions, state.lowApyState, now, fetcher, {
+    thresholdPct:Number(env.LOW_APY_THRESHOLD_PCT??10),
+    recoverPct:Number(env.LOW_APY_RECOVER_PCT??12),
+    cooldownHours:Number(env.LOW_APY_COOLDOWN_HOURS??24),
+    checkMinutes:Number(env.LOW_APY_CHECK_MINUTES??30),
+    minUsd:minimum
+  });
+  if(String(env.LOW_APY_ALERT_ENABLED??"true")==="true"){
+    const item = lowApyMessage(walletLabel(user), lowApy.raised,
+      Number(env.LOW_APY_THRESHOLD_PCT??10), now);
+    if(item)pending.push(item);
+  }
   const dailySnapshot = summarizeWalletPositions(positions,now);
   for (const key of Object.keys(seen)) {
     if (seen[key] < now - OVERLAP) delete seen[key];
@@ -479,6 +493,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     positionSnapshots: currentSnapshots, seen,
     redeemTrackers: reminders.trackers,
     priceRiskTrackers: risks.trackers,
+    lowApyState: lowApy.state,
     dailySnapshot,
     pending: [...(state.pending || []), ...pending], lastSuccessAt: now,
     audit: {
