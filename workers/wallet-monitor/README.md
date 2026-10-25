@@ -238,16 +238,18 @@ Polymarket 数据 API v1 官方迁移时间表标注 2026-10-24 退役。此 Wor
 - 若需要快速回滚，仅可把 `DATA_API_PRIMARY` 改为 `v1`（前提是旧 API 尚可用）。不建议长期回滚到即将退役的 v1；应优先修复 v2。
 - 测试：`node workers/wallet-monitor/test-v2-primary.mjs`，包括多页游标、旧事件桥接去重、真实 BUY/ADD/WIN/REDEEM、无损 checkpoint 以及异常数据失败保护。
 
-
-## 低 APY / 可考虑卖出提醒
+## 低 Mark APY / 可考虑卖出提醒
 
 - 默认开启：`LOW_APY_ALERT_ENABLED=true`。
-- 阈值：`LOW_APY_THRESHOLD_PCT=10`，当持仓按当前 CLOB 买一价计算的剩余有效 APY 低于 10% 时提醒。
-- 恢复门槛：`LOW_APY_RECOVER_PCT=12`。触发后只有 APY 恢复到 12% 以上才重新武装，避免在阈值附近反复提示。
-- 检查频率：`LOW_APY_CHECK_MINUTES=30`。Wallet Monitor 仍每 5 分钟轮询，但低 APY 盘口最多每 30 分钟读取一次。
+- 触发阈值：`LOW_APY_THRESHOLD_PCT=10`。
+- **触发依据改为 Mark / Current APY**：使用 Data API 的 `curPrice` 计算机会成本，`APY = (1 / curPrice)^(365 / remainingYears) - 1`。
+- 通知同时展示 **Mark APR（简单年化）**，用于和 Dashboard 现有的持有 APR 口径对照；APR 不参与触发。
+- CLOB **Best Bid APY 只用于说明真实退出条件**，不再决定是否发提醒。
+- 若 Mark APY 低于阈值，即使 CLOB 暂时不可用，也仍会提醒，并把可执行价标为暂不可用。
+- 恢复门槛：`LOW_APY_RECOVER_PCT=12`。触发后只有 Mark APY 恢复到 12% 以上才重新武装。
+- 检查频率：`LOW_APY_CHECK_MINUTES=30`；Wallet Monitor 本身仍每 5 分钟轮询。
 - 重复提醒冷却：`LOW_APY_COOLDOWN_HOURS=24`。
-- 延续全局 `MIN_POSITION_USD=5` 过滤小仓位。
-- 有效 APY 使用当前持有 outcome token 的 CLOB 最高买一价计算，而不是 Data API 的参考价：
-  `APY = (1 / bestBid)^(365 / remainingDays) - 1`。
-- 推送包含钱包、市场、方向、买一价、剩余 APY、剩余 ROI、持仓份数、按买一估算的持仓价值、买一档深度、买入均价和预计结束日期。
-- 买一价只表示该档当前存在，不代表整个仓位都能以该价格成交。实际卖出前应结合买一档深度和完整盘口评估滑点。
+- 延续 `MIN_POSITION_USD=5` 过滤小仓位。
+- 推送包含：钱包、市场/方向、Mark 价、Mark APY、Mark APR、持仓价值、Best Bid、可执行 APY/APR、买一深度、持仓数量、均价和预计结束日期。
+- 日期型 `endDate` 按美东当天结束估算，与 Dashboard 的结算日口径保持一致。
+- 买一价只代表当前第一档；若买一深度不足，整笔卖出的实际均价可能更低。
