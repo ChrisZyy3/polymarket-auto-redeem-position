@@ -470,19 +470,23 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     const item = priceRiskMessage(walletLabel(user),risks.raised,now);
     if(item)pending.push(item);
   }
-  const lowApyEnabled = String(env.LOW_APY_ALERT_ENABLED??"false")==="true";
-  const lowApy = lowApyEnabled
+  const lowAprEnabled = String(
+    env.LOW_APR_ALERT_ENABLED ?? env.LOW_APY_ALERT_ENABLED ?? "false"
+  ) === "true";
+  const lowAprThreshold = Number(
+    env.LOW_APR_THRESHOLD_PCT ?? env.LOW_APY_THRESHOLD_PCT ?? 10
+  );
+  const lowApy = lowAprEnabled
     ? await inspectLowApy(positions, state.lowApyState, now, fetcher, {
-      thresholdPct:Number(env.LOW_APY_THRESHOLD_PCT??10),
-      recoverPct:Number(env.LOW_APY_RECOVER_PCT??12),
-      cooldownHours:Number(env.LOW_APY_COOLDOWN_HOURS??24),
-      checkMinutes:Number(env.LOW_APY_CHECK_MINUTES??30),
+      thresholdPct:lowAprThreshold,
+      recoverPct:Number(env.LOW_APR_RECOVER_PCT ?? env.LOW_APY_RECOVER_PCT ?? 12),
+      cooldownHours:Number(env.LOW_APR_COOLDOWN_HOURS ?? env.LOW_APY_COOLDOWN_HOURS ?? 24),
+      checkMinutes:Number(env.LOW_APR_CHECK_MINUTES ?? env.LOW_APY_CHECK_MINUTES ?? 30),
       minUsd:minimum
     })
     : { state: state.lowApyState ?? null, raised: [], skipped: "disabled", checked: 0, errors: 0 };
-  if(lowApyEnabled){
-    const item = lowApyMessage(walletLabel(user), lowApy.raised,
-      Number(env.LOW_APY_THRESHOLD_PCT??10), now);
+  if(lowAprEnabled){
+    const item = lowApyMessage(walletLabel(user), lowApy.raised, lowAprThreshold, now);
     if(item)pending.push(item);
   }
   const dailySnapshot = summarizeWalletPositions(positions,now);

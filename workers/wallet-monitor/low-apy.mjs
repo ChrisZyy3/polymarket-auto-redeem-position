@@ -1,7 +1,7 @@
 const CLOB_BOOK_URL = "https://clob.polymarket.com/book";
 const SETTLEMENT_TIME_ZONE = "America/New_York";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-const STATE_BASIS = "mark-apy-v2";
+const STATE_BASIS = "mark-apr-v3";
 
 const DEFAULTS = {
   thresholdPct: 10,
@@ -177,8 +177,8 @@ export async function inspectLowApy(positions, previous, now, fetcher=fetch, con
     const markAprPct = markApr * 100;
     const priorBelow = prior?.below === true;
     const below = priorBelow
-      ? markApyPct < v.recoverPct
-      : markApyPct < v.thresholdPct;
+      ? markAprPct < v.recoverPct
+      : markAprPct < v.thresholdPct;
     const lastAlertAt = Number(prior?.lastAlertAt || 0);
     const canRepeat = !lastAlertAt || now - lastAlertAt >= v.cooldownHours * 3600;
 
@@ -237,7 +237,7 @@ export async function inspectLowApy(positions, previous, now, fetcher=fetch, con
     nextTokens[id] = entry;
   }
 
-  raised.sort((a,b) => a.markApyPct - b.markApyPct);
+  raised.sort((a,b) => a.markAprPct - b.markAprPct);
   return {
     state: {basis:STATE_BASIS,lastCheckedAt:now,tokens:nextTokens},
     raised,
@@ -250,9 +250,9 @@ export function lowApyMessage(walletLabel, raised, thresholdPct, now) {
   if (!raised?.length) return null;
   const time = new Date(now*1000).toLocaleString("zh-CN", {timeZone:"Asia/Shanghai"});
   const lines = [
-    "### 💸 Polymarket · Mark APY 过低 / 可考虑卖出",
+    "### 💸 Polymarket · Mark APR 过低 / 可考虑卖出",
     "**钱包：** " + safe(walletLabel),
-    "**触发阈值：** Mark APY < " + Number(thresholdPct).toFixed(1) + "%",
+    "**触发阈值：** Mark APR < " + Number(thresholdPct).toFixed(1) + "%",
     "**触发仓位：** " + raised.length + " 个",
     "**北京时间：** " + time,
     "",
@@ -297,24 +297,24 @@ export function lowApyMessage(walletLabel, raised, thresholdPct, now) {
   }
 
   if (raised.length > 6)
-    lines.push("另有 " + (raised.length - 6) + " 个低 Mark APY 仓位已折叠。","");
+    lines.push("另有 " + (raised.length - 6) + " 个低 Mark APR 仓位已折叠。","");
 
   lines.push(
-    "> 触发条件只看 Mark / Current APY：APY = (1 / curPrice)^(365 / 剩余天数) - 1。",
-    "> CLOB 买一仅用于说明真实退出条件，不参与是否触发低 APY 提醒。",
+    "> 触发条件只看 Mark / Current APR：APR = (1 / curPrice - 1) × 365 / 剩余天数。",
+    "> 该口径与 Dashboard 的持有年化一致；Mark APY 仅保留作复利参考。",
+    "> CLOB 买一仅用于说明真实退出条件，不参与是否触发低 APR 提醒。",
     "> 买一价只代表当前第一档；若买一深度小于持仓，整笔卖出的实际均价可能更低。",
-    "> Mark APY 与 Dashboard 的简单 APR 不是同一个口径；通知同时展示两者，避免混淆。",
     "> 若市场实际结算晚于 endDate，真实年化会更低。"
   );
 
   const first = raised[0];
   return {
     formatVersion: 2,
-    title: "💸 LOW MARK APY · " + walletLabel + " · " + raised.length + " 个仓位",
-    short: safe(first.title).slice(0,30) + " · Mark APY " +
-      first.markApyPct.toFixed(1) + "%" +
-      (first.executableApyPct != null
-        ? " · Bid APY " + first.executableApyPct.toFixed(1) + "%"
+    title: "💸 LOW MARK APR · " + walletLabel + " · " + raised.length + " 个仓位",
+    short: safe(first.title).slice(0,30) + " · Mark APR " +
+      first.markAprPct.toFixed(1) + "%" +
+      (first.executableAprPct != null
+        ? " · Bid APR " + first.executableAprPct.toFixed(1) + "%"
         : ""),
     desp: lines.filter(Boolean).join("\n")
   };
