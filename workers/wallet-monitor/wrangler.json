@@ -1,0 +1,46 @@
+{
+  "name": "polymarket-wallet-monitor",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-22",
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
+  },
+  "vars": {
+    "WALLET_ADDRESS": "0x052f4191cd324a348835a846d34df5b0061e53fb",
+    "MIN_POSITION_USD": "5",
+    "V2_SHADOW_ENABLED": "false",
+    "WALLET_ADDRESSES": "0x9f7eb5bc88342f01d18754be0439fad79ec282ce,0x24816c037cdc2c9bd979e69d777541cf560a9b79,0x052f4191cd324a348835a846d34df5b0061e53fb",
+    "DAILY_REPORT_ENABLED": "true",
+    "REDEEM_REMINDER_ENABLED": "false",
+    "RISK_ALERT_ENABLED": "true",
+    "REDEEM_DELAY_HOURS": "6",
+    "REDEEM_COOLDOWN_HOURS": "24",
+    "MIN_REDEEM_USD": "5",
+    "PRICE_ALERT_FLOOR": "0.90",
+    "COST_DRAWDOWN_PCT": "5",
+    "RAPID_DROP_POINTS": "0.05",
+    "RISK_COOLDOWN_HOURS": "24",
+    "DATA_API_PRIMARY": "v2"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MONITOR",
+        "class_name": "WalletMonitor"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "WalletMonitor"
+      ]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
