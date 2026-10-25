@@ -1,4 +1,8 @@
 const CLOB_BOOK_URL = "https://clob.polymarket.com/book";
+const SETTLEMENT_TIME_ZONE = "America/New_York";
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const STATE_BASIS = "mark-apy-v2";
+
 const DEFAULTS = {
   thresholdPct: 10,
   recoverPct: 12,
@@ -11,27 +15,82 @@ const DEFAULTS = {
 const num = v => v !== undefined && v !== null && v !== "" && Number.isFinite(Number(v));
 const safe = s => String(s || "未知市场").replace(/[\r\n]+/g, " ")
   .replace(/([\\_*[\]~<>])/g, "\\$1").slice(0, 120);
-const usd = n => "$" + Number(n).toLocaleString("en-US", {minimumFractionDigits:2,maximumFractionDigits:2});
+const usd = n => "$" + Number(n).toLocaleString("en-US", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
 const pr = n => "$" + Number(n).toFixed(4);
+
+function getTimeZoneOffsetMinutes(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const values = Object.fromEntries(
+    parts.filter(({type}) => type !== "literal").map(({type,value}) => [type,value])
+  );
+  const asUtc = Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second)
+  );
+  if (!Number.isFinite(asUtc)) return 0;
+  return Math.round((asUtc - date.getTime()) / 60000);
+}
+
+function endOfDaySettlementUtcMs(dateStr) {
+  const startUtc = Date.parse(dateStr + "T00:00:00.000Z");
+  if (!Number.isFinite(startUtc)) return null;
+  const endUtc = startUtc + MS_PER_DAY - 1;
+  let settlementUtc = endUtc;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const offset = getTimeZoneOffsetMinutes(new Date(settlementUtc), SETTLEMENT_TIME_ZONE);
+    settlementUtc = endUtc - offset * 60000;
+  }
+  return settlementUtc;
+}
 
 function endMs(raw) {
   if (typeof raw !== "string" || !raw.trim()) return null;
   const text = raw.trim();
   const parsed = /^\d{4}-\d{2}-\d{2}$/.test(text)
-    ? Date.parse(text + "T23:59:59Z")
+    ? endOfDaySettlementUtcMs(text)
     : Date.parse(text);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-export function effectiveApy(price, endDate, nowSec) {
-  if (!num(price) || Number(price) <= 0 || Number(price) >= 1)
-    return Number(price) === 1 ? 0 : null;
+function remainingYears(endDate, nowSec) {
   const maturity = endMs(endDate);
   const nowMs = Number(nowSec) * 1000;
   if (maturity === null || !Number.isFinite(nowMs) || maturity <= nowMs) return null;
-  const years = (maturity - nowMs) / (365 * 24 * 3600 * 1000);
+  return (maturity - nowMs) / (365 * MS_PER_DAY);
+}
+
+export function effectiveApy(price, endDate, nowSec) {
+  if (!num(price) || Number(price) <= 0 || Number(price) > 1) return null;
+  if (Number(price) === 1) return 0;
+  const years = remainingYears(endDate, nowSec);
+  if (years === null || years <= 0) return null;
   const apy = Math.pow(1 / Number(price), 1 / years) - 1;
   return Number.isFinite(apy) && apy >= 0 ? apy : null;
+}
+
+export function simpleApr(price, endDate, nowSec) {
+  if (!num(price) || Number(price) <= 0 || Number(price) > 1) return null;
+  if (Number(price) === 1) return 0;
+  const years = remainingYears(endDate, nowSec);
+  if (years === null || years <= 0) return null;
+  const apr = ((1 / Number(price)) - 1) / years;
+  return Number.isFinite(apr) && apr >= 0 ? apr : null;
 }
 
 function bestBid(book) {
@@ -52,8 +111,8 @@ async function orderBook(fetcher, tokenId, timeoutMs) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetcher(url, {
-      headers:{accept:"application/json"},
-      signal:controller.signal
+      headers: {accept:"application/json"},
+      signal: controller.signal
     });
     if (!response.ok) throw new Error("CLOB HTTP " + response.status);
     return await response.json();
@@ -86,8 +145,10 @@ function validateConfig(config) {
 
 export async function inspectLowApy(positions, previous, now, fetcher=fetch, config={}) {
   const v = validateConfig(config);
-  const priorState = previous && typeof previous === "object" ? previous : {};
+  const compatible = previous?.basis === STATE_BASIS;
+  const priorState = compatible && previous && typeof previous === "object" ? previous : {};
   const lastCheckedAt = Number(priorState.lastCheckedAt || 0);
+
   if (lastCheckedAt > 0 && now - lastCheckedAt < v.checkMinutes * 60) {
     return {state: priorState, raised: [], skipped:"interval", checked:0, errors:0};
   }
@@ -102,59 +163,86 @@ export async function inspectLowApy(positions, previous, now, fetcher=fetch, con
     if (p?.asset == null || p.redeemable === true ||
         !num(p.size) || Number(p.size) <= 0) continue;
     if (positionExposure(p) < v.minUsd) continue;
-    const maturity = endMs(p.endDate);
-    if (maturity === null || maturity <= now * 1000) continue;
+    if (!num(p.curPrice) || Number(p.curPrice) <= 0 || Number(p.curPrice) > 1) continue;
+
+    const markPrice = Number(p.curPrice);
+    const markApy = effectiveApy(markPrice, p.endDate, now);
+    const markApr = simpleApr(markPrice, p.endDate, now);
+    if (markApy === null || markApr === null) continue;
+    checked++;
 
     const id = String(p.asset);
     const prior = priorTokens[id] || null;
-    try {
-      const book = await orderBook(fetcher, id, v.timeoutMs);
-      const bid = bestBid(book);
-      if (!bid) continue;
-      checked++;
-      const apy = effectiveApy(bid.price, p.endDate, now);
-      if (apy === null) continue;
+    const markApyPct = markApy * 100;
+    const markAprPct = markApr * 100;
+    const priorBelow = prior?.below === true;
+    const below = priorBelow
+      ? markApyPct < v.recoverPct
+      : markApyPct < v.thresholdPct;
+    const lastAlertAt = Number(prior?.lastAlertAt || 0);
+    const canRepeat = !lastAlertAt || now - lastAlertAt >= v.cooldownHours * 3600;
 
-      const apyPct = apy * 100;
-      const priorBelow = prior?.below === true;
-      const below = priorBelow ? apyPct < v.recoverPct : apyPct < v.thresholdPct;
-      const lastAlertAt = Number(prior?.lastAlertAt || 0);
-      const canRepeat = !lastAlertAt || now - lastAlertAt >= v.cooldownHours * 3600;
-      const entry = {
-        below, lastAlertAt, apyPct,
-        bestBid:bid.price, bidSize:bid.size
-      };
+    const entry = {
+      below,
+      lastAlertAt,
+      markPrice,
+      markApyPct,
+      markAprPct
+    };
 
-      if (below && (!priorBelow || canRepeat)) {
-        entry.lastAlertAt = now;
-        const size = Number(p.size);
-        raised.push({
-          id,
-          title:String(p.title || p.conditionId || "未知市场"),
-          outcome:String(p.outcome || "未知选项"),
-          eventSlug:String(p.eventSlug || ""),
-          endDate:p.endDate,
-          size,
-          avgPrice:num(p.avgPrice) ? Number(p.avgPrice) : null,
-          bestBid:bid.price,
-          bidSize:bid.size,
-          bidDepthUsd:bid.price * bid.size,
-          positionValueUsd:size * bid.price,
-          remainingRoiPct:(1 / bid.price - 1) * 100,
-          apyPct,
-        });
+    if (below && (!priorBelow || canRepeat)) {
+      entry.lastAlertAt = now;
+      const size = Number(p.size);
+      let bid = null;
+      let executableApyPct = null;
+      let executableAprPct = null;
+
+      try {
+        bid = bestBid(await orderBook(fetcher, id, v.timeoutMs));
+        if (bid) {
+          const executableApy = effectiveApy(bid.price, p.endDate, now);
+          const executableApr = simpleApr(bid.price, p.endDate, now);
+          executableApyPct = executableApy === null ? null : executableApy * 100;
+          executableAprPct = executableApr === null ? null : executableApr * 100;
+        }
+      } catch {
+        errors++;
       }
-      nextTokens[id] = entry;
-    } catch {
-      errors++;
-      if (prior) nextTokens[id] = prior;
+
+      raised.push({
+        id,
+        title: String(p.title || p.conditionId || "未知市场"),
+        outcome: String(p.outcome || "未知选项"),
+        eventSlug: String(p.eventSlug || ""),
+        endDate: p.endDate,
+        size,
+        avgPrice: num(p.avgPrice) ? Number(p.avgPrice) : null,
+        markPrice,
+        markApyPct,
+        markAprPct,
+        markPositionValueUsd: num(p.currentValue)
+          ? Number(p.currentValue)
+          : size * markPrice,
+        markRemainingRoiPct: (1 / markPrice - 1) * 100,
+        bestBid: bid?.price ?? null,
+        bidSize: bid?.size ?? null,
+        bidDepthUsd: bid ? bid.price * bid.size : null,
+        executableApyPct,
+        executableAprPct,
+        executableRemainingRoiPct: bid ? (1 / bid.price - 1) * 100 : null,
+        executableFullPositionValueUsd: bid ? size * bid.price : null,
+      });
     }
+
+    nextTokens[id] = entry;
   }
 
-  raised.sort((a,b) => a.apyPct - b.apyPct);
+  raised.sort((a,b) => a.markApyPct - b.markApyPct);
   return {
-    state:{lastCheckedAt:now,tokens:nextTokens},
-    raised, checked, errors
+    state: {basis:STATE_BASIS,lastCheckedAt:now,tokens:nextTokens},
+    raised,
+    checked,
+    errors
   };
 }
 
@@ -162,48 +250,72 @@ export function lowApyMessage(walletLabel, raised, thresholdPct, now) {
   if (!raised?.length) return null;
   const time = new Date(now*1000).toLocaleString("zh-CN", {timeZone:"Asia/Shanghai"});
   const lines = [
-    "### 💸 Polymarket · 低 APY / 可考虑卖出",
+    "### 💸 Polymarket · Mark APY 过低 / 可考虑卖出",
     "**钱包：** " + safe(walletLabel),
-    "**阈值：** 有效 APY < " + Number(thresholdPct).toFixed(1) + "%",
+    "**触发阈值：** Mark APY < " + Number(thresholdPct).toFixed(1) + "%",
     "**触发仓位：** " + raised.length + " 个",
     "**北京时间：** " + time,
     "",
   ];
 
   for (const a of raised.slice(0,6)) {
-    const text=safe(a.title)+" / "+safe(a.outcome);
-    const url=/^[a-zA-Z0-9_-]+$/.test(a.eventSlug)
-      ? "https://polymarket.com/event/"+a.eventSlug : null;
+    const text = safe(a.title) + " / " + safe(a.outcome);
+    const url = /^[a-zA-Z0-9_-]+$/.test(a.eventSlug)
+      ? "https://polymarket.com/event/" + a.eventSlug
+      : null;
+
     lines.push(
-      "#### "+(url?"["+text+"]("+url+")":text),
-      "- 当前可卖买一：**"+pr(a.bestBid)+"**",
-      "- 剩余有效 APY：**"+a.apyPct.toFixed(2)+"%**",
-      "- 持有到 $1 的剩余 ROI："+a.remainingRoiPct.toFixed(2)+"%",
-      "- 当前持仓："+a.size.toLocaleString("en-US",{maximumFractionDigits:8})+" 份",
-      "- 按买一估算持仓价值：**"+usd(a.positionValueUsd)+"**",
-      "- 买一档深度："+usd(a.bidDepthUsd),
-      a.avgPrice!=null?"- 买入均价："+pr(a.avgPrice):"",
-      "- 预计结束："+safe(a.endDate||"暂无数据"),
+      "#### " + (url ? "[" + text + "](" + url + ")" : text),
+      "**机会成本（Mark / Current）**",
+      "- Mark 参考价：**" + pr(a.markPrice) + "**",
+      "- Mark APY（复利）：**" + a.markApyPct.toFixed(2) + "%**",
+      "- Mark APR（简单年化）：**" + a.markAprPct.toFixed(2) + "%**",
+      "- 持有到 $1 的剩余 ROI：" + a.markRemainingRoiPct.toFixed(2) + "%",
+      "- 当前持仓价值：**" + usd(a.markPositionValueUsd) + "**",
+      "",
+      "**实际退出（CLOB 买一）**",
+      a.bestBid != null ? "- 当前可卖买一：**" + pr(a.bestBid) + "**" :
+        "- 当前可卖买一：**暂不可用**",
+      a.executableApyPct != null ? "- 可执行 APY（复利）：**" +
+        a.executableApyPct.toFixed(2) + "%**" :
+        "- 可执行 APY：暂不可用",
+      a.executableAprPct != null ? "- 可执行 APR（简单年化）：" +
+        a.executableAprPct.toFixed(2) + "%" : "",
+      a.executableRemainingRoiPct != null ? "- 买一价对应剩余 ROI：" +
+        a.executableRemainingRoiPct.toFixed(2) + "%" : "",
+      a.bidDepthUsd != null ? "- 买一档深度：" + usd(a.bidDepthUsd) : "",
+      a.executableFullPositionValueUsd != null
+        ? "- 按买一估算全仓价值（假设深度足够）：" +
+          usd(a.executableFullPositionValueUsd)
+        : "",
+      "",
+      "- 当前持仓：" + a.size.toLocaleString("en-US",{maximumFractionDigits:8}) + " 份",
+      a.avgPrice != null ? "- 买入均价：" + pr(a.avgPrice) : "",
+      "- 预计结束：" + safe(a.endDate || "暂无数据"),
       ""
     );
   }
 
-  if (raised.length>6)
-    lines.push("另有 "+(raised.length-6)+" 个低 APY 仓位已折叠。","");
+  if (raised.length > 6)
+    lines.push("另有 " + (raised.length - 6) + " 个低 Mark APY 仓位已折叠。","");
 
   lines.push(
-    "> 有效 APY 按当前 CLOB 买一价与预计结束时间计算：APY = (1 / 买一价)^(365 / 剩余天数) - 1。",
-    "> 买一价只保证该档当前存在，不代表整笔持仓都能以该价成交；请结合“买一档深度”判断实际可卖规模。",
-    "> 若市场实际结算晚于 endDate，真实年化会更低，因此该提醒偏乐观。",
-    "> 这是机会成本提醒：剩余年化低于阈值时，可考虑卖出并切换到收益/确定性更好的仓位。"
+    "> 触发条件只看 Mark / Current APY：APY = (1 / curPrice)^(365 / 剩余天数) - 1。",
+    "> CLOB 买一仅用于说明真实退出条件，不参与是否触发低 APY 提醒。",
+    "> 买一价只代表当前第一档；若买一深度小于持仓，整笔卖出的实际均价可能更低。",
+    "> Mark APY 与 Dashboard 的简单 APR 不是同一个口径；通知同时展示两者，避免混淆。",
+    "> 若市场实际结算晚于 endDate，真实年化会更低。"
   );
 
-  const first=raised[0];
+  const first = raised[0];
   return {
-    formatVersion:2,
-    title:"💸 LOW APY · "+walletLabel+" · "+raised.length+" 个仓位",
-    short:safe(first.title).slice(0,34)+" · APY "+
-      first.apyPct.toFixed(1)+"% · "+usd(first.positionValueUsd),
-    desp:lines.filter(Boolean).join("\n")
+    formatVersion: 2,
+    title: "💸 LOW MARK APY · " + walletLabel + " · " + raised.length + " 个仓位",
+    short: safe(first.title).slice(0,30) + " · Mark APY " +
+      first.markApyPct.toFixed(1) + "%" +
+      (first.executableApyPct != null
+        ? " · Bid APY " + first.executableApyPct.toFixed(1) + "%"
+        : ""),
+    desp: lines.filter(Boolean).join("\n")
   };
 }
