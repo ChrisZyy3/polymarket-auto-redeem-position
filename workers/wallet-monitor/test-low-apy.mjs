@@ -36,17 +36,17 @@ const position = {
   redeemable:false
 };
 
-// Mark APY is low enough to trigger, even when the executable bid implies a higher APY.
+// Mark APR is the trigger basis; APY is informational only.
 const low = await inspectLowApy([position],null,now,fetchBook("0.98"),{
   thresholdPct:10,recoverPct:12,checkMinutes:30,cooldownHours:24,
   minUsd:5,timeoutMs:1000
 });
 assert.equal(low.raised.length,1);
-assert.equal(low.state.basis,"mark-apy-v2");
+assert.equal(low.state.basis,"mark-apr-v3");
 assert.equal(low.raised[0].markPrice,0.99);
 assert.equal(low.raised[0].bestBid,0.98);
-assert.ok(low.raised[0].executableApyPct > low.raised[0].markApyPct,
-  "lower executable bid should imply a higher remaining APY");
+assert.ok(low.raised[0].executableAprPct > low.raised[0].markAprPct,
+  "lower executable bid should imply a higher remaining APR");
 assert.equal(low.raised[0].markPositionValueUsd,495);
 assert.equal(low.raised[0].bidDepthUsd,980);
 
@@ -59,7 +59,7 @@ const migrated=await inspectLowApy([position],legacyState,now,fetchBook("0.98"),
   thresholdPct:10,recoverPct:12,checkMinutes:30,cooldownHours:24,
   minUsd:5,timeoutMs:1000
 });
-assert.equal(migrated.raised.length,1,"legacy executable-APY state should be re-evaluated immediately");
+assert.equal(migrated.raised.length,1,"legacy APY-basis state should be re-evaluated immediately");
 
 // Interval gating works once state is on the new basis.
 const skipped = await inspectLowApy([position],low.state,now+600,fetchBook("0.98"),{
@@ -69,20 +69,20 @@ const skipped = await inspectLowApy([position],low.state,now+600,fetchBook("0.98
 assert.equal(skipped.skipped,"interval");
 assert.equal(skipped.raised.length,0);
 
-// Cooldown is based on Mark APY, not on the executable bid.
+// Cooldown is based on Mark APR, not on the executable bid.
 const cooldown = await inspectLowApy([position],low.state,now+3600,fetchBook("0.98"),{
   thresholdPct:10,recoverPct:12,checkMinutes:30,cooldownHours:24,
   minUsd:5,timeoutMs:1000
 });
 assert.equal(cooldown.raised.length,0,"no repeat within cooldown");
 
-// Recovery is also based on Mark APY.
+// Recovery is also based on Mark APR.
 const recoveredPosition={...position,curPrice:0.97,currentValue:485};
 const recovered = await inspectLowApy([recoveredPosition],low.state,now+3600,fetchBook("0.96"),{
   thresholdPct:10,recoverPct:12,checkMinutes:30,cooldownHours:24,
   minUsd:5,timeoutMs:1000
 });
-assert.equal(recovered.state.tokens["1"].below,false,"rearm after Mark APY recovery");
+assert.equal(recovered.state.tokens["1"].below,false,"rearm after Mark APR recovery");
 
 // Crossing below again after recovery should alert again.
 const again = await inspectLowApy([position],recovered.state,now+7200,fetchBook("0.98"),{
@@ -91,7 +91,7 @@ const again = await inspectLowApy([position],recovered.state,now+7200,fetchBook(
 });
 assert.equal(again.raised.length,1);
 
-// A CLOB outage must not suppress a Mark-APY opportunity-cost alert.
+// A CLOB outage must not suppress a Mark-APR opportunity-cost alert.
 const failingFetch=async()=>{ throw new Error("network down"); };
 const noBook = await inspectLowApy([{...position,asset:"3"}],null,now,failingFetch,{
   thresholdPct:10,recoverPct:12,checkMinutes:30,cooldownHours:24,
@@ -110,10 +110,33 @@ const dustResult=await inspectLowApy([dust],null,now,fetchBook("0.98"),{
 });
 assert.equal(dustResult.checked,0);
 
+
+
+const wtiEnd = "2026-11-01";
+const wtiNow = Date.parse("2026-10-25T18:05:03Z") / 1000;
+const wtiApr = simpleApr(0.998, wtiEnd, wtiNow);
+const wtiApy = effectiveApy(0.998, wtiEnd, wtiNow);
+assert.ok(wtiApr * 100 < 10, "WTI-style mark APR should be below 10%");
+assert.ok(wtiApy * 100 > 10, "WTI-style mark APY may still be above 10%");
+const wti = await inspectLowApy([{
+  ...position,
+  asset:"wti",
+  curPrice:0.998,
+  endDate:wtiEnd,
+  currentValue:77621.446,
+  size:77777
+}],null,wtiNow,fetchBook("0.997","1000"),{
+  thresholdPct:10,recoverPct:12,checkMinutes:30,cooldownHours:24,
+  minUsd:5,timeoutMs:1000
+});
+assert.equal(wti.raised.length,1,"APR basis should trigger for WTI-style 9.8% APR");
+assert.ok(wti.raised[0].markAprPct < 10);
+assert.ok(wti.raised[0].markApyPct > 10);
+
 const msg=lowApyMessage("ChrisZyy",low.raised,10,now);
-assert.ok(msg.title.includes("LOW MARK APY"));
+assert.ok(msg.title.includes("LOW MARK APR"));
 assert.ok(msg.desp.includes("Mark APY（复利）"));
 assert.ok(msg.desp.includes("Mark APR（简单年化）"));
 assert.ok(msg.desp.includes("可执行 APY（复利）"));
 assert.ok(msg.desp.includes("当前持仓价值"));
-console.log("mark-apy tests passed");
+console.log("mark-apr tests passed");
