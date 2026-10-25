@@ -22,7 +22,12 @@
     "COST_DRAWDOWN_PCT": "5",
     "RAPID_DROP_POINTS": "0.05",
     "RISK_COOLDOWN_HOURS": "24",
-    "DATA_API_PRIMARY": "v2"
+    "DATA_API_PRIMARY": "v2",
+    "LOW_APY_ALERT_ENABLED": "true",
+    "LOW_APY_THRESHOLD_PCT": "10",
+    "LOW_APY_RECOVER_PCT": "12",
+    "LOW_APY_CHECK_MINUTES": "30",
+    "LOW_APY_COOLDOWN_HOURS": "24"
   },
   "durable_objects": {
     "bindings": [
