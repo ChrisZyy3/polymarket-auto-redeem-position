@@ -11,11 +11,9 @@ function flag(obj: unknown): boolean | null {
 }
 export function rewardEligibility(payload: unknown): boolean | null {
   const rows: unknown[] = Array.isArray(payload) ? payload : [payload];
-  const verdicts = rows.flatMap(e => {
-    const markets = e && typeof e === "object" && "markets" in e &&
-      Array.isArray(e.markets) ? e.markets : [];
-    return [flag(e), ...markets.map(flag)];
-  }).filter((v): v is boolean => v !== null);
+  const verdicts = rows.map(flag).filter((v): v is boolean => v !== null);
+  // Event-level flag only; mixed event markets are not enough to establish
+  // eligibility of a particular held outcome.
   if (verdicts.includes(true)) return true;
   if (verdicts.includes(false)) return false;
   return null;
