@@ -6,7 +6,7 @@ function flag(obj) {
 }
 export function rewardEligibility(payload) {
   const rows=Array.isArray(payload)?payload:[payload];
-  const flags=rows.flatMap(e=>[flag(e),...(Array.isArray(e?.markets)?e.markets.map(flag):[])]).filter(x=>x!==null);
+  const flags=rows.map(flag).filter(x=>x!==null);
   return flags.includes(true)?true:flags.includes(false)?false:null;
 }
 export async function holdingRewardForSlug(slug,fetcher=fetch,annualRate=HOLDING_REWARD_APR) {
