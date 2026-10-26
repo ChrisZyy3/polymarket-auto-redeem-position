@@ -29,7 +29,10 @@ export interface Position {
 export interface EnrichedPosition extends Position {
   holdRoi: number;
   costRoi: number;
-  holdApr: number | null;
+  holdApr: number | null; // Combined Mark APR + Holding Rewards APR
+  markApr: number | null;
+  holdingRewardApr: number;
+  holdingRewardEligible: boolean | null;
   costApr: number | null;
   daysToSettle: number;
   status: 'good' | 'attention' | 'losing' | 'redeemable';
