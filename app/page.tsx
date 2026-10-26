@@ -84,7 +84,7 @@ const HISTORY_KEY = "polymarket-dashboard-address-history";
 const MAX_HISTORY = 8;
 
 const HOLD_APR_THRESHOLD_KEY = "polymarket-dashboard-hold-apr-threshold";
-const DEFAULT_HOLD_APR_THRESHOLD = 8; // Default 8% APR alert threshold / 默认 8% 的 APR 预警阈值
+const DEFAULT_HOLD_APR_THRESHOLD = 10; // Default 10% APR alert threshold / 默认 8% 的 APR 预警阈值
 const TARGET_APR_BY_ASSET_KEY = "polymarket-dashboard-target-apr-by-asset-v1";
 const DUST_POSITION_VALUE_USD = 1;
 
@@ -554,7 +554,7 @@ export default function Home() {
       {
         id: "marketApr",
         accessorFn: (position) => position.holdApr,
-        header: isEnglish ? "Market APR" : "市场 APR",
+        header: isEnglish ? "Combined Hold APR" : "综合持有 APR",
         cell: ({ row }) => {
           const { holdApr } = row.original;
           const isLow = holdApr !== null && holdApr * 100 <= holdAprThreshold;
@@ -565,7 +565,14 @@ export default function Home() {
               }`}
             >
               {isLow && <AlertTriangle aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
-              {formatPercent(holdApr)}
+              <span className="flex flex-col gap-0.5">
+                <span>{formatPercent(holdApr)}</span>
+                <span className="text-[10px] font-medium text-slate-400">
+                  {isEnglish ? "Mark" : "市场"} {formatPercent(row.original.markApr)}
+                  {row.original.holdingRewardEligible === true ? ` + Reward ${formatPercent(row.original.holdingRewardApr)}` : ""}
+                  {row.original.holdingRewardEligible === null ? (isEnglish ? " · Reward unverified" : " · 奖励待核实") : ""}
+                </span>
+              </span>
             </span>
           );
         },
@@ -825,8 +832,8 @@ export default function Home() {
           <div className="flex flex-col gap-3">
             <label htmlFor="hold-apr-threshold" className="text-xs text-slate-400 leading-relaxed">
               {isEnglish
-                ? "Positions at or below this Hold APR are flagged in the dashboard and alerts."
-                : "继续持有年化收益率 (Hold APR) 低于或等于此设定阈值时，看板和推送将进行风险预警并标红。"}
+                ? "Positions below this combined Hold APR are flagged in the dashboard (Cloudflare notifications use their own 10% threshold)."
+                : "综合持有 APR（Mark APR + 已核实 Holding Rewards APR）低于此设定阈值时，看板标红；Cloudflare 推送阈值独立设为 10%。"}
             </label>
             <div className="relative mt-1">
               <input
@@ -884,11 +891,11 @@ export default function Home() {
               tooltip={isEnglish ? "Current market value of all positions" : "用户当前所有未结算的持仓当前市价总价值"}
             />
             <SummaryCard
-              label={isEnglish ? "Weighted market APR" : "加权市场 APR"}
+              label={isEnglish ? "Weighted combined hold APR" : "加权综合持有 APR"}
               value={data ? formatPercent(data.summary.avgHoldApr) : "—"}
               icon={<TrendingUp className="h-4 w-4 text-fuchsia-400" />}
               glowColor="red"
-              tooltip={isEnglish ? "Expected annualized return, weighted by position value" : "以仓位当前市值为权重，加权计算的持仓预期年化收益率。评估继续锁定资金的性价比"}
+              tooltip={isEnglish ? "Mark APR plus verified eligible holding rewards, weighted by position value" : "按当前市值加权的综合 APR = 市场 Mark APR + 已核实 Holding Rewards APR；未确认资格的奖励不计入"}
             />
       </div>
 

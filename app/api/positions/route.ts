@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { fetchCurrentPositions, fetchCashBalance, filterPositionsByMinimumValue } from '@/lib/polymarket';
 import { calcApr, needsAttention, isLosing } from '@/lib/apr';
 import type { EnrichedPosition } from '@/lib/types';
+import { holdingRewardForSlug, combinedHoldingApr } from '@/lib/holding-rewards';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -25,19 +26,28 @@ export async function GET(request: NextRequest) {
     const holding = visiblePositions.filter(p => !p.redeemable);
     const redeemable = visiblePositions.filter(p => p.redeemable);
 
+    const uniqueSlugs = [...new Set(holding.map(p => p.eventSlug || p.slug).filter(Boolean))];
+    const rewards = new Map(await Promise.all(uniqueSlugs.map(async slug =>
+      [slug, await holdingRewardForSlug(slug, fetch, undefined, holding.find(p => (p.eventSlug || p.slug) === slug)?.conditionId)] as const
+    )));
     const enrichedHolding: EnrichedPosition[] = holding.map(p => {
       const result = calcApr(p);
+      const reward = rewards.get(p.eventSlug || p.slug) ?? { eligible:null, apr:0 };
+      const effectiveHoldApr = combinedHoldingApr(result.holdApr, reward.apr);
       const hasCurrentLoss = Number.isFinite(p.cashPnl) && p.cashPnl < 0;
       const status = hasCurrentLoss || isLosing(result, 0.5)
         ? 'losing'
-        : needsAttention(result, aprThreshold)
+        : (effectiveHoldApr === null || effectiveHoldApr * 100 < aprThreshold)
           ? 'attention'
           : 'good';
       return {
         ...p,
         holdRoi: result.holdRoi,
         costRoi: result.costRoi,
-        holdApr: result.holdApr,
+        markApr: result.holdApr,
+        holdingRewardApr: reward.apr,
+        holdingRewardEligible: reward.eligible,
+        holdApr: effectiveHoldApr,
         costApr: result.costApr,
         daysToSettle: result.daysToSettle,
         status,
@@ -51,6 +61,9 @@ export async function GET(request: NextRequest) {
       holdRoi: 0,
       costRoi: 0,
       holdApr: null,
+      markApr: null,
+      holdingRewardApr: 0,
+      holdingRewardEligible: null,
       costApr: null,
       daysToSettle: 0,
       status: 'redeemable' as const,
