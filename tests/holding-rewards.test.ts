@@ -16,3 +16,8 @@ test("unknown eligibility contributes zero and stays unknown",async()=>{
  const reward=await holdingRewardForSlug("example",async()=>{throw Error("unavailable");});
  assert.deepEqual(reward,{eligible:null,apr:0});
 });
+
+test("event with multiple markets never applies unrelated market reward",()=>{
+ assert.equal(rewardEligibility({markets:[{conditionId:"0xa",holdingRewardsEnabled:true},{conditionId:"0xb",holdingRewardsEnabled:false}]},"0xb"),false);
+ assert.equal(rewardEligibility({markets:[{conditionId:"0xa",holdingRewardsEnabled:true}]},"0xb"),null);
+});
