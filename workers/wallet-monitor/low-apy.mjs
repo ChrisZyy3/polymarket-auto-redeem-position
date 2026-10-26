@@ -1,7 +1,8 @@
 const CLOB_BOOK_URL = "https://clob.polymarket.com/book";
 const SETTLEMENT_TIME_ZONE = "America/New_York";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-const STATE_BASIS = "mark-apr-v3";
+const STATE_BASIS = "combined-apr-holding-v4";
+import { rewardMapForPositions } from "./holding-rewards.mjs";
 
 const DEFAULTS = {
   thresholdPct: 10,
@@ -155,6 +156,11 @@ export async function inspectLowApy(positions, previous, now, fetcher=fetch, con
 
   const priorTokens = priorState.tokens && typeof priorState.tokens === "object"
     ? priorState.tokens : {};
+  const eligiblePositions=(positions||[]).filter(p=>p?.asset != null &&
+    p.redeemable !== true && num(p.size) && Number(p.size)>0 &&
+    positionExposure(p)>=v.minUsd && num(p.curPrice) &&
+    Number(p.curPrice)>0 && Number(p.curPrice)<=1);
+  const rewardMap=await rewardMapForPositions(eligiblePositions,fetcher);
   const nextTokens = {};
   const raised = [];
   let checked = 0, errors = 0;
@@ -175,10 +181,20 @@ export async function inspectLowApy(positions, previous, now, fetcher=fetch, con
     const prior = priorTokens[id] || null;
     const markApyPct = markApy * 100;
     const markAprPct = markApr * 100;
+    const reward = rewardMap.get(p.eventSlug) ?? {eligible:null,apr:0};
+    // Unknown reward eligibility must never be silently represented as confirmed 0.
+    // Defer yield alerts until eligibility can be verified.
+    if (reward.eligible===null) {
+      if (priorTokens[id]) nextTokens[id]=priorTokens[id];
+      errors++;
+      continue;
+    }
+    const holdingRewardAprPct = reward.apr * 100;
+    const combinedAprPct = markAprPct + holdingRewardAprPct;
     const priorBelow = prior?.below === true;
     const below = priorBelow
-      ? markAprPct < v.recoverPct
-      : markAprPct < v.thresholdPct;
+      ? combinedAprPct < v.recoverPct
+      : combinedAprPct < v.thresholdPct;
     const lastAlertAt = Number(prior?.lastAlertAt || 0);
     const canRepeat = !lastAlertAt || now - lastAlertAt >= v.cooldownHours * 3600;
 
@@ -187,7 +203,9 @@ export async function inspectLowApy(positions, previous, now, fetcher=fetch, con
       lastAlertAt,
       markPrice,
       markApyPct,
-      markAprPct
+      markAprPct,
+      holdingRewardAprPct,
+      combinedAprPct
     };
 
     if (below && (!priorBelow || canRepeat)) {
@@ -220,6 +238,9 @@ export async function inspectLowApy(positions, previous, now, fetcher=fetch, con
         markPrice,
         markApyPct,
         markAprPct,
+        holdingRewardAprPct,
+        combinedAprPct,
+        holdingRewardEligible:reward.eligible,
         markPositionValueUsd: num(p.currentValue)
           ? Number(p.currentValue)
           : size * markPrice,
@@ -237,7 +258,7 @@ export async function inspectLowApy(positions, previous, now, fetcher=fetch, con
     nextTokens[id] = entry;
   }
 
-  raised.sort((a,b) => a.markAprPct - b.markAprPct);
+  raised.sort((a,b) => a.combinedAprPct - b.combinedAprPct);
   return {
     state: {basis:STATE_BASIS,lastCheckedAt:now,tokens:nextTokens},
     raised,
@@ -250,9 +271,9 @@ export function lowApyMessage(walletLabel, raised, thresholdPct, now) {
   if (!raised?.length) return null;
   const time = new Date(now*1000).toLocaleString("zh-CN", {timeZone:"Asia/Shanghai"});
   const lines = [
-    "### 💸 Polymarket · Mark APR 过低 / 可考虑卖出",
+    "### 💸 Polymarket · 综合持有 APR 过低 / 可考虑卖出",
     "**钱包：** " + safe(walletLabel),
-    "**触发阈值：** Mark APR < " + Number(thresholdPct).toFixed(1) + "%",
+    "**触发阈值：** 综合持有 APR < " + Number(thresholdPct).toFixed(1) + "%",
     "**触发仓位：** " + raised.length + " 个",
     "**北京时间：** " + time,
     "",
@@ -269,7 +290,9 @@ export function lowApyMessage(walletLabel, raised, thresholdPct, now) {
       "**机会成本（Mark / Current）**",
       "- Mark 参考价：**" + pr(a.markPrice) + "**",
       "- Mark APY（复利）：**" + a.markApyPct.toFixed(2) + "%**",
-      "- Mark APR（简单年化）：**" + a.markAprPct.toFixed(2) + "%**",
+      "- Mark APR（简单年化）：" + a.markAprPct.toFixed(2) + "%",
+      "- Holding Rewards APR：" + a.holdingRewardAprPct.toFixed(2) + "%",
+      "- **综合持有 APR：** **" + a.combinedAprPct.toFixed(2) + "%**",
       "- 持有到 $1 的剩余 ROI：" + a.markRemainingRoiPct.toFixed(2) + "%",
       "- 当前持仓价值：**" + usd(a.markPositionValueUsd) + "**",
       "",
@@ -297,11 +320,11 @@ export function lowApyMessage(walletLabel, raised, thresholdPct, now) {
   }
 
   if (raised.length > 6)
-    lines.push("另有 " + (raised.length - 6) + " 个低 Mark APR 仓位已折叠。","");
+    lines.push("另有 " + (raised.length - 6) + " 个低综合持有 APR 仓位已折叠。","");
 
   lines.push(
-    "> 触发条件只看 Mark / Current APR：APR = (1 / curPrice - 1) × 365 / 剩余天数。",
-    "> 该口径与 Dashboard 的持有年化一致；Mark APY 仅保留作复利参考。",
+    "> 触发条件：综合持有 APR = Mark APR + 官方已确认可领取的 Holding Rewards APR。",
+    "> 与 Dashboard 的综合持有 APR 口径一致；Mark APY 仅保留作复利参考。奖励率可能变更，实际到账以官方采样及发放为准。",
     "> CLOB 买一仅用于说明真实退出条件，不参与是否触发低 APR 提醒。",
     "> 买一价只代表当前第一档；若买一深度小于持仓，整笔卖出的实际均价可能更低。",
     "> 若市场实际结算晚于 endDate，真实年化会更低。"
@@ -310,9 +333,9 @@ export function lowApyMessage(walletLabel, raised, thresholdPct, now) {
   const first = raised[0];
   return {
     formatVersion: 2,
-    title: "💸 LOW MARK APR · " + walletLabel + " · " + raised.length + " 个仓位",
-    short: safe(first.title).slice(0,30) + " · Mark APR " +
-      first.markAprPct.toFixed(1) + "%" +
+    title: "💸 LOW COMBINED APR · " + walletLabel + " · " + raised.length + " 个仓位",
+    short: safe(first.title).slice(0,30) + " · Hold APR " +
+      first.combinedAprPct.toFixed(1) + "%" +
       (first.executableAprPct != null
         ? " · Bid APR " + first.executableAprPct.toFixed(1) + "%"
         : ""),
