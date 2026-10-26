@@ -141,7 +141,7 @@ assert.ok(msg.desp.includes("Mark APY（复利）"));
 assert.ok(msg.desp.includes("Mark APR（简单年化）"));
 assert.ok(msg.desp.includes("可执行 APY（复利）"));
 assert.ok(msg.desp.includes("当前持仓价值"));
-const rewarded = await inspectLowApy([position],null,now,fetchBook("0.98","1000",true),{
+const rewarded = await inspectLowApy([{...position,curPrice:0.988}],null,now,fetchBook("0.98","1000",true),{
   thresholdPct:10,recoverPct:12,checkMinutes:30,cooldownHours:24,minUsd:5,timeoutMs:1000
 });
 assert.equal(rewarded.raised.length,0,"reward lifts combined APR above threshold");
