@@ -9,16 +9,21 @@ function flag(obj: unknown): boolean | null {
   if (value === false) return false;
   return null;
 }
-export function rewardEligibility(payload: unknown): boolean | null {
+export function rewardEligibility(payload: unknown, conditionId?: string): boolean | null {
   const rows: unknown[] = Array.isArray(payload) ? payload : [payload];
+  const markets = rows.flatMap(e => e && typeof e === "object" && "markets" in e &&
+    Array.isArray(e.markets) ? e.markets : []);
+  const matched = conditionId ? markets.find((m: any) =>
+    typeof m?.conditionId === "string" &&
+    m.conditionId.toLowerCase() === conditionId.toLowerCase()) : null;
+  if (matched) return flag(matched);
+  if (conditionId && markets.length) return null;
   const verdicts = rows.map(flag).filter((v): v is boolean => v !== null);
-  // Event-level flag only; mixed event markets are not enough to establish
-  // eligibility of a particular held outcome.
   if (verdicts.includes(true)) return true;
   if (verdicts.includes(false)) return false;
   return null;
 }
-export async function holdingRewardForSlug(slug: string, fetcher: typeof fetch = fetch, annualRate = HOLDING_REWARD_APR): Promise<{eligible:boolean|null;apr:number}> {
+export async function holdingRewardForSlug(slug: string, fetcher: typeof fetch = fetch, annualRate = HOLDING_REWARD_APR, conditionId?: string): Promise<{eligible:boolean|null;apr:number}> {
   if (!/^[a-zA-Z0-9_-]{1,180}$/.test(String(slug || ""))) return {eligible:null,apr:0};
   try {
     const response = await fetcher(GAMMA + "/events/slug/" + encodeURIComponent(slug), {
@@ -26,7 +31,7 @@ export async function holdingRewardForSlug(slug: string, fetcher: typeof fetch =
       signal:AbortSignal.timeout(7500)
     });
     if (!response.ok) return {eligible:null,apr:0};
-    const eligible = rewardEligibility(await response.json());
+    const eligible = rewardEligibility(await response.json(), conditionId);
     return {eligible,apr: eligible === true ? annualRate : 0};
   } catch {
     return {eligible:null,apr:0};
