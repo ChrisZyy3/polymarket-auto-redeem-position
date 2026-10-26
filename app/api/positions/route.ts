@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
 
     const uniqueSlugs = [...new Set(holding.map(p => p.eventSlug || p.slug).filter(Boolean))];
     const rewards = new Map(await Promise.all(uniqueSlugs.map(async slug =>
-      [slug, await holdingRewardForSlug(slug)] as const
+      [slug, await holdingRewardForSlug(slug, fetch, undefined, holding.find(p => (p.eventSlug || p.slug) === slug)?.conditionId)] as const
     )));
     const enrichedHolding: EnrichedPosition[] = holding.map(p => {
       const result = calcApr(p);
