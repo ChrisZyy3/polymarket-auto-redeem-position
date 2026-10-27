@@ -189,12 +189,12 @@ export default {
         const failed = result.wallets.filter(r => !r.ok).map(r => r.wallet);
         throw new Error("Wallet monitor poll failed for: " + failed.join(", "));
       }
-      // Existing five-minute Cron doubles as the Beijing 09:00 daily scheduler.
+      // Existing five-minute Cron doubles as the Beijing 08:00 daily scheduler.
       // A singleton coordinator DO makes every tick safely idempotent.
       try {
         await runDailyDigest(env,fetch,Number.isFinite(_event?.scheduledTime) ? _event.scheduledTime : Date.now());
       } catch {
-        // The next five-minute tick within the 09:00 hour will retry.
+        // The next five-minute tick within the 08:00 hour will retry.
         // Never fail healthy wallet polling because of a digest/RPC outage.
         console.error("wallet_daily_digest_deferred",JSON.stringify({
           at:Math.floor(Date.now()/1000),reason:"snapshot_or_provider_unavailable"
