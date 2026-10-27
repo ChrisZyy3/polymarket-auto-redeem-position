@@ -8,7 +8,7 @@ const assert=(value,label)=>{if(!value)throw Error(label)};
 const walletA="0x052f4191cd324a348835a846d34df5b0061e53fb";
 const walletB="0x24816c037cdc2c9bd979e69d777541cf560a9b79";
 const walletC="0x9f7eb5bc88342f01d18754be0439fad79ec282ce";
-const now=Math.floor(Date.parse("2026-10-24T01:00:00Z")/1000);
+const now=Math.floor(Date.parse("2026-10-24T00:00:00Z")/1000);
 const market={
   asset:"outcome-yes",conditionId:"condition-a",size:100,avgPrice:.9,
   curPrice:.95,currentValue:95,initialValue:90,redeemable:false,
@@ -27,10 +27,12 @@ assert(aggregate.upcoming.length===1&&aggregate.pending.length===1,
   "daily upcoming and redeemable shortlist are distinct");
 assert(walletBalanceAmount("1,234.56 pUSD")===1234.56&&
   walletBalanceAmount("暂时无法获取")===null,"known balances parsed, missing never zero");
-const ms=Date.parse("2026-10-24T01:00:00Z");
+const ms=Date.parse("2026-10-24T00:00:00Z");
 assert(digestWindow(ms)&&digestDate(ms)==="2026-10-24"&&
   !digestWindow(ms-5*60_000)&&!digestWindow(ms+60*60_000),
-  "daily window maps Beijing 09:00 to UTC 01:00");
+  "daily window maps Beijing 08:00 to UTC 00:00");
+assert(!digestWindow(Date.parse("2026-10-24T01:00:00Z")),
+  "former Beijing 09:00 window no longer sends a digest");
 const report=composeDailyDigest("2026-10-24",[
   {label:"ChrisZyy",balance:"100.00 pUSD",snapshot:aggregate},
   {label:"RealChris",balance:"200.00 pUSD",snapshot:summarizeWalletPositions([],now)},
@@ -217,7 +219,7 @@ const simulation={
 const digestEnv={WALLET_ADDRESSES:labels.join(","),MONITOR:simulation,
   DAILY_REPORT_ENABLED:"true"};
 const rpc=async()=>({ok:true,json:async()=>({result:"0x0"})});
-const dayMs=Date.parse("2026-10-24T01:00:00Z");
+const dayMs=Date.parse("2026-10-24T00:00:00Z");
 const processed=await runDailyDigest(digestEnv,rpc,dayMs);
 assert(processed.queued&&queuedCount===1&&
   simMap.get("item").skipBalanceFooter&&
@@ -227,7 +229,7 @@ const duplicate=await runDailyDigest(digestEnv,rpc,dayMs+5*60_000);
 assert(duplicate.skipped==="already_queued"&&queuedCount===1,
   "five-minute Cron retries never duplicate a daily report");
 assert((await runDailyDigest(digestEnv,rpc,dayMs-5*60_000)).skipped==="outside_window",
-  "outside 09:00 Beijing no reports");
+  "outside 08:00 Beijing no reports");
 const staleEnv={...digestEnv,MONITOR:{
   idFromName:n=>n,
   get:id=>({fetch:async(url)=>{
@@ -244,4 +246,4 @@ const snapResponse=await object.fetch(
   new Request("https://internal/digest-snapshot?wallet="+walletA));
 assert(snapResponse.status===200&&(await snapResponse.json()).snapshot.openCount===1,
   "per-wallet DO read-only summary endpoint returns persisted snapshot");
-console.log("Passed: daily 09:00 three-wallet digest, claim reminder/cooldown, price risk/cooldown and end-to-end polling");
+console.log("Passed: daily 08:00 three-wallet digest, claim reminder/cooldown, price risk/cooldown and end-to-end polling");
