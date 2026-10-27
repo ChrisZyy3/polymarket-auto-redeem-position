@@ -193,7 +193,7 @@ endDate 只有日期时注明「仅提供日期」；缺失或占位符标注「
 
 ## Asset digest, redeem and market-risk alerts
 
-**Daily (Beijing ~09:00)**: existing 5-minute Cron triggers a single three-wallet summary during the 09:00 hour. Each wallet stores a fresh compact position snapshot after a successful poll; a separate coordinator Durable Object `_system_daily_digest_v1` accepts at most one report per Beijing calendar day. The message is persisted in the existing Outbox mechanism and retried if ServerChan is unavailable. No additional Cron schedules, database or API keys are needed.
+**Daily (Beijing ~08:00)**: existing 5-minute Cron triggers a single three-wallet summary during the 08:00 hour. Each wallet stores a fresh compact position snapshot after a successful poll; a separate coordinator Durable Object `_system_daily_digest_v1` accepts at most one report per Beijing calendar day. The message is persisted in the existing Outbox mechanism and retried if ServerChan is unavailable. No additional Cron schedules, database or API keys are needed.
 
 The daily report separates on-chain wallet pUSD (not order-adjusted available balance), live/unresolved market-value estimates and potential unredeemed payouts. Their sums do not double-count redeemable positions. Gross floating PnL is a mark-to-market estimate based on currentValue and initialValue/avgPrice; it is not a fee-inclusive or realized net profit. Missing RPC/valuation data yields `unavailable`, not an invented zero.
 
