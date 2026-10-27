@@ -1,4 +1,4 @@
-// Compact, fee-cautious, read-only wallet snapshot for the daily 09:00 Beijing digest.
+// Compact, fee-cautious, read-only wallet snapshot for the daily 08:00 Beijing digest.
 // Store aggregates and a small shortlist, not raw account histories.
 const valid = v => v !== undefined && v !== null && v !== "" && Number.isFinite(Number(v));
 const dollar = v => "$" + Number(v).toLocaleString("en-US",{
@@ -7,7 +7,7 @@ const dollar = v => "$" + Number(v).toLocaleString("en-US",{
 const label = s => String(s || "未知市场").replace(/[\r\n]+/g," ")
   .replace(/([\\_*[\]~<>])/g,"\\$1").slice(0,120);
 const dateKey = ms => new Date(ms + 8*3600*1000).toISOString().slice(0,10);
-export const DAILY_DIGEST_HOUR = 9; // Asia/Shanghai never observes DST.
+export const DAILY_DIGEST_HOUR = 8; // Asia/Shanghai never observes DST.
 export function digestDate(ms) { return dateKey(ms); }
 export function digestWindow(ms) {
   const shifted = new Date(ms + 8*3600*1000);
@@ -105,7 +105,7 @@ export function composeDailyDigest(day, wallets) {
   const gross=wallets.reduce((n,w)=>n+w.snapshot.openGrossPnl,0);
   const lines=[
     "### 📊 Polymarket · 三钱包资产日报",
-    "**日期：** "+day+"（北京时间 09:00 左右）",
+    "**日期：** "+day+"（北京时间 08:00 左右）",
     "",
     "#### 💰 资产概况",
     "- **链上 pUSD**："+(completeBalances?dollar(free):"部分钱包余额暂不可用"),
