@@ -486,16 +486,16 @@ export default function Home() {
               </div>
               {/* Mobile: consolidate performance under Entry → Current.
                   On desktop, keep the dedicated sortable P&L / Return column. */}
-              <div className="mt-1 flex items-center gap-1.5 whitespace-nowrap text-xs md:hidden">
-                <span className="font-sans font-medium text-slate-500">P&L</span>
+              <div className="mt-0.5 whitespace-nowrap text-xs md:hidden">
+                <span className="sr-only">{isEnglish ? "P&L" : "持有盈亏"}</span>
                 <span className={`font-bold ${cashPnlClass}`}>
                   {hasCashPnl
                     ? `${cashPnl >= 0 ? "+" : "-"}${formatMoneyCompact(Math.abs(cashPnl))}`
                     : "—"}
                 </span>
               </div>
-              <div className="mt-0.5 flex items-center gap-1.5 whitespace-nowrap text-xs md:hidden">
-                <span className="font-sans font-medium text-slate-500">{isEnglish ? "Return" : "收益率"}</span>
+              <div className="mt-0.5 whitespace-nowrap text-xs md:hidden">
+                <span className="sr-only">{isEnglish ? "Return" : "收益率"}</span>
                 <span className={`font-semibold ${holdingReturnClass}`}>
                   {hasHoldingReturn
                     ? `${holdingReturn >= 0 ? "+" : ""}${formatPercent(holdingReturn)}`
