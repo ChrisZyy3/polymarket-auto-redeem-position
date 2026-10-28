@@ -860,27 +860,27 @@ export default function Home() {
 
           {/* Search History Badges List / 历史检索地址胶囊徽章列表 */}
           {history.length > 0 && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 pt-1">
-              <span className="text-xs font-semibold text-slate-500">{isEnglish ? "Recent searches:" : "历史查询:"}</span>
+            <div className="mt-4 flex items-center gap-2 overflow-x-auto overscroll-x-contain pb-1 pt-1" aria-label={isEnglish ? "Recent wallet searches" : "最近查询的钱包"}>
+              <span className="shrink-0 text-xs font-medium text-slate-400">{isEnglish ? "Recent" : "最近"}</span>
               {history.map((addr) => (
                 <span
                   key={addr}
-                  className="group/badge inline-flex items-center gap-1 rounded-full border border-slate-800 bg-slate-950/50 pl-3 pr-1 text-xs text-slate-300 hover:border-slate-700 transition-all shadow-sm"
+                  className="group/badge inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-700/70 bg-slate-950/60 pl-3 pr-1 text-xs text-slate-300 transition-colors hover:border-cyan-500/40"
                 >
                   <button
                     type="button"
                     onClick={() => handleHistoryClick(addr)}
                     disabled={loading}
                     title={addr}
-                    className="py-1.5 font-mono hover:text-cyan-400 transition-colors text-[11px] disabled:opacity-50 cursor-pointer"
+                    className="cursor-pointer py-2 font-mono text-[11px] transition-colors hover:text-cyan-300 focus-visible:rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
                   >
                     {shortenAddress(addr)}
                   </button>
                   <button
                     type="button"
                     onClick={() => removeHistory(addr)}
-                    aria-label={isEnglish ? "Remove" : "移除"}
-                    className="rounded-full p-0.5 text-slate-500 hover:bg-slate-800 hover:text-rose-400 transition-colors cursor-pointer"
+                    aria-label={`${isEnglish ? "Remove wallet" : "移除钱包"} ${shortenAddress(addr)}`}
+                    className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-800 hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -893,26 +893,30 @@ export default function Home() {
         {/* Global Warnings Parameter Card / 报警参数面板卡片 */}
         <div className="relative rounded-2xl border border-slate-800 bg-slate-900/55 p-4 shadow-[0_10px_28px_rgba(0,0,0,0.12)] sm:p-5">
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-indigo-400/25 to-transparent"></div>
-          <h2 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-200">
-            <Percent className="h-4.5 w-4.5 text-purple-400" />
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100">
+            <Percent className="h-4 w-4 text-indigo-300" aria-hidden="true" />
             {isEnglish ? "Hold APR threshold" : "继续持有 APR 警报阈值"}
           </h2>
           <div className="flex flex-col gap-3">
-            <label htmlFor="hold-apr-threshold" className="text-xs text-slate-400 leading-relaxed">
+            <label htmlFor="hold-apr-threshold" className="text-xs leading-5 text-slate-400">
               {isEnglish
-                ? "Positions below this combined Hold APR are flagged in the dashboard (Cloudflare notifications use their own 10% threshold)."
-                : "综合持有 APR（Mark APR + 已核实 Holding Rewards APR）低于此设定阈值时，看板标红；Cloudflare 推送阈值独立设为 10%。"}
+                ? "Highlights positions below this combined APR. Cloudflare alerts use a separate 10% threshold."
+                : "综合持有 APR 低于此值时高亮；Cloudflare 推送阈值独立设为 10%。"}
             </label>
             <div className="relative mt-1">
               <input
                 id="hold-apr-threshold"
+                name="holdAprThreshold"
+                autoComplete="off"
+                inputMode="decimal"
+                min="0"
                 type="number"
                 step="0.5"
                 value={holdAprThreshold}
                 onChange={handleThresholdChange}
-                className="w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3.5 py-2.5 text-sm font-semibold text-slate-100 shadow-inner focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500/50"
+                className="h-11 w-full rounded-xl border border-slate-700 bg-slate-950/75 px-3.5 py-2.5 font-mono text-sm font-semibold text-slate-100 shadow-inner outline-none transition-[border-color,box-shadow] focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/25"
               />
-              <span className="absolute right-4 top-3 text-sm font-bold text-purple-400">%</span>
+              <span aria-hidden="true" className="pointer-events-none absolute right-4 top-3 text-sm font-bold text-indigo-300">%</span>
             </div>
           </div>
         </div>
@@ -923,7 +927,7 @@ export default function Home() {
         * 异常及失败信息捕获面板
         */}
       {error && (
-        <div className="mt-6 flex items-start gap-3 rounded-2xl border border-rose-500/20 bg-rose-500/5 p-4 text-sm text-rose-400 backdrop-blur-md shadow-lg shadow-rose-950/10">
+        <div role="alert" className="mt-5 flex items-start gap-3 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
           <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5 text-rose-500" />
           <div>
             <span className="font-bold">{isEnglish ? "Request failed:" : "查询异常:"}</span> {error}
@@ -936,7 +940,7 @@ export default function Home() {
         * 账户总体业绩卡片与统计分析结果：查询前保留完整页面骨架
         */}
       {/* Dashboard Summary Statistics Cards Grid / 指标概览区块 */}
-      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
             <SummaryCard
               label={isEnglish ? "Total portfolio value" : "资产总价值"}
               value={data ? `$${formatNumber(data.summary.totalBalance)}` : "—"}
@@ -967,7 +971,7 @@ export default function Home() {
             />
       </div>
 
-     <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+     <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <HistoryMetric
           label={isEnglish ? "Change since first record" : "记录以来变化 / 年化"}
           value={data ? formatHistoryChange(
@@ -1059,7 +1063,7 @@ export default function Home() {
                 const isExpanded = expandedPositionKey === positionKey;
                 return (
                   <Fragment key={row.id}>
-                    <tr className="group hover:bg-slate-900/30 transition-all duration-150">
+                    <tr className="group hover:bg-slate-900/30 transition-colors duration-150">
                       {row.getVisibleCells().map((cell) => (
                         <td key={cell.id} className={`px-2 py-4 align-middle whitespace-nowrap md:px-4 ${cell.column.id === "holdingPerformance" ? "hidden md:table-cell" : ""}`}>
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -1475,7 +1479,7 @@ function SummaryCard({
 
   return (
     <div
-      className={`group/card flex min-h-[104px] flex-col justify-between rounded-xl border bg-slate-900/50 p-4 shadow-md backdrop-blur-md transition-all duration-200 ${glowStyles[glowColor]}`}
+      className={`group/card flex min-h-[104px] flex-col justify-between rounded-xl border bg-slate-900/50 p-4 shadow-md backdrop-blur-md transition-colors duration-200 ${glowStyles[glowColor]}`}
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-[11px] font-semibold text-slate-400 transition-colors group-hover/card:text-slate-300">
