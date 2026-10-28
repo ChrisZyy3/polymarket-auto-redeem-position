@@ -459,13 +459,23 @@ export default function Home() {
         id: "pricePath",
         accessorFn: (row) => row.curPrice,
         header: isEnglish ? "Entry → current (%)" : "建仓价 → 当前价 (%)",
-        cell: ({ row }) => (
-          <span className="whitespace-nowrap font-mono">
-            <span className="font-medium text-slate-400">{formatPercent(row.original.avgPrice, 1)}</span>
-            <span className="mx-1 text-slate-600">→</span>
-            <span className="font-bold text-cyan-300">{formatPercent(row.original.curPrice, 1)}</span>
-          </span>
-        ),
+        cell: ({ row }) => {
+          const { avgPrice, curPrice } = row.original;
+          const currentPriceColor = Number.isFinite(avgPrice) && Number.isFinite(curPrice)
+            ? curPrice > avgPrice
+              ? "text-emerald-400"
+              : curPrice < avgPrice
+                ? "text-rose-400"
+                : "text-cyan-300"
+            : "text-cyan-300";
+          return (
+            <span className="whitespace-nowrap font-mono">
+              <span className="font-medium text-slate-400">{formatPercent(avgPrice, 1)}</span>
+              <span className="mx-1 text-slate-600">→</span>
+              <span className={`font-bold ${currentPriceColor}`}>{formatPercent(curPrice, 1)}</span>
+            </span>
+          );
+        },
       },
       {
         accessorKey: "currentValue",
@@ -556,8 +566,11 @@ export default function Home() {
         accessorFn: (position) => position.holdApr,
         header: isEnglish ? "Combined Hold APR" : "综合持有 APR",
         cell: ({ row }) => {
-          const { holdApr } = row.original;
+          const { holdApr, markApr, holdingRewardEligible, holdingRewardApr } = row.original;
           const isLow = holdApr !== null && holdApr * 100 <= holdAprThreshold;
+          // Only show a second APR line when Holding Rewards actually change the total.
+          const showBreakdown = typeof holdApr === "number" && typeof markApr === "number" &&
+            Math.abs(holdApr - markApr) > 1e-9;
           return (
             <span
               className={`flex min-w-24 items-center gap-1 font-mono font-bold ${
@@ -567,11 +580,14 @@ export default function Home() {
               {isLow && <AlertTriangle aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
               <span className="flex flex-col gap-0.5">
                 <span>{formatPercent(holdApr)}</span>
-                <span className="text-[10px] font-medium text-slate-400">
-                  {isEnglish ? "Mark" : "市场"} {formatPercent(row.original.markApr)}
-                  {row.original.holdingRewardEligible === true ? ` + Reward ${formatPercent(row.original.holdingRewardApr)}` : ""}
-                  {row.original.holdingRewardEligible === null ? (isEnglish ? " · Reward unverified" : " · 奖励待核实") : ""}
-                </span>
+                {showBreakdown && (
+                  <span className="text-[10px] font-medium text-slate-400">
+                    {isEnglish ? "Mark" : "市场"} {formatPercent(markApr)}
+                    {holdingRewardEligible === true && holdingRewardApr > 0
+                      ? ` + Reward ${formatPercent(holdingRewardApr)}`
+                      : ""}
+                  </span>
+                )}
               </span>
             </span>
           );
