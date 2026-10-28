@@ -754,34 +754,34 @@ export default function Home() {
       : (isEnglish ? "Enter a wallet address and click Analyze." : "请输入钱包地址并点击查询分析，查看仓位数据。");
 
   return (
-    <main className="relative z-10 mx-auto max-w-7xl px-4 py-6 md:py-7">
+    <main id="main-content" className="relative z-10 mx-auto w-full max-w-[1440px] px-4 pb-12 pt-6 sm:px-6 md:pt-8 xl:px-8">
       
       {/* 
         * Dashboard Header Brand & Description
         * 顶部系统主标题与装饰标徽
         */}
-      <div className="flex flex-col justify-between gap-4 border-b border-slate-800 pb-5 md:flex-row md:items-center">
+      <div className="flex flex-col justify-between gap-4 border-b border-slate-800/80 pb-6 md:flex-row md:items-center">
         <div>
-          <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.12)]">
+          <div className="mb-3 inline-flex items-center gap-2 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-cyan-300">
             <Zap className="h-3.5 w-3.5" />
             Polymarket Portfolio Analyzer
           </div>
-          <h1 className="bg-gradient-to-r from-slate-100 via-cyan-200 to-indigo-300 bg-clip-text text-2xl font-extrabold tracking-tight text-transparent md:text-3xl">
+          <h1 className="max-w-3xl text-balance bg-gradient-to-r from-slate-50 via-slate-100 to-cyan-200 bg-clip-text text-2xl font-bold leading-tight tracking-tight text-transparent md:text-[2rem]">
             {isEnglish ? "Portfolio & Returns Monitor" : "自动持仓监控与收益看板"}
           </h1>
-          <p className="mt-1 max-w-xl text-xs leading-relaxed text-slate-400">
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
             {isEnglish
               ? "Estimate annualized returns to settlement at current prices, and flag low-APR, losing, and redeemable positions."
               : "按当前价格计算到期年化，快速识别低 APR、亏损和可赎回仓位。"}
           </p>
         </div>
-        <div className="inline-flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900/50 p-1 self-start md:self-auto shadow-inner" aria-label={isEnglish ? "Language" : "语言"}>
+        <div className="inline-flex items-center gap-1 self-start rounded-xl border border-slate-700/70 bg-slate-900/70 p-1 md:self-auto" aria-label={isEnglish ? "Language" : "语言"}>
           <Languages className="ml-2 h-4 w-4 text-cyan-400" aria-hidden="true" />
           <button
             type="button"
             onClick={() => changeLanguage("zh")}
             aria-pressed={!isEnglish}
-            className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${!isEnglish ? "bg-cyan-500 text-slate-950" : "text-slate-400 hover:text-slate-100"}`}
+            className={`rounded-lg px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${!isEnglish ? "bg-cyan-400 text-slate-950" : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"}`}
           >
             中文
           </button>
@@ -789,7 +789,7 @@ export default function Home() {
             type="button"
             onClick={() => changeLanguage("en")}
             aria-pressed={isEnglish}
-            className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${isEnglish ? "bg-cyan-500 text-slate-950" : "text-slate-400 hover:text-slate-100"}`}
+            className={`rounded-lg px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${isEnglish ? "bg-cyan-400 text-slate-950" : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"}`}
           >
             EN
           </button>
@@ -800,28 +800,49 @@ export default function Home() {
         * Search Bar & Configurations Container
         * 地址检索框与年化告警阈值调节面板
         */}
-      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
         
         {/* Search Address Input Card / 钱包地址查询输入卡片 */}
-        <div className="group relative overflow-hidden rounded-xl border border-slate-800/80 bg-slate-900/40 p-4 shadow-lg backdrop-blur-xl lg:col-span-2">
-          <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent"></div>
-          <h2 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-200">
-            <Wallet className="h-4.5 w-4.5 text-cyan-400" />
-            {isEnglish ? "Wallet analysis" : "账户检索与分析"}
-          </h2>
-          <form onSubmit={handleSubmit} className="flex flex-wrap items-center gap-3">
-            <div className="relative flex-1">
+        <div className="relative rounded-2xl border border-slate-800 bg-slate-900/55 p-4 shadow-[0_10px_28px_rgba(0,0,0,0.12)] sm:p-5 lg:col-span-2">
+          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400/35 to-transparent"></div>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+              <Wallet className="h-4 w-4 text-cyan-400" aria-hidden="true" />
+              {isEnglish ? "Wallet analysis" : "账户检索与分析"}
+            </h2>
+            {(data || loading) && (
+              <span role="status" aria-live="polite" className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
+                {loading
+                  ? <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none text-cyan-400" aria-hidden="true" />
+                  : <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
+                {fetchedAtLabel}
+              </span>
+            )}
+          </div>
+          <form onSubmit={handleSubmit} className="flex flex-wrap items-center gap-2.5" aria-busy={loading}>
+            <div className="relative min-w-[200px] flex-[1_1_280px]">
+              <label htmlFor="wallet-address" className="sr-only">{isEnglish ? "EVM wallet address" : "EVM 钱包地址"}</label>
               <input
+                id="wallet-address"
+                name="address"
+                autoComplete="off"
+                spellCheck={false}
+                inputMode="text"
+                required
+                pattern="0x[a-fA-F0-9]{40}"
+                title={isEnglish ? "Enter a valid 42-character EVM wallet address." : "请输入以 0x 开头的 42 位 EVM 钱包地址。"}
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
-                placeholder={isEnglish ? "Ethereum wallet address (0x…)" : "请输入以太坊格式钱包地址 (0x...)"}
-                className="w-full rounded-lg border border-slate-700 bg-slate-950/70 py-2.5 pl-3.5 pr-10 text-sm text-slate-100 placeholder-slate-500 shadow-inner transition-all focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                placeholder={isEnglish ? "EVM wallet address, e.g. 0x1234…" : "输入 EVM 钱包地址，如 0x1234…"}
+                className="h-11 w-full rounded-xl border border-slate-700 bg-slate-950/75 py-2.5 pl-3.5 pr-11 font-mono text-sm text-slate-100 shadow-inner outline-none transition-[border-color,box-shadow] placeholder:font-sans placeholder:text-slate-500 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/25"
               />
               {address && (
                 <button
                   type="button"
                   onClick={() => setAddress("")}
-                  className="absolute right-3.5 top-3.5 text-slate-500 hover:text-slate-300 transition-colors"
+                  aria-label={isEnglish ? "Clear wallet address" : "清空钱包地址"}
+                  title={isEnglish ? "Clear wallet address" : "清空钱包地址"}
+                  className="absolute right-1.5 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -830,15 +851,11 @@ export default function Home() {
             <button
               type="submit"
               disabled={loading}
-              className="flex cursor-pointer items-center gap-2 rounded-lg bg-gradient-to-r from-cyan-500 to-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-cyan-950/50 transition-all hover:from-cyan-400 hover:to-indigo-500 focus:outline-none disabled:opacity-50 active:scale-98"
+              className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-cyan-400 px-5 text-sm font-semibold text-slate-950 shadow-sm transition-[background-color,box-shadow] hover:bg-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 disabled:cursor-wait disabled:opacity-50"
             >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+              {loading ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Search aria-hidden="true" className="h-4 w-4" />}
               {isEnglish ? "Analyze" : "查询分析"}
             </button>
-            <div className="hidden shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-slate-500">
-              <Database className="h-3.5 w-3.5" />
-              {fetchedAtLabel}
-            </div>
           </form>
 
           {/* Search History Badges List / 历史检索地址胶囊徽章列表 */}
@@ -874,8 +891,8 @@ export default function Home() {
         </div>
 
         {/* Global Warnings Parameter Card / 报警参数面板卡片 */}
-        <div className="group relative overflow-hidden rounded-xl border border-slate-800/80 bg-slate-900/40 p-4 shadow-lg backdrop-blur-xl">
-          <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-purple-500/30 to-transparent"></div>
+        <div className="relative rounded-2xl border border-slate-800 bg-slate-900/55 p-4 shadow-[0_10px_28px_rgba(0,0,0,0.12)] sm:p-5">
+          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-indigo-400/25 to-transparent"></div>
           <h2 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-200">
             <Percent className="h-4.5 w-4.5 text-purple-400" />
             {isEnglish ? "Hold APR threshold" : "继续持有 APR 警报阈值"}
