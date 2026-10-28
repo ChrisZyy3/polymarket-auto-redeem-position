@@ -1,48 +1,53 @@
 @import "tailwindcss";
 
-/*
- * Custom styles for Polymarket Dashboard
- * 包含发光动画、毛玻璃（Glassmorphism）增强和深色滚动条样式
- */
+/* Calm, high-contrast foundation for the portfolio terminal. */
+:root {
+  color-scheme: dark;
+}
 
-/*
- * Custom Scrollbar for Dark Theme
- * 适用于深色主题的定制滚动条，确保整体视觉的高级感与一致性
- */
+body {
+  background-image:
+    radial-gradient(ellipse 70% 30rem at 50% -12rem, rgb(6 182 212 / 0.075), transparent),
+    radial-gradient(ellipse 35% 24rem at 90% 10rem, rgb(79 70 229 / 0.045), transparent);
+}
+
+::selection {
+  background: rgb(34 211 238 / 0.28);
+  color: #f8fafc;
+}
+
+button,
+a,
+summary {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgb(34 211 238 / 0.12);
+}
+
 ::-webkit-scrollbar {
-  width: 8px; /* Width of the vertical scrollbar / 垂直滚动条宽度 */
-  height: 8px; /* Height of the horizontal scrollbar / 水平滚动条高度 */
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6); /* Slate-900 with opacity / 半透明深色背景轨道 */
+  background: rgb(15 23 42 / 0.6);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.3); /* Slate-400 with opacity / 半透明滑块 */
-  border-radius: 9999px; /* Fully rounded corners / 圆角滑块 */
+  background: rgb(148 163 184 / 0.3);
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.5); /* Brighter on hover / 悬停时滑块变亮 */
+  background: rgb(148 163 184 / 0.5);
 }
 
-/*
- * Glowing border border effects for custom cards
- * 定制卡片的霓虹渐变发光边框效果
- */
-.neon-border-glow-purple {
-  box-shadow: 0 0 15px rgba(168, 85, 247, 0.15); /* Soft purple glow / 紫色软阴影发光 */
-}
-
-.neon-border-glow-cyan {
-  box-shadow: 0 0 15px rgba(6, 182, 212, 0.15); /* Soft cyan glow / 青色软阴影发光 */
-}
-
-.neon-border-glow-green {
-  box-shadow: 0 0 15px rgba(34, 197, 94, 0.15); /* Soft green glow / 绿色软阴影发光 */
-}
-
-.neon-border-glow-red {
-  box-shadow: 0 0 15px rgba(239, 68, 68, 0.15); /* Soft red glow / 红色软阴影发光 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
