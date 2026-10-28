@@ -294,6 +294,10 @@ export default function Home() {
   // Memoize positions from state payload
   // 缓存提取并解析的仓位数组
   const positions = useMemo(() => data?.positions ?? [], [data]);
+  const lowAprCount = useMemo(() => positions.filter(position =>
+    position.holdApr !== null && Number.isFinite(position.holdApr) &&
+    position.holdApr * 100 <= holdAprThreshold
+  ).length, [positions, holdAprThreshold]);
   const totalAssetValue = data?.summary.totalBalance ?? 0;
   const marketValues = useMemo(() => {
     const values = new Map<string, number>();
@@ -609,7 +613,7 @@ export default function Home() {
           return (
             <span
               className={`flex min-w-24 items-center gap-1 font-mono font-bold ${
-                isLow ? "text-rose-400 animate-pulse" : "text-emerald-400"
+                isLow ? "text-rose-300" : "text-emerald-400"
               }`}
             >
               {isLow && <AlertTriangle aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
@@ -754,34 +758,34 @@ export default function Home() {
       : (isEnglish ? "Enter a wallet address and click Analyze." : "请输入钱包地址并点击查询分析，查看仓位数据。");
 
   return (
-    <main className="relative z-10 mx-auto max-w-7xl px-4 py-6 md:py-7">
+    <main id="main-content" className="relative z-10 mx-auto w-full max-w-[1440px] px-4 pb-12 pt-6 sm:px-6 md:pt-8 xl:px-8">
       
       {/* 
         * Dashboard Header Brand & Description
         * 顶部系统主标题与装饰标徽
         */}
-      <div className="flex flex-col justify-between gap-4 border-b border-slate-800 pb-5 md:flex-row md:items-center">
+      <div className="flex flex-col justify-between gap-4 border-b border-slate-800/80 pb-6 md:flex-row md:items-center">
         <div>
-          <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.12)]">
+          <div className="mb-3 inline-flex items-center gap-2 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-cyan-300">
             <Zap className="h-3.5 w-3.5" />
             Polymarket Portfolio Analyzer
           </div>
-          <h1 className="bg-gradient-to-r from-slate-100 via-cyan-200 to-indigo-300 bg-clip-text text-2xl font-extrabold tracking-tight text-transparent md:text-3xl">
+          <h1 className="max-w-3xl text-balance bg-gradient-to-r from-slate-50 via-slate-100 to-cyan-200 bg-clip-text text-2xl font-bold leading-tight tracking-tight text-transparent md:text-[2rem]">
             {isEnglish ? "Portfolio & Returns Monitor" : "自动持仓监控与收益看板"}
           </h1>
-          <p className="mt-1 max-w-xl text-xs leading-relaxed text-slate-400">
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
             {isEnglish
               ? "Estimate annualized returns to settlement at current prices, and flag low-APR, losing, and redeemable positions."
               : "按当前价格计算到期年化，快速识别低 APR、亏损和可赎回仓位。"}
           </p>
         </div>
-        <div className="inline-flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900/50 p-1 self-start md:self-auto shadow-inner" aria-label={isEnglish ? "Language" : "语言"}>
+        <div className="inline-flex items-center gap-1 self-start rounded-xl border border-slate-700/70 bg-slate-900/70 p-1 md:self-auto" aria-label={isEnglish ? "Language" : "语言"}>
           <Languages className="ml-2 h-4 w-4 text-cyan-400" aria-hidden="true" />
           <button
             type="button"
             onClick={() => changeLanguage("zh")}
             aria-pressed={!isEnglish}
-            className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${!isEnglish ? "bg-cyan-500 text-slate-950" : "text-slate-400 hover:text-slate-100"}`}
+            className={`rounded-lg px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${!isEnglish ? "bg-cyan-400 text-slate-950" : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"}`}
           >
             中文
           </button>
@@ -789,7 +793,7 @@ export default function Home() {
             type="button"
             onClick={() => changeLanguage("en")}
             aria-pressed={isEnglish}
-            className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${isEnglish ? "bg-cyan-500 text-slate-950" : "text-slate-400 hover:text-slate-100"}`}
+            className={`rounded-lg px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${isEnglish ? "bg-cyan-400 text-slate-950" : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"}`}
           >
             EN
           </button>
@@ -800,28 +804,49 @@ export default function Home() {
         * Search Bar & Configurations Container
         * 地址检索框与年化告警阈值调节面板
         */}
-      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
         
         {/* Search Address Input Card / 钱包地址查询输入卡片 */}
-        <div className="group relative overflow-hidden rounded-xl border border-slate-800/80 bg-slate-900/40 p-4 shadow-lg backdrop-blur-xl lg:col-span-2">
-          <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent"></div>
-          <h2 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-200">
-            <Wallet className="h-4.5 w-4.5 text-cyan-400" />
-            {isEnglish ? "Wallet analysis" : "账户检索与分析"}
-          </h2>
-          <form onSubmit={handleSubmit} className="flex flex-wrap items-center gap-3">
-            <div className="relative flex-1">
+        <div className="relative rounded-2xl border border-slate-800 bg-slate-900/55 p-4 shadow-[0_10px_28px_rgba(0,0,0,0.12)] sm:p-5 lg:col-span-2">
+          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400/35 to-transparent"></div>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+              <Wallet className="h-4 w-4 text-cyan-400" aria-hidden="true" />
+              {isEnglish ? "Wallet analysis" : "账户检索与分析"}
+            </h2>
+            {(data || loading) && (
+              <span role="status" aria-live="polite" className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
+                {loading
+                  ? <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none text-cyan-400" aria-hidden="true" />
+                  : <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
+                {fetchedAtLabel}
+              </span>
+            )}
+          </div>
+          <form onSubmit={handleSubmit} className="flex flex-wrap items-center gap-2.5" aria-busy={loading}>
+            <div className="relative min-w-[200px] flex-[1_1_280px]">
+              <label htmlFor="wallet-address" className="sr-only">{isEnglish ? "EVM wallet address" : "EVM 钱包地址"}</label>
               <input
+                id="wallet-address"
+                name="address"
+                autoComplete="off"
+                spellCheck={false}
+                inputMode="text"
+                required
+                pattern="0x[a-fA-F0-9]{40}"
+                title={isEnglish ? "Enter a valid 42-character EVM wallet address." : "请输入以 0x 开头的 42 位 EVM 钱包地址。"}
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
-                placeholder={isEnglish ? "Ethereum wallet address (0x…)" : "请输入以太坊格式钱包地址 (0x...)"}
-                className="w-full rounded-lg border border-slate-700 bg-slate-950/70 py-2.5 pl-3.5 pr-10 text-sm text-slate-100 placeholder-slate-500 shadow-inner transition-all focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                placeholder={isEnglish ? "EVM wallet address, e.g. 0x1234…" : "输入 EVM 钱包地址，如 0x1234…"}
+                className="h-11 w-full rounded-xl border border-slate-700 bg-slate-950/75 py-2.5 pl-3.5 pr-11 font-mono text-sm text-slate-100 shadow-inner outline-none transition-[border-color,box-shadow] placeholder:font-sans placeholder:text-slate-500 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/25"
               />
               {address && (
                 <button
                   type="button"
                   onClick={() => setAddress("")}
-                  className="absolute right-3.5 top-3.5 text-slate-500 hover:text-slate-300 transition-colors"
+                  aria-label={isEnglish ? "Clear wallet address" : "清空钱包地址"}
+                  title={isEnglish ? "Clear wallet address" : "清空钱包地址"}
+                  className="absolute right-1.5 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -830,40 +855,36 @@ export default function Home() {
             <button
               type="submit"
               disabled={loading}
-              className="flex cursor-pointer items-center gap-2 rounded-lg bg-gradient-to-r from-cyan-500 to-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-cyan-950/50 transition-all hover:from-cyan-400 hover:to-indigo-500 focus:outline-none disabled:opacity-50 active:scale-98"
+              className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-cyan-400 px-5 text-sm font-semibold text-slate-950 shadow-sm transition-[background-color,box-shadow] hover:bg-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 disabled:cursor-wait disabled:opacity-50"
             >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+              {loading ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Search aria-hidden="true" className="h-4 w-4" />}
               {isEnglish ? "Analyze" : "查询分析"}
             </button>
-            <div className="hidden shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-slate-500">
-              <Database className="h-3.5 w-3.5" />
-              {fetchedAtLabel}
-            </div>
           </form>
 
           {/* Search History Badges List / 历史检索地址胶囊徽章列表 */}
           {history.length > 0 && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 pt-1">
-              <span className="text-xs font-semibold text-slate-500">{isEnglish ? "Recent searches:" : "历史查询:"}</span>
+            <div className="mt-4 flex items-center gap-2 overflow-x-auto overscroll-x-contain pb-1 pt-1" aria-label={isEnglish ? "Recent wallet searches" : "最近查询的钱包"}>
+              <span className="shrink-0 text-xs font-medium text-slate-400">{isEnglish ? "Recent" : "最近"}</span>
               {history.map((addr) => (
                 <span
                   key={addr}
-                  className="group/badge inline-flex items-center gap-1 rounded-full border border-slate-800 bg-slate-950/50 pl-3 pr-1 text-xs text-slate-300 hover:border-slate-700 transition-all shadow-sm"
+                  className="group/badge inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-700/70 bg-slate-950/60 pl-3 pr-1 text-xs text-slate-300 transition-colors hover:border-cyan-500/40"
                 >
                   <button
                     type="button"
                     onClick={() => handleHistoryClick(addr)}
                     disabled={loading}
                     title={addr}
-                    className="py-1.5 font-mono hover:text-cyan-400 transition-colors text-[11px] disabled:opacity-50 cursor-pointer"
+                    className="cursor-pointer py-2 font-mono text-[11px] transition-colors hover:text-cyan-300 focus-visible:rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
                   >
                     {shortenAddress(addr)}
                   </button>
                   <button
                     type="button"
                     onClick={() => removeHistory(addr)}
-                    aria-label={isEnglish ? "Remove" : "移除"}
-                    className="rounded-full p-0.5 text-slate-500 hover:bg-slate-800 hover:text-rose-400 transition-colors cursor-pointer"
+                    aria-label={`${isEnglish ? "Remove wallet" : "移除钱包"} ${shortenAddress(addr)}`}
+                    className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-800 hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -874,28 +895,32 @@ export default function Home() {
         </div>
 
         {/* Global Warnings Parameter Card / 报警参数面板卡片 */}
-        <div className="group relative overflow-hidden rounded-xl border border-slate-800/80 bg-slate-900/40 p-4 shadow-lg backdrop-blur-xl">
-          <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-purple-500/30 to-transparent"></div>
-          <h2 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-200">
-            <Percent className="h-4.5 w-4.5 text-purple-400" />
+        <div className="relative rounded-2xl border border-slate-800 bg-slate-900/55 p-4 shadow-[0_10px_28px_rgba(0,0,0,0.12)] sm:p-5">
+          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-indigo-400/25 to-transparent"></div>
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100">
+            <Percent className="h-4 w-4 text-indigo-300" aria-hidden="true" />
             {isEnglish ? "Hold APR threshold" : "继续持有 APR 警报阈值"}
           </h2>
           <div className="flex flex-col gap-3">
-            <label htmlFor="hold-apr-threshold" className="text-xs text-slate-400 leading-relaxed">
+            <label htmlFor="hold-apr-threshold" className="text-xs leading-5 text-slate-400">
               {isEnglish
-                ? "Positions below this combined Hold APR are flagged in the dashboard (Cloudflare notifications use their own 10% threshold)."
-                : "综合持有 APR（Mark APR + 已核实 Holding Rewards APR）低于此设定阈值时，看板标红；Cloudflare 推送阈值独立设为 10%。"}
+                ? "Highlights positions below this combined APR. Cloudflare alerts use a separate 10% threshold."
+                : "综合持有 APR 低于此值时高亮；Cloudflare 推送阈值独立设为 10%。"}
             </label>
             <div className="relative mt-1">
               <input
                 id="hold-apr-threshold"
+                name="holdAprThreshold"
+                autoComplete="off"
+                inputMode="decimal"
+                min="0"
                 type="number"
                 step="0.5"
                 value={holdAprThreshold}
                 onChange={handleThresholdChange}
-                className="w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3.5 py-2.5 text-sm font-semibold text-slate-100 shadow-inner focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500/50"
+                className="h-11 w-full rounded-xl border border-slate-700 bg-slate-950/75 px-3.5 py-2.5 font-mono text-sm font-semibold text-slate-100 shadow-inner outline-none transition-[border-color,box-shadow] focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/25"
               />
-              <span className="absolute right-4 top-3 text-sm font-bold text-purple-400">%</span>
+              <span aria-hidden="true" className="pointer-events-none absolute right-4 top-3 text-sm font-bold text-indigo-300">%</span>
             </div>
           </div>
         </div>
@@ -906,7 +931,7 @@ export default function Home() {
         * 异常及失败信息捕获面板
         */}
       {error && (
-        <div className="mt-6 flex items-start gap-3 rounded-2xl border border-rose-500/20 bg-rose-500/5 p-4 text-sm text-rose-400 backdrop-blur-md shadow-lg shadow-rose-950/10">
+        <div role="alert" className="mt-5 flex items-start gap-3 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
           <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5 text-rose-500" />
           <div>
             <span className="font-bold">{isEnglish ? "Request failed:" : "查询异常:"}</span> {error}
@@ -919,7 +944,7 @@ export default function Home() {
         * 账户总体业绩卡片与统计分析结果：查询前保留完整页面骨架
         */}
       {/* Dashboard Summary Statistics Cards Grid / 指标概览区块 */}
-      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
             <SummaryCard
               label={isEnglish ? "Total portfolio value" : "资产总价值"}
               value={data ? `$${formatNumber(data.summary.totalBalance)}` : "—"}
@@ -945,12 +970,12 @@ export default function Home() {
               label={isEnglish ? "Weighted combined hold APR" : "加权综合持有 APR"}
               value={data ? formatPercent(data.summary.avgHoldApr) : "—"}
               icon={<TrendingUp className="h-4 w-4 text-fuchsia-400" />}
-              glowColor="red"
+              glowColor="purple"
               tooltip={isEnglish ? "Mark APR plus verified eligible holding rewards, weighted by position value" : "按当前市值加权的综合 APR = 市场 Mark APR + 已核实 Holding Rewards APR；未确认资格的奖励不计入"}
             />
       </div>
 
-     <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+     <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <HistoryMetric
           label={isEnglish ? "Change since first record" : "记录以来变化 / 年化"}
           value={data ? formatHistoryChange(
@@ -986,50 +1011,70 @@ export default function Home() {
       <PortfolioHistoryChart snapshots={portfolioHistory?.snapshots ?? []} language={language} />
 
       {/* Positions detailed tables container / 仓位细分数据列表 */}
-      <div className="mt-8 backdrop-blur-xl bg-slate-900/30 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl relative">
-        <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent"></div>
+      <div className="relative mt-8 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/45 shadow-[0_14px_36px_rgba(0,0,0,0.14)]">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent"></div>
 
-        <div className="px-6 py-5 border-b border-slate-800 bg-slate-900/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2">
-              <Activity className="h-5 w-5 text-cyan-400" />
-              {isEnglish ? "Position yield and market APR" : "持仓收益与盘口 APR"}
-            </h3>
-            <p className="text-xs text-slate-400 mt-1">
+        <div className="flex flex-col gap-3 border-b border-slate-800 bg-slate-900/65 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-5">
+          <div className="min-w-0">
+            <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-100">
+              <Activity className="h-5 w-5 text-cyan-400" aria-hidden="true" />
+              {isEnglish ? "Positions & Yield" : "持仓收益与市场报价"}
+            </h2>
+            <p className="mt-1 text-xs leading-5 text-slate-400">
               {isEnglish
-                ? "Expand a market to compare the live best-bid and best-ask conditional APR."
-                : "展开市场即可比较实时买一、卖一价格对应的条件 APR。"}
+                ? "Sort by yield or position value. Expand a market for live bid/ask APR."
+                : "可按收益或市值排序，展开市场查看实时买卖盘口 APR。"}
+            </p>
+            <p className="mt-1.5 text-[11px] text-slate-500 md:hidden">
+              {isEnglish ? "Swipe horizontally to view more columns" : "左右滑动查看完整仓位数据"}
             </p>
           </div>
-          <div className="flex items-center gap-1.5 self-start sm:self-auto text-xs text-slate-500 font-semibold bg-slate-950/60 border border-slate-800 px-3 py-1.5 rounded-lg shadow-inner">
-            <Info className="h-3.5 w-3.5 text-slate-400" />
-            {isEnglish
-              ? `Positions worth less than $${DUST_POSITION_VALUE_USD} are excluded`
-              : `自动忽略市值低于 ${DUST_POSITION_VALUE_USD} 美元的尘埃仓位`}
+          <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs">
+            <span className="rounded-lg border border-slate-700/70 bg-slate-950/60 px-3 py-1.5 font-medium text-slate-300">
+              {isEnglish ? `${positions.length} positions` : `${positions.length} 个仓位`}
+            </span>
+            {lowAprCount > 0 && (
+              <span className="rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-1.5 font-medium text-rose-300">
+                {isEnglish ? `${lowAprCount} below APR threshold` : `${lowAprCount} 个低 APR`}
+              </span>
+            )}
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-sm">
+        <div
+          role="region"
+          tabIndex={0}
+          aria-label={isEnglish ? "Scrollable positions table" : "可横向滚动的仓位明细表"}
+          className="overflow-x-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/70"
+        >
+          <table className="w-full border-collapse text-left text-sm tabular-nums">
             <thead>
               {table.getHeaderGroups().map((headerGroup) => (
-                <tr key={headerGroup.id} className="bg-slate-950/60 border-b border-slate-800 text-slate-400">
+                <tr key={headerGroup.id} className="border-b border-slate-800 bg-slate-950/75 text-xs text-slate-300">
                   {headerGroup.headers.map((header) => {
                     const sortDirection = header.column.getIsSorted();
                     return (
                       <th
                         key={header.id}
-                        onClick={header.column.getToggleSortingHandler()}
-                        className={`group/th cursor-pointer select-none whitespace-nowrap px-2 py-4 font-semibold transition-colors hover:text-slate-200 md:px-4 ${header.column.id === "holdingPerformance" ? "hidden md:table-cell" : ""}`}
+                        scope="col"
+                        aria-sort={sortDirection === "asc" ? "ascending" : sortDirection === "desc" ? "descending" : "none"}
+                        className={`whitespace-nowrap px-2 py-2.5 font-semibold md:px-4 ${header.column.id === "holdingPerformance" ? "hidden md:table-cell" : ""}`}
                       >
-                        <span className="flex items-center gap-1.5">
-                          {flexRender(header.column.columnDef.header, header.getContext())}
-                          {sortDirection === "asc" && <ArrowUp className="h-3.5 w-3.5 text-cyan-400" />}
-                          {sortDirection === "desc" && <ArrowDown className="h-3.5 w-3.5 text-cyan-400" />}
-                          {!sortDirection && (
-                            <ArrowUpDown className="h-3.5 w-3.5 text-slate-600 group-hover/th:text-slate-400 transition-colors" />
-                          )}
-                        </span>
+                        {header.column.getCanSort() ? (
+                          <button
+                            type="button"
+                            onClick={header.column.getToggleSortingHandler()}
+                            title={isEnglish ? "Sort by this column" : "按此列排序"}
+                            className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-1 text-left transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                          >
+                            {flexRender(header.column.columnDef.header, header.getContext())}
+                            {sortDirection === "asc" && <ArrowUp aria-hidden="true" className="h-3.5 w-3.5 text-cyan-400" />}
+                            {sortDirection === "desc" && <ArrowDown aria-hidden="true" className="h-3.5 w-3.5 text-cyan-400" />}
+                            {!sortDirection && <ArrowUpDown aria-hidden="true" className="h-3.5 w-3.5 text-slate-500" />}
+                          </button>
+                        ) : (
+                          <span>{flexRender(header.column.columnDef.header, header.getContext())}</span>
+                        )}
                       </th>
                     );
                   })}
@@ -1042,7 +1087,7 @@ export default function Home() {
                 const isExpanded = expandedPositionKey === positionKey;
                 return (
                   <Fragment key={row.id}>
-                    <tr className="group hover:bg-slate-900/30 transition-all duration-150">
+                    <tr className="group transition-colors duration-150 hover:bg-slate-800/30 focus-within:bg-slate-800/25">
                       {row.getVisibleCells().map((cell) => (
                         <td key={cell.id} className={`px-2 py-4 align-middle whitespace-nowrap md:px-4 ${cell.column.id === "holdingPerformance" ? "hidden md:table-cell" : ""}`}>
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -1070,7 +1115,7 @@ export default function Home() {
                 <tr>
                   <td
                     colSpan={columns.length}
-                    className="px-4 py-16 text-center text-slate-500 font-semibold"
+                    className="px-4 py-16 text-center text-sm font-medium text-slate-400"
                   >
                     {emptyPositionsMessage}
                   </td>
@@ -1411,13 +1456,13 @@ function HistoryMetric({
     mainValue === "等待查询" ||
     mainValue === "No data yet";
   return (
-    <div className="min-h-20 rounded-lg border border-slate-800 bg-slate-900/40 p-3.5">
-      <div className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-500">
+    <div className="min-h-24 rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3.5">
+      <div className="flex items-center justify-between gap-2 text-xs font-medium text-slate-400">
         {label}
         {icon}
       </div>
       <div
-        className={`mt-3 font-mono text-lg font-bold ${
+        className={`mt-3 font-mono text-lg font-semibold tabular-nums ${
           isPending ? "text-slate-500" : isNegative ? "text-rose-400" : "text-emerald-400"
         }`}
       >
@@ -1447,36 +1492,37 @@ function SummaryCard({
   glowColor: "cyan" | "green" | "purple" | "red";
   tooltip?: string;
 }) {
-  // Glow border shadows configuration
-  // 外边框霓虹发光阴影样式选项字典
-  const glowStyles = {
-    cyan: "neon-border-glow-cyan focus-within:ring-cyan-500 border-slate-800 hover:border-cyan-500/50",
-    green: "neon-border-glow-green focus-within:ring-emerald-500 border-slate-800 hover:border-emerald-500/50",
-    purple: "neon-border-glow-purple focus-within:ring-indigo-500 border-slate-800 hover:border-indigo-500/50",
-    red: "neon-border-glow-red focus-within:ring-rose-500 border-slate-800 hover:border-rose-500/50",
+  const accents = {
+    cyan: "hover:border-cyan-500/35",
+    green: "hover:border-emerald-500/35",
+    purple: "hover:border-indigo-500/35",
+    red: "hover:border-fuchsia-500/35",
   };
 
   return (
     <div
-      className={`group/card flex min-h-[104px] flex-col justify-between rounded-xl border bg-slate-900/50 p-4 shadow-md backdrop-blur-md transition-all duration-200 ${glowStyles[glowColor]}`}
+      className={`group/card flex min-h-[116px] min-w-0 flex-col justify-between rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-[0_8px_24px_rgba(0,0,0,0.1)] transition-[background-color,border-color] hover:bg-slate-900/80 sm:p-5 ${accents[glowColor]}`}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold text-slate-400 transition-colors group-hover/card:text-slate-300">
-          {label}
-        </span>
-        {icon && <div className="rounded-md border border-slate-800 bg-slate-950/80 p-1 shadow-inner">{icon}</div>}
+        <span className="min-w-0 text-xs font-medium leading-5 text-slate-400">{label}</span>
+        {icon && <div className="shrink-0 rounded-lg border border-slate-800 bg-slate-950/70 p-1.5">{icon}</div>}
       </div>
-      <div className="mt-2 flex items-baseline justify-between gap-1">
+      <div className="mt-3 flex min-w-0 items-end">
         <AutoFitValue value={value} />
-        {tooltip && (
-          <div className="group/tip relative inline-flex self-end mb-1 cursor-pointer">
-            <Info className="h-3.5 w-3.5 text-slate-600 hover:text-slate-400 transition-colors" />
-            <div className="pointer-events-none absolute bottom-full right-0 z-30 mb-2 w-56 rounded-xl border border-slate-800 bg-slate-950 p-2.5 text-[10px] text-slate-400 leading-normal opacity-0 shadow-2xl transition-opacity group-hover/tip:opacity-100">
-              {tooltip}
-            </div>
-          </div>
-        )}
       </div>
+      {tooltip && (
+        <details className="group/tip mt-1 text-right">
+          <summary
+            aria-label={`More about ${label}`}
+            className="ml-auto inline-flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 [&::-webkit-details-marker]:hidden"
+          >
+            <Info aria-hidden="true" className="h-4 w-4" />
+          </summary>
+          <p className="mt-1 rounded-lg border border-slate-700 bg-slate-950/70 p-2.5 text-left text-xs leading-5 text-slate-300">
+            {tooltip}
+          </p>
+        </details>
+      )}
     </div>
   );
 }
@@ -1513,7 +1559,7 @@ function AutoFitValue({ value }: { value: string | number }) {
       <span
         ref={valueRef}
         style={{ fontSize }}
-        className="block w-max max-w-full whitespace-nowrap font-mono font-black leading-tight text-slate-100 tracking-tight transition-colors group-hover/card:text-white"
+        className="block w-max max-w-full whitespace-nowrap font-mono font-bold leading-tight tracking-tight tabular-nums text-slate-50"
       >
         {value}
       </span>
