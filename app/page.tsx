@@ -411,41 +411,58 @@ export default function Home() {
           const quoteExpanded = expandedPositionKey === quoteKey;
           const marketContent = (
             <>
-              <div className="flex items-center gap-1 font-semibold text-slate-200 group-hover:text-cyan-400 transition-colors">
-                <span className="truncate">{row.original.title}</span>
+              <div className="flex min-w-0 items-center gap-1 font-semibold text-slate-200 group-hover:text-cyan-400 transition-colors">
+                <span className="min-w-0 truncate">{row.original.title}</span>
                 {marketUrl && <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
               </div>
-              <div className="flex items-center gap-1.5 mt-1">
-                <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+              <div className="mt-1 flex items-center gap-1.5">
+                <span className="hidden md:inline-flex text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
                   {isEnglish ? "Outcome" : "持有方向"}
                 </span>
-                <span className="text-xs font-semibold text-cyan-400 truncate">{row.original.outcome}</span>
+                <span className="truncate text-xs font-semibold text-cyan-400">{row.original.outcome}</span>
               </div>
             </>
           );
+          const quoteToggleLabel = quoteExpanded
+            ? (isEnglish ? "Hide live bid and ask APR" : "收起实时盘口 APR")
+            : (isEnglish ? "Show live bid and ask APR" : "展开实时盘口 APR");
           return (
             <div className="max-w-[280px]">
-              {marketUrl ? (
-                <a
-                  href={marketUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={fullMarketName}
-                  aria-label={`${isEnglish ? "Open market on Polymarket" : "打开 Polymarket 市场"}: ${fullMarketName}`}
-                  className="block rounded-sm outline-none hover:text-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
-                >
-                  {marketContent}
-                </a>
-              ) : (
-                <div title={fullMarketName}>{marketContent}</div>
-              )}
+              <div className="flex items-end gap-2 md:block">
+                {marketUrl ? (
+                  <a
+                    href={marketUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={fullMarketName}
+                    aria-label={`${isEnglish ? "Open market on Polymarket" : "打开 Polymarket 市场"}: ${fullMarketName}`}
+                    className="block min-w-0 flex-1 rounded-sm outline-none hover:text-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
+                  >
+                    {marketContent}
+                  </a>
+                ) : (
+                  <div className="min-w-0 flex-1" title={fullMarketName}>{marketContent}</div>
+                )}
+                {row.original.status !== "redeemable" ? (
+                  <button
+                    type="button"
+                    onClick={() => handleQuoteToggle(row.original)}
+                    aria-expanded={quoteExpanded}
+                    aria-label={quoteToggleLabel}
+                    title={isEnglish ? "Market APR" : "查看盘口 APR"}
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-cyan-500/20 bg-cyan-500/5 text-cyan-400 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/10 focus:outline-none focus:ring-1 focus:ring-cyan-400 md:hidden"
+                  >
+                    {quoteExpanded ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
+                  </button>
+                ) : null}
+              </div>
               {row.original.status !== "redeemable" ? (
                 <button
                   type="button"
                   onClick={() => handleQuoteToggle(row.original)}
                   aria-expanded={quoteExpanded}
-                  aria-label={isEnglish ? "Show live bid and ask APR" : "展开实时买一和卖一 APR"}
-                  className="mt-2 inline-flex items-center gap-1 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2 py-1 text-[10px] font-semibold text-cyan-400 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/10 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                  aria-label={quoteToggleLabel}
+                  className="mt-2 hidden items-center gap-1 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2 py-1 text-[10px] font-semibold text-cyan-400 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/10 focus:outline-none focus:ring-1 focus:ring-cyan-400 md:inline-flex"
                 >
                   {quoteExpanded ? <ChevronUp className="h-3 w-3" aria-hidden="true" /> : <ChevronDown className="h-3 w-3" aria-hidden="true" />}
                   {isEnglish ? "Market APR" : "查看盘口 APR"}
@@ -486,7 +503,7 @@ export default function Home() {
               </div>
               {/* Mobile: consolidate performance under Entry → Current.
                   On desktop, keep the dedicated sortable P&L / Return column. */}
-              <div className="mt-0.5 whitespace-nowrap text-xs md:hidden">
+              <div className="mt-1 whitespace-nowrap text-xs md:hidden">
                 <span className="sr-only">{isEnglish ? "P&L" : "持有盈亏"}</span>
                 <span className={`font-bold ${cashPnlClass}`}>
                   {hasCashPnl
@@ -494,7 +511,7 @@ export default function Home() {
                     : "—"}
                 </span>
               </div>
-              <div className="mt-0.5 whitespace-nowrap text-xs md:hidden">
+              <div className="mt-1 whitespace-nowrap text-xs md:hidden">
                 <span className="sr-only">{isEnglish ? "Return" : "收益率"}</span>
                 <span className={`font-semibold ${holdingReturnClass}`}>
                   {hasHoldingReturn
@@ -1003,7 +1020,7 @@ export default function Home() {
                       <th
                         key={header.id}
                         onClick={header.column.getToggleSortingHandler()}
-                        className={`group/th cursor-pointer select-none whitespace-nowrap px-4 py-4 font-semibold hover:text-slate-200 transition-colors ${header.column.id === "holdingPerformance" ? "hidden md:table-cell" : ""}`}
+                        className={`group/th cursor-pointer select-none whitespace-nowrap px-2 py-4 font-semibold transition-colors hover:text-slate-200 md:px-4 ${header.column.id === "holdingPerformance" ? "hidden md:table-cell" : ""}`}
                       >
                         <span className="flex items-center gap-1.5">
                           {flexRender(header.column.columnDef.header, header.getContext())}
@@ -1027,14 +1044,14 @@ export default function Home() {
                   <Fragment key={row.id}>
                     <tr className="group hover:bg-slate-900/30 transition-all duration-150">
                       {row.getVisibleCells().map((cell) => (
-                        <td key={cell.id} className={`px-4 py-4 align-middle whitespace-nowrap ${cell.column.id === "holdingPerformance" ? "hidden md:table-cell" : ""}`}>
+                        <td key={cell.id} className={`px-2 py-4 align-middle whitespace-nowrap md:px-4 ${cell.column.id === "holdingPerformance" ? "hidden md:table-cell" : ""}`}>
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
                         </td>
                       ))}
                     </tr>
                     {isExpanded ? (
                       <tr className="bg-slate-950/40">
-                        <td colSpan={columns.length} className="px-4 pb-5 pt-1 align-top whitespace-normal">
+                        <td colSpan={columns.length} className="px-2 pb-5 pt-1 align-top whitespace-normal md:px-4">
                           <PositionQuotePanel
                             position={row.original}
                             quoteState={quoteStates[positionKey]}
