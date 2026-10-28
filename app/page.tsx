@@ -970,7 +970,7 @@ export default function Home() {
               label={isEnglish ? "Weighted combined hold APR" : "加权综合持有 APR"}
               value={data ? formatPercent(data.summary.avgHoldApr) : "—"}
               icon={<TrendingUp className="h-4 w-4 text-fuchsia-400" />}
-              glowColor="red"
+              glowColor="purple"
               tooltip={isEnglish ? "Mark APR plus verified eligible holding rewards, weighted by position value" : "按当前市值加权的综合 APR = 市场 Mark APR + 已核实 Holding Rewards APR；未确认资格的奖励不计入"}
             />
       </div>
@@ -1456,13 +1456,13 @@ function HistoryMetric({
     mainValue === "等待查询" ||
     mainValue === "No data yet";
   return (
-    <div className="min-h-20 rounded-lg border border-slate-800 bg-slate-900/40 p-3.5">
-      <div className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-500">
+    <div className="min-h-24 rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3.5">
+      <div className="flex items-center justify-between gap-2 text-xs font-medium text-slate-400">
         {label}
         {icon}
       </div>
       <div
-        className={`mt-3 font-mono text-lg font-bold ${
+        className={`mt-3 font-mono text-lg font-semibold tabular-nums ${
           isPending ? "text-slate-500" : isNegative ? "text-rose-400" : "text-emerald-400"
         }`}
       >
@@ -1492,36 +1492,37 @@ function SummaryCard({
   glowColor: "cyan" | "green" | "purple" | "red";
   tooltip?: string;
 }) {
-  // Glow border shadows configuration
-  // 外边框霓虹发光阴影样式选项字典
-  const glowStyles = {
-    cyan: "neon-border-glow-cyan focus-within:ring-cyan-500 border-slate-800 hover:border-cyan-500/50",
-    green: "neon-border-glow-green focus-within:ring-emerald-500 border-slate-800 hover:border-emerald-500/50",
-    purple: "neon-border-glow-purple focus-within:ring-indigo-500 border-slate-800 hover:border-indigo-500/50",
-    red: "neon-border-glow-red focus-within:ring-rose-500 border-slate-800 hover:border-rose-500/50",
+  const accents = {
+    cyan: "hover:border-cyan-500/35",
+    green: "hover:border-emerald-500/35",
+    purple: "hover:border-indigo-500/35",
+    red: "hover:border-fuchsia-500/35",
   };
 
   return (
     <div
-      className={`group/card flex min-h-[104px] flex-col justify-between rounded-xl border bg-slate-900/50 p-4 shadow-md backdrop-blur-md transition-colors duration-200 ${glowStyles[glowColor]}`}
+      className={`group/card flex min-h-[116px] min-w-0 flex-col justify-between rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-[0_8px_24px_rgba(0,0,0,0.1)] transition-[background-color,border-color] hover:bg-slate-900/80 sm:p-5 ${accents[glowColor]}`}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold text-slate-400 transition-colors group-hover/card:text-slate-300">
-          {label}
-        </span>
-        {icon && <div className="rounded-md border border-slate-800 bg-slate-950/80 p-1 shadow-inner">{icon}</div>}
+        <span className="min-w-0 text-xs font-medium leading-5 text-slate-400">{label}</span>
+        {icon && <div className="shrink-0 rounded-lg border border-slate-800 bg-slate-950/70 p-1.5">{icon}</div>}
       </div>
-      <div className="mt-2 flex items-baseline justify-between gap-1">
+      <div className="mt-3 flex min-w-0 items-end">
         <AutoFitValue value={value} />
-        {tooltip && (
-          <div className="group/tip relative inline-flex self-end mb-1 cursor-pointer">
-            <Info className="h-3.5 w-3.5 text-slate-600 hover:text-slate-400 transition-colors" />
-            <div className="pointer-events-none absolute bottom-full right-0 z-30 mb-2 w-56 rounded-xl border border-slate-800 bg-slate-950 p-2.5 text-[10px] text-slate-400 leading-normal opacity-0 shadow-2xl transition-opacity group-hover/tip:opacity-100">
-              {tooltip}
-            </div>
-          </div>
-        )}
       </div>
+      {tooltip && (
+        <details className="group/tip mt-1 text-right">
+          <summary
+            aria-label={`More about ${label}`}
+            className="ml-auto inline-flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 [&::-webkit-details-marker]:hidden"
+          >
+            <Info aria-hidden="true" className="h-4 w-4" />
+          </summary>
+          <p className="mt-1 rounded-lg border border-slate-700 bg-slate-950/70 p-2.5 text-left text-xs leading-5 text-slate-300">
+            {tooltip}
+          </p>
+        </details>
+      )}
     </div>
   );
 }
@@ -1558,7 +1559,7 @@ function AutoFitValue({ value }: { value: string | number }) {
       <span
         ref={valueRef}
         style={{ fontSize }}
-        className="block w-max max-w-full whitespace-nowrap font-mono font-black leading-tight text-slate-100 tracking-tight transition-colors group-hover/card:text-white"
+        className="block w-max max-w-full whitespace-nowrap font-mono font-bold leading-tight tracking-tight tabular-nums text-slate-50"
       >
         {value}
       </span>
