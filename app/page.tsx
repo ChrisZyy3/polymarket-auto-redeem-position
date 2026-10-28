@@ -460,7 +460,7 @@ export default function Home() {
         accessorFn: (row) => row.curPrice,
         header: isEnglish ? "Entry → current (%)" : "建仓价 → 当前价 (%)",
         cell: ({ row }) => {
-          const { avgPrice, curPrice } = row.original;
+          const { avgPrice, curPrice, cashPnl } = row.original;
           const currentPriceColor = Number.isFinite(avgPrice) && Number.isFinite(curPrice)
             ? curPrice > avgPrice
               ? "text-emerald-400"
@@ -468,12 +468,41 @@ export default function Home() {
                 ? "text-rose-400"
                 : "text-cyan-300"
             : "text-cyan-300";
+          const holdingReturn = calculateHoldingReturn(row.original);
+          const hasCashPnl = typeof cashPnl === "number" && Number.isFinite(cashPnl);
+          const hasHoldingReturn = typeof holdingReturn === "number" && Number.isFinite(holdingReturn);
+          const cashPnlClass = hasCashPnl
+            ? cashPnl >= 0 ? "text-emerald-400" : "text-rose-400"
+            : "text-slate-500";
+          const holdingReturnClass = hasHoldingReturn
+            ? holdingReturn >= 0 ? "text-emerald-400" : "text-rose-400"
+            : "text-slate-500";
           return (
-            <span className="whitespace-nowrap font-mono">
-              <span className="font-medium text-slate-400">{formatPercent(avgPrice, 1)}</span>
-              <span className="mx-1 text-slate-600">→</span>
-              <span className={`font-bold ${currentPriceColor}`}>{formatPercent(curPrice, 1)}</span>
-            </span>
+            <div className="font-mono">
+              <div className="whitespace-nowrap">
+                <span className="font-medium text-slate-400">{formatPercent(avgPrice, 1)}</span>
+                <span className="mx-1 text-slate-600">→</span>
+                <span className={`font-bold ${currentPriceColor}`}>{formatPercent(curPrice, 1)}</span>
+              </div>
+              {/* Mobile: consolidate performance under Entry → Current.
+                  On desktop, keep the dedicated sortable P&L / Return column. */}
+              <div className="mt-1 flex items-center gap-1.5 whitespace-nowrap text-xs md:hidden">
+                <span className="font-sans font-medium text-slate-500">P&L</span>
+                <span className={`font-bold ${cashPnlClass}`}>
+                  {hasCashPnl
+                    ? `${cashPnl >= 0 ? "+" : "-"}${formatMoneyCompact(Math.abs(cashPnl))}`
+                    : "—"}
+                </span>
+              </div>
+              <div className="mt-0.5 flex items-center gap-1.5 whitespace-nowrap text-xs md:hidden">
+                <span className="font-sans font-medium text-slate-500">{isEnglish ? "Return" : "收益率"}</span>
+                <span className={`font-semibold ${holdingReturnClass}`}>
+                  {hasHoldingReturn
+                    ? `${holdingReturn >= 0 ? "+" : ""}${formatPercent(holdingReturn)}`
+                    : "—"}
+                </span>
+              </div>
+            </div>
           );
         },
       },
@@ -486,11 +515,6 @@ export default function Home() {
           const positionWeight = totalAssetValue > 0 ? marketValue / totalAssetValue : 0;
           const isHighConcentration = positionWeight > 0.3;
           const isConcentrated = positionWeight > 0.2;
-          const riskLabel = isHighConcentration
-            ? (isEnglish ? "High concentration" : "高集中风险")
-            : isConcentrated
-              ? (isEnglish ? "Concentration risk" : "集中风险")
-              : "";
           const riskClass = isHighConcentration
             ? "text-rose-400"
             : isConcentrated
@@ -511,12 +535,6 @@ export default function Home() {
                 <span className="text-slate-500">{isEnglish ? "Asset share" : "仓位占比"}</span>
                 <span className={`font-mono ${riskClass}`}>{formatPercent(positionWeight)}</span>
               </span>
-              {riskLabel ? (
-                <span className={`flex items-center gap-1 text-[10px] font-semibold ${riskClass}`}>
-                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  {riskLabel}
-                </span>
-              ) : null}
             </div>
           );
         },
@@ -985,7 +1003,7 @@ export default function Home() {
                       <th
                         key={header.id}
                         onClick={header.column.getToggleSortingHandler()}
-                        className="group/th cursor-pointer select-none whitespace-nowrap px-4 py-4 font-semibold hover:text-slate-200 transition-colors"
+                        className={`group/th cursor-pointer select-none whitespace-nowrap px-4 py-4 font-semibold hover:text-slate-200 transition-colors ${header.column.id === "holdingPerformance" ? "hidden md:table-cell" : ""}`}
                       >
                         <span className="flex items-center gap-1.5">
                           {flexRender(header.column.columnDef.header, header.getContext())}
@@ -1009,7 +1027,7 @@ export default function Home() {
                   <Fragment key={row.id}>
                     <tr className="group hover:bg-slate-900/30 transition-all duration-150">
                       {row.getVisibleCells().map((cell) => (
-                        <td key={cell.id} className="px-4 py-4 align-middle whitespace-nowrap">
+                        <td key={cell.id} className={`px-4 py-4 align-middle whitespace-nowrap ${cell.column.id === "holdingPerformance" ? "hidden md:table-cell" : ""}`}>
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
                         </td>
                       ))}
