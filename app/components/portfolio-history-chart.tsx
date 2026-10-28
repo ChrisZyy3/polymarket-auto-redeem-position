@@ -115,11 +115,11 @@ export function PortfolioHistoryChart({
   }
 
   return (
-    <section className="mt-8 border-y border-slate-800 py-7" aria-labelledby="portfolio-history-title">
+    <section className="mt-7 rounded-2xl border border-slate-800 bg-slate-900/40 px-4 py-4 sm:px-5 sm:py-5" aria-labelledby="portfolio-history-title">
       <div className={`${isExpanded ? "mb-5" : ""} flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between`}>
         <div>
-          <h2 id="portfolio-history-title" className="flex items-center gap-2 text-lg font-bold text-slate-100">
-            <LineChart className="h-5 w-5 text-cyan-400" />
+          <h2 id="portfolio-history-title" className="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-100">
+            <LineChart aria-hidden="true" className="h-5 w-5 text-cyan-400" />
             {isEnglish ? "Portfolio history" : "总资产历史曲线"}
             <button
               type="button"
@@ -128,9 +128,9 @@ export function PortfolioHistoryChart({
               aria-controls="portfolio-history-content"
               aria-label={isExpanded ? (isEnglish ? "Collapse chart" : "收起历史曲线") : isEnglish ? "Expand chart" : "展开历史曲线"}
               title={isExpanded ? (isEnglish ? "Collapse" : "收起") : isEnglish ? "Expand" : "展开"}
-              className="ml-1 inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+              className="ml-1 inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
             >
-              {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              {isExpanded ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
             </button>
           </h2>
           {isExpanded && (
@@ -142,7 +142,7 @@ export function PortfolioHistoryChart({
           )}
         </div>
         {isExpanded && (
-          <div className="inline-flex h-9 self-start rounded-lg border border-slate-700 bg-slate-950 p-1" aria-label={isEnglish ? "Time range" : "曲线时间范围"}>
+          <div role="group" className="inline-flex min-h-10 self-start rounded-xl border border-slate-700 bg-slate-950/75 p-1" aria-label={isEnglish ? "Time range" : "曲线时间范围"}>
             {([30, 90, "all"] as const).map((value) => (
               <button
                 key={value}
@@ -151,7 +151,8 @@ export function PortfolioHistoryChart({
                   setRange(value);
                   setSelectedIndex(null);
                 }}
-                className={`min-w-14 rounded px-3 text-xs font-semibold transition-colors ${
+                aria-pressed={range === value}
+                className={`min-w-14 rounded-lg px-3 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                   range === value
                     ? "bg-slate-700 text-white"
                     : "text-slate-500 hover:text-slate-200"
@@ -165,14 +166,14 @@ export function PortfolioHistoryChart({
       </div>
 
       {isExpanded && (chart ? (
-        <div id="portfolio-history-content" className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+        <div id="portfolio-history-content" className="rounded-xl border border-slate-800 bg-slate-950/55 p-3 sm:p-4">
           <div className="mb-3 flex h-10 items-center justify-between gap-4">
             <div className="flex items-center gap-2 text-xs text-slate-500">
               <CalendarDays className="h-4 w-4" />
               {selected ? new Date(selected.recordedAt).toLocaleString(isEnglish ? "en-US" : "zh-CN") : ""}
             </div>
             <div className="text-right" aria-live="polite">
-              <div className="font-mono text-lg font-bold text-slate-100">
+              <div className="font-mono text-lg font-semibold tabular-nums text-slate-100">
                 {selected ? money(selected.totalBalance) : "--"}
               </div>
               {selected && (
@@ -186,7 +187,7 @@ export function PortfolioHistoryChart({
             <svg
               viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
               className="h-full w-full overflow-visible"
-              role="img"
+              role="group"
               aria-label={isEnglish
                 ? `Portfolio value changed from ${money(visible[0].totalBalance)} to ${money(visible.at(-1)!.totalBalance)}`
                 : `总资产从 ${money(visible[0].totalBalance)} 变化至 ${money(visible.at(-1)!.totalBalance)}`}
@@ -284,7 +285,7 @@ export function PortfolioHistoryChart({
           </div>
         </div>
       ) : (
-        <div id="portfolio-history-content" className="flex min-h-56 items-center justify-center rounded-lg border border-dashed border-slate-700 bg-slate-950/30 px-6 text-center text-sm text-slate-500">
+        <div id="portfolio-history-content" className="flex min-h-48 items-center justify-center rounded-xl border border-dashed border-slate-700 bg-slate-950/30 px-6 text-center text-sm leading-6 text-slate-400">
           {isEnglish
             ? "No history yet. The chart starts after the first scheduled snapshot."
             : "暂无历史快照。定时任务首次成功执行后，资产曲线会从当天开始记录。"}
