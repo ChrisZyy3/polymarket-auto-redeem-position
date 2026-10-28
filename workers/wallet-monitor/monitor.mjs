@@ -2,6 +2,7 @@ import { tradeAlert, settlementAlert, settlementKind, walletPusdBalance } from "
 import { snapshotHoldings, positionAction, winningPayoutForecast } from "./position-lifecycle.mjs";
 import { readRedeemableEconomics, settlementNet } from "./settlement-economics.mjs";
 import { mergeTradeFills } from "./trade-batch.mjs";
+import { shouldNotifyActivity } from "./activity-alert-filter.mjs";
 import { drainOutbox } from "./outbox.mjs";
 import { dataApiJson } from "./data-client.mjs";
 import { primaryV2Positions, primaryV2Activity,
@@ -320,6 +321,9 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
   const useV2 = apiVersion === "v2";
   const minimum = Number(env.MIN_POSITION_USD ?? 5);
   if (!Number.isFinite(minimum) || minimum < 0) throw new Error("Invalid MIN_POSITION_USD");
+  const minActivityAlertUsd = Number(env.MIN_ACTIVITY_ALERT_USD ?? 0);
+  if (!Number.isFinite(minActivityAlertUsd) || minActivityAlertUsd < 0)
+    throw new Error("Invalid MIN_ACTIVITY_ALERT_USD");
   let state = await storage.get("monitor");
   if (state && state.user !== user) throw new Error("Wallet changed: use a new Durable Object instance");
   // Existing wallets retain their checkpoints and queues; only audit fields are new.
@@ -381,7 +385,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     }
     seen[key] = num(a.timestamp);
     if (!["TRADE", "REDEEM"].includes(a.type)) continue;
-    // Trade alerts have no value floor: a large order can fill in tiny pieces.
+    // Keep every activity for durable dedupe and aggregation, including small fills.
     const holding = matchingPosition(a, positions);
     const market = { ...holding, ...a, title: a.title || holding?.title,
       outcome: a.outcome || holding?.outcome,
@@ -390,7 +394,10 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     newEvents.push(market);
   }
   const mergedTrades = mergeTradeFills(newEvents);
-  const pending = mergedTrades.map(a => {
+  // This only gates ordinary BUY / SELL / REDEEM push cards. Resolution,
+  // redeem reminders, market-risk, low-APR and monitor-health alerts bypass it.
+  const pending = mergedTrades.filter(a =>
+    shouldNotifyActivity(a, minActivityAlertUsd)).map(a => {
     const holding = matchingPosition(a, positions);
     const lifecycle = positionAction(a, mergedTrades, previousSnapshots, currentSnapshots);
     const forecast = a.type === "TRADE" && a.side === "BUY" && holding

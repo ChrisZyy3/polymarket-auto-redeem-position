@@ -27,7 +27,8 @@
     "LOW_APR_THRESHOLD_PCT": "10",
     "LOW_APR_RECOVER_PCT": "12",
     "LOW_APR_CHECK_MINUTES": "30",
-    "LOW_APR_COOLDOWN_HOURS": "24"
+    "LOW_APR_COOLDOWN_HOURS": "24",
+    "MIN_ACTIVITY_ALERT_USD": "100"
   },
   "durable_objects": {
     "bindings": [

@@ -14,11 +14,11 @@
 
 ## 通知范围
 
-- BUY/SELL 成交：每条新活动通知，包含方向、单笔份数、成交金额、价格和市场链接；不再展示交易哈希链接。
+- BUY/SELL 成交：每轮按 token/方向/5 分钟合并后，仅当成交金额达到 `MIN_ACTIVITY_ALERT_USD`（默认 $100）才发送，包含方向、份数、成交金额、价格和市场链接；不再展示交易哈希链接。
 - 新变为可赎回：区分 WIN（每份回款约 1 pUSD）、PARTIAL（正回款不足 1 pUSD）并提醒手动处理；LOSS（每份回款 0）单独提示。
-- 实际 REDEEM：通知实际到账金额；到账金额不等于利润。零回款赎回也会提示。
+- 实际 REDEEM：已核实到账金额达到 `MIN_ACTIVITY_ALERT_USD`（默认 $100）才通知；金额缺失时不静默过滤，到账金额不等于利润。结算 WIN/LOSS/PARTIAL 不受此门槛影响。
 - 结算归零：仅当 Data API 的 redeemable 为 true 且 curPrice 为 0 时触发；单纯浮亏或低价不触发。
-- 仓位提醒默认忽略投入/价值均小于 $5 的仓位；结算归零时保留之前记录的投入，避免零市值被过滤。成交提醒没有 $5 门槛，避免漏掉拆分成交。
+- 仓位提醒默认忽略投入/价值均小于 $5 的仓位；结算归零时保留之前记录的投入，避免零市值被过滤。成交活动全部读取并去重，推送阶段单独按 $100 金额门槛过滤，不会重置检查点。
 
 首次运行只建立基线，不补发历史成交或已经可赎回/归零的仓位。
 上线前已经赎回且消失的仓位不会补报。
@@ -124,8 +124,8 @@ and does not change a wallet's push counters.
 
 Existing checkpoint/outbox state is preserved. Historic notifications before
 auditSince cannot be reconstructed, so pushCount and alertsDetectedCount start at
-zero when audit is first initialized. TRADE/REDEEM still have no USD minimum;
-only redeemable/lost position transitions use MIN_POSITION_USD.
+zero when audit is first initialized. TRADE/REDEEM now use `MIN_ACTIVITY_ALERT_USD` after aggregation to filter notifications only;
+all observed events are still deduplicated, while resolution/risk alerts bypass the floor.
 
 ## 推送的钱包名称和当前持仓摘要
 
@@ -161,7 +161,7 @@ endDate 只有日期时注明「仅提供日期」；缺失或占位符标注「
 
 ## V2 可靠性升级（2026-10-23）
 
-- **每 5 分钟 Cron**：`*/5 * * * *`。同钱包、同 outcome token、同 BUY/SELL 方向、同五分钟 UTC bucket 内的拆单合并成一条通知；成交金额/份数求和，成交价格按金额加权。REDEEM 与结算事件始终独立提醒。
+- **每 5 分钟 Cron**：`*/5 * * * *`。同钱包、同 outcome token、同 BUY/SELL 方向、同五分钟 UTC bucket 内的拆单合并成一条通知；成交金额/份数求和，成交价格按金额加权。普通 TRADE/REDEEM 走 $100 推送门槛，WIN/LOSS/PARTIAL 等结算事件仍独立提醒。
 - **可靠 Outbox**：先将检测到的事件、checkpoint 与待发消息存储到原 Durable Object，再尝试 Server酱。推送失败不会阻断新数据检测，原消息持久留队，由 DO Alarm 进行退避重试。
 - **60 分钟活动回查窗口**：针对索引延迟保留 60 分钟重叠，结合逐 fill 的 activityKey 去重；极端超过窗口的索引延迟仍需更深的定期回查。
 - **429/503 恢复**：对 Data API 429/502/503/504 进行最多两次短退避重试，支持 Retry-After，超过短等待预算则交给下一轮 Cron 补查；三个钱包请求错峰 800ms。
@@ -253,3 +253,13 @@ Polymarket 数据 API v1 官方迁移时间表标注 2026-10-24 退役。此 Wor
 - 推送包含：钱包、市场/方向、Mark 价、Mark APR、Mark APY、持仓价值、Best Bid、可执行 APR/APY、买一深度、持仓数量、均价和预计结束日期。
 - 日期型 `endDate` 按美东当天结束估算，与 Dashboard 的结算日口径保持一致。
 - 兼容旧 `LOW_APY_*` 环境变量作为临时 fallback；新部署只写入 `LOW_APR_*`。
+
+
+## 普通交易/赎回推送金额门槛（2026-10-28）
+
+- `MIN_ACTIVITY_ALERT_USD=100`：对 BUY、SELL、REDEEM **普通活动通知**，低于 $100 不推送，**恰好 $100 会推送**。
+- 先用现有五分钟拆单合并，再按 `usdcSize` 判断，避免多笔小额 fill 单独刷屏。若 `usdcSize` 缺失，只有当 `size × price` 可核实时才估算；两者都不可靠则保留通知，避免误删重要事件。
+- 过滤**只影响新通知入队**，不影响历史活动的去重、原有检查点、钱包持仓、DO 快照与日报；已持久化 Outbox 的旧消息继续正常投递。
+- **不受过滤影响**：WIN、LOSS、PARTIAL 结算通知，低 APR 与价格风控，MONITOR 故障/恢复，日常资产报告及任何独立异常告警。
+- 若不希望过滤，可以将变量改为 `MIN_ACTIVITY_ALERT_USD=0`。未设置变量的旧部署也保持全部成交活动推送的兼容行为。
+- 这是**成交/赎回金额过滤**，并非对浮动市值、日内 P&L 或单次价格涨跌的 $100 门槛。
