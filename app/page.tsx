@@ -294,6 +294,10 @@ export default function Home() {
   // Memoize positions from state payload
   // 缓存提取并解析的仓位数组
   const positions = useMemo(() => data?.positions ?? [], [data]);
+  const lowAprCount = useMemo(() => positions.filter(position =>
+    position.holdApr !== null && Number.isFinite(position.holdApr) &&
+    position.holdApr * 100 <= holdAprThreshold
+  ).length, [positions, holdAprThreshold]);
   const totalAssetValue = data?.summary.totalBalance ?? 0;
   const marketValues = useMemo(() => {
     const values = new Map<string, number>();
@@ -609,7 +613,7 @@ export default function Home() {
           return (
             <span
               className={`flex min-w-24 items-center gap-1 font-mono font-bold ${
-                isLow ? "text-rose-400 animate-pulse" : "text-emerald-400"
+                isLow ? "text-rose-300" : "text-emerald-400"
               }`}
             >
               {isLow && <AlertTriangle aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
@@ -1007,50 +1011,70 @@ export default function Home() {
       <PortfolioHistoryChart snapshots={portfolioHistory?.snapshots ?? []} language={language} />
 
       {/* Positions detailed tables container / 仓位细分数据列表 */}
-      <div className="mt-8 backdrop-blur-xl bg-slate-900/30 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl relative">
-        <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent"></div>
+      <div className="relative mt-8 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/45 shadow-[0_14px_36px_rgba(0,0,0,0.14)]">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent"></div>
 
-        <div className="px-6 py-5 border-b border-slate-800 bg-slate-900/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2">
-              <Activity className="h-5 w-5 text-cyan-400" />
-              {isEnglish ? "Position yield and market APR" : "持仓收益与盘口 APR"}
-            </h3>
-            <p className="text-xs text-slate-400 mt-1">
+        <div className="flex flex-col gap-3 border-b border-slate-800 bg-slate-900/65 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-5">
+          <div className="min-w-0">
+            <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-100">
+              <Activity className="h-5 w-5 text-cyan-400" aria-hidden="true" />
+              {isEnglish ? "Positions & Yield" : "持仓收益与市场报价"}
+            </h2>
+            <p className="mt-1 text-xs leading-5 text-slate-400">
               {isEnglish
-                ? "Expand a market to compare the live best-bid and best-ask conditional APR."
-                : "展开市场即可比较实时买一、卖一价格对应的条件 APR。"}
+                ? "Sort by yield or position value. Expand a market for live bid/ask APR."
+                : "可按收益或市值排序，展开市场查看实时买卖盘口 APR。"}
+            </p>
+            <p className="mt-1.5 text-[11px] text-slate-500 md:hidden">
+              {isEnglish ? "Swipe horizontally to view more columns" : "左右滑动查看完整仓位数据"}
             </p>
           </div>
-          <div className="flex items-center gap-1.5 self-start sm:self-auto text-xs text-slate-500 font-semibold bg-slate-950/60 border border-slate-800 px-3 py-1.5 rounded-lg shadow-inner">
-            <Info className="h-3.5 w-3.5 text-slate-400" />
-            {isEnglish
-              ? `Positions worth less than $${DUST_POSITION_VALUE_USD} are excluded`
-              : `自动忽略市值低于 ${DUST_POSITION_VALUE_USD} 美元的尘埃仓位`}
+          <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs">
+            <span className="rounded-lg border border-slate-700/70 bg-slate-950/60 px-3 py-1.5 font-medium text-slate-300">
+              {isEnglish ? `${positions.length} positions` : `${positions.length} 个仓位`}
+            </span>
+            {lowAprCount > 0 && (
+              <span className="rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-1.5 font-medium text-rose-300">
+                {isEnglish ? `${lowAprCount} below APR threshold` : `${lowAprCount} 个低 APR`}
+              </span>
+            )}
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-sm">
+        <div
+          role="region"
+          tabIndex={0}
+          aria-label={isEnglish ? "Scrollable positions table" : "可横向滚动的仓位明细表"}
+          className="overflow-x-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/70"
+        >
+          <table className="w-full border-collapse text-left text-sm tabular-nums">
             <thead>
               {table.getHeaderGroups().map((headerGroup) => (
-                <tr key={headerGroup.id} className="bg-slate-950/60 border-b border-slate-800 text-slate-400">
+                <tr key={headerGroup.id} className="border-b border-slate-800 bg-slate-950/75 text-xs text-slate-300">
                   {headerGroup.headers.map((header) => {
                     const sortDirection = header.column.getIsSorted();
                     return (
                       <th
                         key={header.id}
-                        onClick={header.column.getToggleSortingHandler()}
-                        className={`group/th cursor-pointer select-none whitespace-nowrap px-2 py-4 font-semibold transition-colors hover:text-slate-200 md:px-4 ${header.column.id === "holdingPerformance" ? "hidden md:table-cell" : ""}`}
+                        scope="col"
+                        aria-sort={sortDirection === "asc" ? "ascending" : sortDirection === "desc" ? "descending" : "none"}
+                        className={`whitespace-nowrap px-2 py-2.5 font-semibold md:px-4 ${header.column.id === "holdingPerformance" ? "hidden md:table-cell" : ""}`}
                       >
-                        <span className="flex items-center gap-1.5">
-                          {flexRender(header.column.columnDef.header, header.getContext())}
-                          {sortDirection === "asc" && <ArrowUp className="h-3.5 w-3.5 text-cyan-400" />}
-                          {sortDirection === "desc" && <ArrowDown className="h-3.5 w-3.5 text-cyan-400" />}
-                          {!sortDirection && (
-                            <ArrowUpDown className="h-3.5 w-3.5 text-slate-600 group-hover/th:text-slate-400 transition-colors" />
-                          )}
-                        </span>
+                        {header.column.getCanSort() ? (
+                          <button
+                            type="button"
+                            onClick={header.column.getToggleSortingHandler()}
+                            title={isEnglish ? "Sort by this column" : "按此列排序"}
+                            className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-1 text-left transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                          >
+                            {flexRender(header.column.columnDef.header, header.getContext())}
+                            {sortDirection === "asc" && <ArrowUp aria-hidden="true" className="h-3.5 w-3.5 text-cyan-400" />}
+                            {sortDirection === "desc" && <ArrowDown aria-hidden="true" className="h-3.5 w-3.5 text-cyan-400" />}
+                            {!sortDirection && <ArrowUpDown aria-hidden="true" className="h-3.5 w-3.5 text-slate-500" />}
+                          </button>
+                        ) : (
+                          <span>{flexRender(header.column.columnDef.header, header.getContext())}</span>
+                        )}
                       </th>
                     );
                   })}
@@ -1063,7 +1087,7 @@ export default function Home() {
                 const isExpanded = expandedPositionKey === positionKey;
                 return (
                   <Fragment key={row.id}>
-                    <tr className="group hover:bg-slate-900/30 transition-colors duration-150">
+                    <tr className="group transition-colors duration-150 hover:bg-slate-800/30 focus-within:bg-slate-800/25">
                       {row.getVisibleCells().map((cell) => (
                         <td key={cell.id} className={`px-2 py-4 align-middle whitespace-nowrap md:px-4 ${cell.column.id === "holdingPerformance" ? "hidden md:table-cell" : ""}`}>
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -1091,7 +1115,7 @@ export default function Home() {
                 <tr>
                   <td
                     colSpan={columns.length}
-                    className="px-4 py-16 text-center text-slate-500 font-semibold"
+                    className="px-4 py-16 text-center text-sm font-medium text-slate-400"
                   >
                     {emptyPositionsMessage}
                   </td>
