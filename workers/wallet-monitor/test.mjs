@@ -6,6 +6,7 @@ import { tradeAlert, settlementAlert, settlementKind, estimatePnl, walletPusdBal
 import { snapshotHoldings, positionAction, winningPayoutForecast } from "./position-lifecycle.mjs";
 import { settlementNet, readRedeemableEconomics } from "./settlement-economics.mjs";
 import { mergeTradeFills } from "./trade-batch.mjs";
+import { activityNotionalUsd, shouldNotifyActivity } from "./activity-alert-filter.mjs";
 import worker, { walletAddresses, WalletMonitor } from "./worker.mjs";
 import { healthSummary, HEALTH_STALE_SECONDS } from "./health.mjs";
 
@@ -319,6 +320,89 @@ const groupedAlert=tradeAlert(combined[0], {...market,title:"Merged market",outc
 assert(groupedAlert.desp.includes("合并明细") && groupedAlert.short.includes("2笔合并"),
   "aggregation count visible in detailed and short notifications");
 console.log("Passed: five-minute fill aggregation, no cross-market/cross-side merging");
+
+
+// Do not notify small BUY / SELL / REDEEM changes, but preserve complete
+// deduped activity history and coalesce fills before the $100 cutoff.
+assert(activityNotionalUsd({type:"TRADE",usdcSize:99.99})===99.99,
+  "transaction value uses actual USDC when supplied");
+assert(activityNotionalUsd({type:"TRADE",size:125,price:.8})===100,
+  "missing USDC notional falls back to execution size * price");
+assert(!shouldNotifyActivity({type:"TRADE",usdcSize:99.99},100),
+  "small executions are filtered");
+assert(shouldNotifyActivity({type:"TRADE",usdcSize:100},100),
+  "exactly $100 is included");
+assert(!shouldNotifyActivity({type:"REDEEM",usdcSize:90},100),
+  "small confirmed redemptions are filtered");
+assert(shouldNotifyActivity({type:"TRADE",size:4,price:null},100),
+  "unpriced/incomplete records are not silently discarded");
+assert(shouldNotifyActivity({type:"TRADE",usdcSize:1},0),
+  "default threshold off preserves legacy behavior");
+assert(shouldNotifyActivity({type:"OTHER",usdcSize:1},100),
+  "non-activity events bypass the notification floor");
+let invalidMinActivity=false;
+try { shouldNotifyActivity({type:"TRADE",usdcSize:1},-1); }
+catch {invalidMinActivity=true}
+assert(invalidMinActivity,"negative notification minimum is rejected");
+
+const lowValueDB=new Map(), lowValueSent=[];
+const lowValueStorage={
+  get:async key=>lowValueDB.has(key)?structuredClone(lowValueDB.get(key)):undefined,
+  put:async(key,value)=>lowValueDB.set(key,structuredClone(value))
+};
+const alertEnv={
+  ...env, MIN_ACTIVITY_ALERT_USD:"100", LOW_APR_ALERT_ENABLED:"false",
+  RISK_ALERT_ENABLED:"false", REDEEM_REMINDER_ENABLED:"false"
+};
+const alertPosition={asset:"trade-threshold-asset",conditionId:"trade-threshold-condition",
+  title:"Trade notification threshold",outcome:"Yes",eventSlug:"trade-notification-threshold",
+  size:200,avgPrice:.8,initialValue:160,currentValue:160,
+  curPrice:.8,redeemable:false,endDate:"2026-12-31"};
+let alertActivities=[];
+const alertFetcher=async(url,init)=>{
+  const s=String(url);
+  if(s.includes("push.ft07.com")){
+    lowValueSent.push(JSON.parse(init.body));
+    return {ok:true,json:async()=>({code:0})};
+  }
+  if(s.includes("polygon-bor-rpc.publicnode.com")||s.includes("polygon.drpc.org"))
+    return {ok:true,json:async()=>({result:"0x0"})};
+  return {ok:true,json:async()=>s.includes("/positions?")?[alertPosition]:alertActivities};
+};
+const changeActivity=(tx,type,usdAmount,timestamp)=>({
+  transactionHash:tx,type,asset:alertPosition.asset,conditionId:alertPosition.conditionId,
+  title:alertPosition.title,outcome:alertPosition.outcome,eventSlug:alertPosition.eventSlug,
+  timestamp,side:"BUY",size:usdAmount/.8,usdcSize:usdAmount,price:.8
+});
+await poll(lowValueStorage,alertEnv,alertFetcher,1000);
+alertActivities.push(changeActivity("small-trade","TRADE",40,1020));
+let smallPoll=await poll(lowValueStorage,alertEnv,alertFetcher,1060);
+assert(lowValueSent.length===0&&smallPoll.alerts===0,
+  "sub-$100 BUY does not send any push");
+assert(Object.keys(lowValueDB.get("monitor").seen).length===1 &&
+  lowValueDB.get("monitor").checkpoint===1060,
+  "suppressed trades still advance activity deduplication and checkpoint");
+alertActivities.push(
+  changeActivity("grouped-trade-a","TRADE",60,1110),
+  changeActivity("grouped-trade-b","TRADE",50,1120)
+);
+await poll(lowValueStorage,alertEnv,alertFetcher,1180);
+assert(lowValueSent.length===1 &&
+  lowValueSent[0].title.includes("$110.00") &&
+  lowValueSent[0].desp.includes("2 笔"),
+  "two grouped fills totalling $110 send exactly one notification");
+alertActivities.push(changeActivity("small-redeem","REDEEM",99,1230));
+await poll(lowValueStorage,alertEnv,alertFetcher,1300);
+assert(lowValueSent.length===1,"$99 redeemed activity is suppressed");
+alertActivities.push(changeActivity("large-redeem","REDEEM",100,1360));
+await poll(lowValueStorage,alertEnv,alertFetcher,1420);
+assert(lowValueSent.length===2&&
+  lowValueSent[1].title.startsWith("💰 已赎回") &&
+  lowValueDB.get("monitor").checkpoint===1420 &&
+  Object.keys(lowValueDB.get("monitor").seen).length===5,
+  "a $100 redemption is sent and all activities are checkpointed");
+console.log("Passed: $100 activity threshold, grouped fills, missing-notional fallback, no state loss");
+
 
 
 // 429/503 API retries, backoff, Retry-After, and fail-fast on permanent errors.
