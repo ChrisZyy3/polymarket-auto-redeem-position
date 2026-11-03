@@ -7,7 +7,7 @@ test("market eligibility is checked",()=>{
  assert.equal(rewardEligibility({markets:[{}]}),null);
 });
 test("reward is only added for confirmed true",async()=>{
- const fetcher=async (_url:string)=>({ok:true,json:async()=>({holdingRewardsEnabled:true})}) as Response;
+ const fetcher: typeof fetch=async ()=>({ok:true,json:async()=>({holdingRewardsEnabled:true})}) as Response;
  const reward=await holdingRewardForSlug("will-china-invade-taiwan-before-2027",fetcher);
  assert.equal(reward.apr,0.0325);
  assert.equal(combinedHoldingApr(0.08,reward.apr),0.1125);
