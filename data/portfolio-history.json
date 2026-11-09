@@ -2520,6 +2520,30 @@
       "positionsValue": 309704.8111,
       "availableBalance": 99973.103442,
       "positionCount": 16
+    },
+    {
+      "recordedAt": "2026-11-09T07:53:38.449Z",
+      "address": "0x24816c037cdc2c9bd979e69d777541cf560a9b79",
+      "totalBalance": 62978.401132,
+      "positionsValue": 38765.096,
+      "availableBalance": 24213.305132,
+      "positionCount": 8
+    },
+    {
+      "recordedAt": "2026-11-09T07:53:38.449Z",
+      "address": "0x9f7eb5bc88342f01d18754be0439fad79ec282ce",
+      "totalBalance": 35660.252713,
+      "positionsValue": 34786.8848,
+      "availableBalance": 873.367913,
+      "positionCount": 3
+    },
+    {
+      "recordedAt": "2026-11-09T07:53:38.449Z",
+      "address": "0x052f4191cd324a348835a846d34df5b0061e53fb",
+      "totalBalance": 409375.732282,
+      "positionsValue": 304597.2926,
+      "availableBalance": 104778.439682,
+      "positionCount": 15
     }
   ]
 }
