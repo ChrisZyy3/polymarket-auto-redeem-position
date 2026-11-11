@@ -33,6 +33,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { PortfolioHistoryChart } from "@/app/components/portfolio-history-chart";
+import { calculateDailyPriceChange, type DailyPositionPoint } from "@/lib/position-change";
 import type { PortfolioHistoryMetrics, PortfolioSnapshot } from "@/lib/portfolio-history";
 import { formatMarketPercentForTick } from "@/lib/price-format";
 import { buildTargetAprPlan, type PositionQuote } from "@/lib/position-quote";
@@ -59,6 +60,13 @@ interface ApiResponse {
 interface HistoryResponse {
   snapshots: PortfolioSnapshot[];
   metrics: PortfolioHistoryMetrics;
+}
+
+interface DailyPositionResponse {
+  status: "ok" | "missing" | "unavailable";
+  baselineDate: string;
+  recordedAt: string | null;
+  positions: DailyPositionPoint[];
 }
 
 interface PositionQuoteResponse {
@@ -131,6 +139,21 @@ function formatNumber(value: number | null | undefined, digits = 2): string {
   });
 }
 
+function formatSignedChange(value: number, decimals: number): string {
+  const magnitude = Math.abs(value) < 1e-10 ? 0 : value;
+  return `${magnitude > 0 ? "+" : magnitude < 0 ? "−" : ""}${Math.abs(magnitude).toFixed(decimals)}`;
+}
+
+function formatShanghaiReference(value: string, language: Language): string {
+  const time = new Date(value);
+  if (!Number.isFinite(time.getTime())) return "—";
+  return time.toLocaleString(language === "en" ? "en-US" : "zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+}
+
 function formatMoneyCompact(value: number | null | undefined): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
   return `$${value.toLocaleString("en-US", {
@@ -187,6 +210,7 @@ export default function Home() {
   const [address, setAddress] = useState("");
   const [data, setData] = useState<ApiResponse | null>(null);
   const [portfolioHistory, setPortfolioHistory] = useState<HistoryResponse | null>(null);
+  const [dailyPositionHistory, setDailyPositionHistory] = useState<DailyPositionResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -197,6 +221,7 @@ export default function Home() {
   const [quoteStates, setQuoteStates] = useState<Record<string, QuoteState>>({});
   const [targetAprInputs, setTargetAprInputs] = useState<Record<string, string>>({});
   const quoteRequestVersion = useRef(0);
+  const queryRequestVersion = useRef(0);
   const isEnglish = language === "en";
 
   // Initialize state configurations from localstorage and URL params on mount
@@ -294,6 +319,13 @@ export default function Home() {
   // Memoize positions from state payload
   // 缓存提取并解析的仓位数组
   const positions = useMemo(() => data?.positions ?? [], [data]);
+  const previousTokenPrices = useMemo(
+    () => new Map(dailyPositionHistory?.status === "ok"
+      ? dailyPositionHistory.positions.map(item => [item.tokenId, item] as const)
+      : []),
+    [dailyPositionHistory],
+  );
+  const hasYesterdayPrices = dailyPositionHistory?.status === "ok";
   const lowAprCount = useMemo(() => positions.filter(position =>
     position.holdApr !== null && Number.isFinite(position.holdApr) &&
     position.holdApr * 100 <= holdAprThreshold
@@ -528,6 +560,58 @@ export default function Home() {
         },
       },
       {
+        id: "dailyChange",
+        accessorFn: position => {
+          const change = calculateDailyPriceChange(
+            position.curPrice, previousTokenPrices.get(position.asset), hasYesterdayPrices,
+          );
+          return change.kind === "ok" ? change.rate : undefined;
+        },
+        sortUndefined: "last",
+        sortDescFirst: true,
+        header: () => (
+          <span title={isEnglish
+            ? "Current token price versus yesterday's approximately 09:10 Beijing snapshot; not rolling 24h."
+            : "当前合约价格相对于昨日北京时间约 09:10 的快照；不是滚动 24h 涨跌幅。"
+          }>
+            {isEnglish ? "D1 Change" : "较昨日"}
+          </span>
+        ),
+        cell: ({ row }) => {
+          const change = calculateDailyPriceChange(
+            row.original.curPrice,
+            previousTokenPrices.get(row.original.asset),
+            hasYesterdayPrices,
+          );
+          if (change.kind === "new") {
+            return <span title={isEnglish ? "Token not held in yesterday's wallet snapshot" : "昨日快照中没有此 Token 仓位"}
+              className="inline-flex min-w-[88px] items-center text-xs font-semibold text-cyan-300">NEW</span>;
+          }
+          if (change.kind !== "ok" || change.rate === null || change.cents === null) {
+            return <span title={isEnglish ? "Yesterday's valid price is unavailable" : "昨日没有可比较的有效价格"}
+              className="inline-flex min-w-[88px] items-center font-mono text-sm text-slate-500">—</span>;
+          }
+          const color = change.rate > 0 ? "text-emerald-400" :
+            change.rate < 0 ? "text-rose-400" : "text-slate-300";
+          const reference = dailyPositionHistory?.recordedAt
+            ? formatShanghaiReference(dailyPositionHistory.recordedAt, language) : "—";
+          const description = isEnglish
+            ? `Yesterday ${reference} (Beijing): ${formatPercent(change.previousPrice, 2)} → ${formatPercent(row.original.curPrice, 2)}. Daily snapshot, not rolling 24 hours.`
+            : `昨日参考 ${reference}（北京时间）：${formatPercent(change.previousPrice, 2)} → ${formatPercent(row.original.curPrice, 2)}；非滚动 24 小时。`;
+          return (
+            <span className="flex min-w-[88px] flex-col gap-0.5 font-mono" title={description}
+              aria-label={description}>
+              <span className={`whitespace-nowrap text-sm font-semibold ${color}`}>
+                {formatSignedChange(change.rate * 100, 2)}%
+              </span>
+              <span className="whitespace-nowrap text-[11px] text-slate-400">
+                {formatSignedChange(change.cents, 2)}¢
+              </span>
+            </span>
+          );
+        },
+      },
+      {
         accessorKey: "currentValue",
         header: isEnglish ? "Value ($)" : "持仓市值 ($)",
         cell: ({ row, getValue }) => {
@@ -649,7 +733,7 @@ export default function Home() {
         },
       },
     ],
-    [expandedPositionKey, handleQuoteToggle, holdAprThreshold, isEnglish, language, marketValues, totalAssetValue]
+    [dailyPositionHistory, expandedPositionKey, handleQuoteToggle, hasYesterdayPrices, holdAprThreshold, isEnglish, language, marketValues, previousTokenPrices, totalAssetValue]
   );
 
   // Setup React Table instance
