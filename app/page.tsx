@@ -32,6 +32,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { MarketTitle } from "@/app/components/market-title";
+import { AutoSellPlannerPanel } from "@/app/components/auto-sell-planner-panel";
 import { PortfolioHistoryChart } from "@/app/components/portfolio-history-chart";
 import { calculateDailyPriceChange, type DailyPositionPoint } from "@/lib/position-change";
 import type { PortfolioHistoryMetrics, PortfolioSnapshot } from "@/lib/portfolio-history";
@@ -92,6 +93,8 @@ const HISTORY_KEY = "polymarket-dashboard-address-history";
 const MAX_HISTORY = 8;
 
 const HOLD_APR_THRESHOLD_KEY = "polymarket-dashboard-hold-apr-threshold";
+const AUTO_SELL_TARGET_MARK_APR_DEFAULT = 12;
+const AUTO_SELL_POLL_MS = 5 * 60 * 1000;
 const DEFAULT_HOLD_APR_THRESHOLD = 10; // Default 10% APR alert threshold / 默认 8% 的 APR 预警阈值
 const TARGET_APR_BY_ASSET_KEY = "polymarket-dashboard-target-apr-by-asset-v1";
 const DUST_POSITION_VALUE_USD = 1;
@@ -397,6 +400,20 @@ export default function Home() {
       });
     }
   }
+
+  // Only the open position quote is refreshed; no extra wallet API polling.
+  useEffect(() => {
+    if (!expandedPositionKey) return;
+    const refresh = () => {
+      if (document.visibilityState === "hidden") return;
+      const p = positions.find(item => getPositionKey(item) === expandedPositionKey);
+      if (p && !p.redeemable) void loadPositionQuote(p, holdAprThreshold, true);
+    };
+    const timer = window.setInterval(refresh, AUTO_SELL_POLL_MS);
+    return () => window.clearInterval(timer);
+    // Changes to the expanded position reset its five-minute refresh schedule.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedPositionKey, positions, holdAprThreshold]);
 
   function handleTargetAprChange(asset: string, value: string) {
     if (value && !/^\d*(?:\.\d*)?$/.test(value)) return;
@@ -1189,7 +1206,7 @@ export default function Home() {
                           <PositionQuotePanel
                             position={row.original}
                             quoteState={quoteStates[positionKey]}
-                            targetAprInput={targetAprInputs[row.original.asset] ?? ""}
+                            targetAprInput={targetAprInputs[row.original.asset] ?? String(AUTO_SELL_TARGET_MARK_APR_DEFAULT)}
                             language={language}
                             onTargetAprChange={(value) => handleTargetAprChange(row.original.asset, value)}
                             onRefresh={() => handleQuoteRefresh(row.original)}
@@ -1364,6 +1381,15 @@ function PositionQuotePanel({
               </p>
             )}
           </div>
+
+          {targetAprPercent !== null && (
+            <AutoSellPlannerPanel
+              position={position}
+              quote={quote}
+              targetAprPercent={targetAprPercent}
+              language={language}
+            />
+          )}
 
           {quote.note && (
             <p className="mt-1.5 text-[11px] leading-5 text-amber-300/80">{quote.note}</p>
