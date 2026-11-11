@@ -56,10 +56,16 @@ const positionsTwoPages=async(url)=>{
   const u=new URL(String(url));
   assert(u.pathname==="/v2/positions"&&u.searchParams.get("user")===wallet,
     "v2 position query scoped to exact wallet");
-  assert(u.searchParams.get("status")==="OPEN"&&u.searchParams.get("include_archived")==="true",
-    "v2 OPEN includes redeemed-not-yet holdings and archived");
-  assert(u.searchParams.get("filter_amount")==="0"&&
-    !u.searchParams.has("offset"),"v2 never uses legacy offset or omits dust");
+  assert(u.searchParams.get("status")==="OPEN"&&
+    !u.searchParams.has("include_archived")&&
+    !u.searchParams.has("sort_by")&&
+    !u.searchParams.has("sort_direction")&&
+    u.searchParams.get("limit")==="500",
+    "positions query matches Dashboard: OPEN, default archived and sort, 500 rows");
+  assert(u.searchParams.get("filter_type")==="TOKENS"&&
+    u.searchParams.get("filter_amount")==="0"&&
+    !u.searchParams.has("offset"),
+    "v2 keeps zero-token floor, full cursor pagination and no legacy offset");
   const second=u.searchParams.get("cursor")==="page-2";
   return {ok:true,json:async()=>({
     data:second?[v2Position({token_id:"id-NO",current_size:50})]:[v2Position()],
@@ -76,7 +82,9 @@ const descending=async(url)=>{
     u.searchParams.get("start")==="1000"&&
     u.searchParams.get("sort_by")==="TIMESTAMP"&&
     u.searchParams.get("sort_direction")==="DESC"&&
-    !u.searchParams.has("offset"),"v2 activity uses keyset cursor and the exact types");
+    u.searchParams.get("limit")==="300"&&
+    !u.searchParams.has("offset"),
+    "v2 activity retains keyset cursor, page size and exact types");
   const second=u.searchParams.get("cursor")==="older";
   return {ok:true,json:async()=>({
     data:second?[v2Trade({timestamp:1100,transaction_hash:"tx-earlier"})]:
