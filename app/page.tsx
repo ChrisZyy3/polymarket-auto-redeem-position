@@ -1134,7 +1134,7 @@ export default function Home() {
                     ? "D1 Change needs yesterday’s daily token snapshot; unavailable values show —."
                     : "较昨日需要前一天的仓位价格快照；尚未积累历史数据时显示 —。")}
               </p>
-            )
+            )}
             <p className="mt-1.5 text-[11px] text-slate-500 md:hidden">
               {isEnglish ? "Swipe horizontally to view more columns" : "左右滑动查看完整仓位数据"}
             </p>
