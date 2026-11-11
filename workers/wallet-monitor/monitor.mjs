@@ -127,8 +127,16 @@ function newAudit(now) {
     lastPollAlerts: 0,
     lastPollAccepted: 0,
     consecutivePollFailures: 0,
+    consecutivePollSuccesses: 0,
+    firstPollFailureAt: null,
     lastPollFailureAt: null,
     lastPollError: null,
+    lastPollErrorKind: null,
+    lastPollErrorStatus: null,
+    lastPollErrorEndpoint: null,
+    lastPollTraceId: null,
+    lastPollRetryAfterSeconds: null,
+    nextAllowedPollAt: null,
     healthAlarmActive: false,
     shadowV2LastAttemptAt: null,
     shadowV2LastSuccessAt: null,
@@ -155,8 +163,16 @@ export function auditSnapshot(state) {
     lastPollAlerts: a.lastPollAlerts ?? 0,
     lastPollAccepted: a.lastPollAccepted ?? 0,
     consecutivePollFailures: a.consecutivePollFailures ?? 0,
+    consecutivePollSuccesses: a.consecutivePollSuccesses ?? 0,
+    firstPollFailureAt: a.firstPollFailureAt ?? null,
     lastPollFailureAt: a.lastPollFailureAt ?? null,
     lastPollError: a.lastPollError ?? null,
+    lastPollErrorKind: a.lastPollErrorKind ?? null,
+    lastPollErrorStatus: a.lastPollErrorStatus ?? null,
+    lastPollErrorEndpoint: a.lastPollErrorEndpoint ?? null,
+    lastPollTraceId: a.lastPollTraceId ?? null,
+    lastPollRetryAfterSeconds: a.lastPollRetryAfterSeconds ?? null,
+    nextAllowedPollAt: a.nextAllowedPollAt ?? null,
     healthAlarmActive: a.healthAlarmActive ?? false,
     shadowV2LastAttemptAt: a.shadowV2LastAttemptAt ?? null,
     shadowV2LastSuccessAt: a.shadowV2LastSuccessAt ?? null,
@@ -237,50 +253,62 @@ function safePollError(error) {
     ? message.slice(0, 160) : "Polymarket query failed (details withheld)";
 }
 
-// Record failures separately from healthy data checkpoints.
-// After 3 consecutive failed 5-minute rounds, enqueue one health warning.
-// Successful polling enqueues a single recovery notice.
+// Only record per-wallet health. Account-level MONITOR notifications are
+// evaluated once per Cron tick by the shared Durable Object coordinator.
+// Never advance a wallet activity checkpoint when a Data API request fails.
+const safePath = raw => {
+  const val=String(raw||"");
+  return /^\/(?:v2\/)?[a-z0-9-]{1,50}$/.test(val) ? val : null;
+};
+const safeTrace = raw => {
+  const val=String(raw||"");
+  return /^[A-Za-z0-9-]{5,80}$/.test(val) ? val : null;
+};
 export async function recordPollFailure(storage, env, fetcher = fetch,
   now = Math.floor(Date.now() / 1000), error = null) {
-  const state = await storage.get("monitor");
-  if (!state) return { alerted: false, failures: 0 };
-  state.audit ??= newAudit(now);
-  state.audit.consecutivePollFailures = (state.audit.consecutivePollFailures || 0) + 1;
-  state.audit.lastPollFailureAt = now;
-  state.audit.lastPollError = safePollError(error);
-  const failures = state.audit.consecutivePollFailures;
-  let alerted = false;
-  if (failures >= 3 && !state.audit.healthAlarmActive) {
-    alerted = true;
-    state.audit.healthAlarmActive = true;
-    state.pending ??= [];
-    state.pending.push({
-      formatVersion: 2,
-      title: "⚠️ MONITOR · " + walletLabel(state.user),
-      short: "连续 " + failures + " 次轮询失败；检查 Data API 与 Cloudflare 日志",
-      desp: [
-        "### ⚠️ 钱包监控异常",
-        "**账户：** " + walletLabel(state.user),
-        "**连续失败：** " + failures + " 次（5分钟轮询）",
-        "**最后成功时间：** " + (state.lastSuccessAt
-          ? new Date(state.lastSuccessAt * 1000).toLocaleString("zh-CN", {timeZone:"Asia/Shanghai"})
-          : "暂无"),
-        "**错误：** " + state.audit.lastPollError,
-        "",
-        "> 系统会继续轮询，恢复后自动发送恢复通知。"
-      ].join("\n")
-    });
-    state.audit.alertsDetectedCount = (state.audit.alertsDetectedCount || 0) + 1;
-    state.audit.lastAlertAt = now;
-    state.audit.lastAlertType = "MONITOR_UNHEALTHY";
-  }
-  await storage.put("monitor", state);
-  auditLog("wallet_poll_failure", state.user,
-    {at: now, failures, error: state.audit.lastPollError, alerted});
-  if (alerted) await deliverPending(storage, env, fetcher, now, "alarm");
-  return { alerted, failures };
+  const state=await storage.get("monitor");
+  if(!state)return {alerted:false,failures:0,initialized:false};
+  state.audit??=newAudit(now);
+  const oldFailures=Number(state.audit.consecutivePollFailures||0);
+  state.audit.consecutivePollFailures=oldFailures+1;
+  state.audit.consecutivePollSuccesses=0;
+  state.audit.firstPollFailureAt=oldFailures===0 ? now :
+    (state.audit.firstPollFailureAt||now);
+  state.audit.lastPollFailureAt=now;
+  state.audit.lastPollError=safePollError(error);
+  const status=Number(error?.status) ||
+    Number(String(error?.message||"").match(/^HTTP (\d{3}) from data-api\.polymarket\.com/)?.[1]) || null;
+  const kind=error?.kind === "network" ? "network" :
+    status === 429 ? "rate_limit" :
+    status >= 500 ? "upstream" :
+    /(?:Incomplete|Invalid|Repeated|Missing|Pagination cap) Data API v2|cursor|Pagination cap/i.test(String(error?.message||""))
+      ? "data_validation" : "other";
+  state.audit.lastPollErrorKind=kind;
+  state.audit.lastPollErrorStatus=status;
+  state.audit.lastPollErrorEndpoint=safePath(error?.endpoint);
+  state.audit.lastPollTraceId=safeTrace(error?.traceId);
+  const delay=Number(error?.retryAfterMs);
+  state.audit.lastPollRetryAfterSeconds=
+    kind==="rate_limit" && Number.isFinite(delay) && delay>0
+      ? Math.ceil(delay/1000) : null;
+  // A long Retry-After persists across Cron invocations, so no other wallet
+  // request can inadvertently advance this wallet's checkpoint.
+  state.audit.nextAllowedPollAt=state.audit.lastPollRetryAfterSeconds?
+    now+Math.min(6*3600,state.audit.lastPollRetryAfterSeconds) : null;
+  state.audit.healthAlarmActive=false; // Legacy per-wallet alarm deprecated.
+  await storage.put("monitor",state);
+  auditLog("wallet_poll_failure",state.user,{
+    at:now,failures:state.audit.consecutivePollFailures,
+    kind,status,endpoint:state.audit.lastPollErrorEndpoint,
+    retryAfterSeconds:state.audit.lastPollRetryAfterSeconds,
+    traceId:state.audit.lastPollTraceId
+  });
+  return {
+    alerted:false,failures:state.audit.consecutivePollFailures,
+    initialized:true,lastSuccessAt:state.lastSuccessAt??null,
+    ...auditSnapshot(state)
+  };
 }
-
 
 export async function auditV2Shadow(storage, env, fetcher, user, v1Positions, now) {
   if (String(env.DATA_API_PRIMARY || "v1") === "v2") return { skipped: "primary_v2" };
@@ -326,6 +354,16 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     throw new Error("Invalid MIN_ACTIVITY_ALERT_USD");
   let state = await storage.get("monitor");
   if (state && state.user !== user) throw new Error("Wallet changed: use a new Durable Object instance");
+  if (state && Number(state.audit?.nextAllowedPollAt)>now) {
+    state.audit.lastPollAt=now;
+    await storage.put("monitor",state);
+    auditLog("wallet_poll_deferred",user,{
+      at:now,nextAllowedPollAt:state.audit.nextAllowedPollAt,
+      reason:"429_retry_after"
+    });
+    return {initialized:true,paused:true,
+      lastSuccessAt:state.lastSuccessAt??null,...auditSnapshot(state)};
+  }
   // Existing wallets retain their checkpoints and queues; only audit fields are new.
   if (state) {
     state.audit ??= newAudit(now);
@@ -352,7 +390,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
       priceRiskTrackers: inspectPriceRisk(positions,null,now).trackers,
       lowApyState: { lastCheckedAt: now, tokens: {} },
       seen: {}, pending: [],
-      lastSuccessAt: now, audit: { ...newAudit(now), lastPollAt: now } };
+      lastSuccessAt: now, audit: { ...newAudit(now),lastPollAt:now,consecutivePollSuccesses:1 } };
     await storage.put("monitor", state);
     auditLog("wallet_poll_success", user, { at: now, initialized: true,
       positions: Object.keys(tracked).length, alertsDetected: 0, pushesAccepted: 0, pending: 0 });
@@ -405,19 +443,18 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     return tradeAlert(a, a, marketContextLines(a, positions),
       walletLabel(user), link(a), { lifecycle, forecast, reconciliationAttempted: previousSnapshots !== null });
   });
-  const recovering = Boolean(state.audit.healthAlarmActive);
-  if (recovering) {
-    pending.push({
-      formatVersion: 2,
-      title: "✅ MONITOR 恢复 · " + walletLabel(user),
-      short: "钱包监控已恢复正常，交易数据检查点保持连续",
-      desp: "### ✅ 钱包监控恢复\n\n**账户：** " + walletLabel(user) +
-        "\n\n**北京时间：** " + new Date(now * 1000).toLocaleString("zh-CN", {timeZone:"Asia/Shanghai"}) +
-        "\n\n> 已恢复正常查询，历史活动仍通过重叠窗口补查。"
-    });
-  }
-  state.audit.consecutivePollFailures = 0;
-  state.audit.healthAlarmActive = false;
+  // Health notifications are account-wide. One successful poll increments
+  // the streak but cannot by itself generate a recovery push.
+  state.audit.consecutivePollSuccesses=(state.audit.consecutivePollSuccesses||0)+1;
+  state.audit.consecutivePollFailures=0;
+  state.audit.firstPollFailureAt=null;
+  state.audit.lastPollErrorKind=null;
+  state.audit.lastPollErrorStatus=null;
+  state.audit.lastPollErrorEndpoint=null;
+  state.audit.lastPollTraceId=null;
+  state.audit.lastPollRetryAfterSeconds=null;
+  state.audit.nextAllowedPollAt=null;
+  state.audit.healthAlarmActive=false;
   const tracked = { ...state.positions };
   const settlementCandidates = [];
   for (const p of positions) {
@@ -542,5 +579,6 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     pending: delivery.pending, pushDeferred: delivery.failed });
   return { initialized: false, positions: positions.length,
     alerts: alertCount, pushesAccepted: delivery.accepted, pending: delivery.pending,
-    deliveryDeferred: delivery.failed, checkedAt: now };
+    deliveryDeferred: delivery.failed,checkedAt:now,
+    lastSuccessAt:now, ...auditSnapshot(state) };
 }
