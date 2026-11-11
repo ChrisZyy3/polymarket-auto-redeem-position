@@ -281,6 +281,10 @@ export async function coordinateMonitorHealth(env, pollResult, tickMs=Date.now()
     lastPollErrorKind:row.lastPollErrorKind??null,
     lastPollErrorStatus:row.lastPollErrorStatus??null,
     lastPollErrorEndpoint:row.lastPollErrorEndpoint??null,
+    lastPollErrorCode:row.lastPollErrorCode??null,
+    positionsStale:row.positionsStale===true,
+    activitySynced:row.activitySynced===true,
+    lastActivitySuccessAt:row.lastActivitySuccessAt??null,
     lastPollTraceId:row.lastPollTraceId??null,
     lastPollRetryAfterSeconds:row.lastPollRetryAfterSeconds??null,
     nextAllowedPollAt:row.nextAllowedPollAt??null
