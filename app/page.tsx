@@ -33,6 +33,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { PortfolioHistoryChart } from "@/app/components/portfolio-history-chart";
+import { calculateDailyPriceChange, type DailyPositionPoint } from "@/lib/position-change";
 import type { PortfolioHistoryMetrics, PortfolioSnapshot } from "@/lib/portfolio-history";
 import { formatMarketPercentForTick } from "@/lib/price-format";
 import { buildTargetAprPlan, type PositionQuote } from "@/lib/position-quote";
@@ -59,6 +60,13 @@ interface ApiResponse {
 interface HistoryResponse {
   snapshots: PortfolioSnapshot[];
   metrics: PortfolioHistoryMetrics;
+}
+
+interface DailyPositionResponse {
+  status: "ok" | "missing" | "unavailable";
+  baselineDate: string;
+  recordedAt: string | null;
+  positions: DailyPositionPoint[];
 }
 
 interface PositionQuoteResponse {
@@ -131,6 +139,21 @@ function formatNumber(value: number | null | undefined, digits = 2): string {
   });
 }
 
+function formatSignedChange(value: number, decimals: number): string {
+  const magnitude = Math.abs(value) < 1e-10 ? 0 : value;
+  return `${magnitude > 0 ? "+" : magnitude < 0 ? "−" : ""}${Math.abs(magnitude).toFixed(decimals)}`;
+}
+
+function formatShanghaiReference(value: string, language: Language): string {
+  const time = new Date(value);
+  if (!Number.isFinite(time.getTime())) return "—";
+  return time.toLocaleString(language === "en" ? "en-US" : "zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+}
+
 function formatMoneyCompact(value: number | null | undefined): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
   return `$${value.toLocaleString("en-US", {
@@ -187,6 +210,7 @@ export default function Home() {
   const [address, setAddress] = useState("");
   const [data, setData] = useState<ApiResponse | null>(null);
   const [portfolioHistory, setPortfolioHistory] = useState<HistoryResponse | null>(null);
+  const [dailyPositionHistory, setDailyPositionHistory] = useState<DailyPositionResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -197,6 +221,7 @@ export default function Home() {
   const [quoteStates, setQuoteStates] = useState<Record<string, QuoteState>>({});
   const [targetAprInputs, setTargetAprInputs] = useState<Record<string, string>>({});
   const quoteRequestVersion = useRef(0);
+  const queryRequestVersion = useRef(0);
   const isEnglish = language === "en";
 
   // Initialize state configurations from localstorage and URL params on mount
@@ -294,6 +319,13 @@ export default function Home() {
   // Memoize positions from state payload
   // 缓存提取并解析的仓位数组
   const positions = useMemo(() => data?.positions ?? [], [data]);
+  const previousTokenPrices = useMemo(
+    () => new Map(dailyPositionHistory?.status === "ok"
+      ? dailyPositionHistory.positions.map(item => [item.tokenId, item] as const)
+      : []),
+    [dailyPositionHistory],
+  );
+  const hasYesterdayPrices = dailyPositionHistory?.status === "ok";
   const lowAprCount = useMemo(() => positions.filter(position =>
     position.holdApr !== null && Number.isFinite(position.holdApr) &&
     position.holdApr * 100 <= holdAprThreshold
@@ -528,6 +560,58 @@ export default function Home() {
         },
       },
       {
+        id: "dailyChange",
+        accessorFn: position => {
+          const change = calculateDailyPriceChange(
+            position.curPrice, previousTokenPrices.get(position.asset), hasYesterdayPrices,
+          );
+          return change.kind === "ok" ? change.rate : undefined;
+        },
+        sortUndefined: "last",
+        sortDescFirst: true,
+        header: () => (
+          <span title={isEnglish
+            ? "Current token price versus yesterday's approximately 09:10 Beijing snapshot; not rolling 24h."
+            : "当前合约价格相对于昨日北京时间约 09:10 的快照；不是滚动 24h 涨跌幅。"
+          }>
+            {isEnglish ? "D1 Change" : "较昨日"}
+          </span>
+        ),
+        cell: ({ row }) => {
+          const change = calculateDailyPriceChange(
+            row.original.curPrice,
+            previousTokenPrices.get(row.original.asset),
+            hasYesterdayPrices,
+          );
+          if (change.kind === "new") {
+            return <span title={isEnglish ? "Token not held in yesterday's wallet snapshot" : "昨日快照中没有此 Token 仓位"}
+              className="inline-flex min-w-[88px] items-center text-xs font-semibold text-cyan-300">NEW</span>;
+          }
+          if (change.kind !== "ok" || change.rate === null || change.cents === null) {
+            return <span title={isEnglish ? "Yesterday's valid price is unavailable" : "昨日没有可比较的有效价格"}
+              className="inline-flex min-w-[88px] items-center font-mono text-sm text-slate-500">—</span>;
+          }
+          const color = change.rate > 0 ? "text-emerald-400" :
+            change.rate < 0 ? "text-rose-400" : "text-slate-300";
+          const reference = dailyPositionHistory?.recordedAt
+            ? formatShanghaiReference(dailyPositionHistory.recordedAt, language) : "—";
+          const description = isEnglish
+            ? `Yesterday ${reference} (Beijing): ${formatPercent(change.previousPrice, 2)} → ${formatPercent(row.original.curPrice, 2)}. Daily snapshot, not rolling 24 hours.`
+            : `昨日参考 ${reference}（北京时间）：${formatPercent(change.previousPrice, 2)} → ${formatPercent(row.original.curPrice, 2)}；非滚动 24 小时。`;
+          return (
+            <span className="flex min-w-[88px] flex-col gap-0.5 font-mono" title={description}
+              aria-label={description}>
+              <span className={`whitespace-nowrap text-sm font-semibold ${color}`}>
+                {formatSignedChange(change.rate * 100, 2)}%
+              </span>
+              <span className="whitespace-nowrap text-[11px] text-slate-400">
+                {formatSignedChange(change.cents, 2)}¢
+              </span>
+            </span>
+          );
+        },
+      },
+      {
         accessorKey: "currentValue",
         header: isEnglish ? "Value ($)" : "持仓市值 ($)",
         cell: ({ row, getValue }) => {
@@ -649,7 +733,7 @@ export default function Home() {
         },
       },
     ],
-    [expandedPositionKey, handleQuoteToggle, holdAprThreshold, isEnglish, language, marketValues, totalAssetValue]
+    [dailyPositionHistory, expandedPositionKey, handleQuoteToggle, hasYesterdayPrices, holdAprThreshold, isEnglish, language, marketValues, previousTokenPrices, totalAssetValue]
   );
 
   // Setup React Table instance
@@ -694,35 +778,50 @@ export default function Home() {
   // Primary API trigger to run positions and balance check on a wallet address
   // 核心查询函数：触发后端 API 获取指定钱包的持仓分析数据以及 pUSD 现金资产
   async function runQuery(addr: string) {
+    const requestVersion = ++queryRequestVersion.current;
     setLoading(true);
     setError(null);
+    setDailyPositionHistory(null);
     quoteRequestVersion.current += 1;
     setExpandedPositionKey(null);
     setQuoteStates({});
     try {
-      const [res, historyRes] = await Promise.all([
-        fetch(`/api/positions?address=${encodeURIComponent(addr)}&aprThreshold=${holdAprThreshold}&minValue=${DUST_POSITION_VALUE_USD}`),
-        fetch(`/api/portfolio-history?address=${encodeURIComponent(addr)}`),
+      const encodedAddress = encodeURIComponent(addr);
+      const [res, historyRes, positionHistoryRes] = await Promise.all([
+        fetch(`/api/positions?address=${encodedAddress}&aprThreshold=${holdAprThreshold}&minValue=${DUST_POSITION_VALUE_USD}`),
+        fetch(`/api/portfolio-history?address=${encodedAddress}`).catch(() => null),
+        fetch(`/api/position-change?address=${encodedAddress}`).catch(() => null),
       ]);
       const json = await res.json();
       if (!res.ok) {
         throw new Error(json.error || (isEnglish ? "Request failed. Check your connection or wallet address." : "请求接口失败，请检查网络或钱包地址格式"));
       }
+      // History is auxiliary: failed GitHub reads must never break live data.
+      const [historyJson, changeJson] = await Promise.all([
+        historyRes?.ok
+          ? historyRes.json().catch(() => null) as Promise<HistoryResponse | null>
+          : Promise.resolve(null),
+        positionHistoryRes?.ok
+          ? positionHistoryRes.json().catch(() => null) as Promise<DailyPositionResponse | null>
+          : Promise.resolve(null),
+      ]);
+      if (requestVersion !== queryRequestVersion.current) return;
       setData(json as ApiResponse);
-      setPortfolioHistory(historyRes.ok ? ((await historyRes.json()) as HistoryResponse) : null);
+      setPortfolioHistory(historyJson);
+      setDailyPositionHistory(changeJson);
       pushHistory(addr);
 
-      // Sync active search address into query param context
-      // 将当前正在查询的地址反映在浏览器 URL 参数中，方便刷新不丢失
       const url = new URL(window.location.href);
       url.searchParams.set("address", addr);
       window.history.replaceState(null, "", url);
     } catch (err) {
+      if (requestVersion !== queryRequestVersion.current) return;
       setData(null);
       setPortfolioHistory(null);
+      setDailyPositionHistory(null);
       setError(err instanceof Error ? err.message : isEnglish ? "Unexpected request error" : "未知的请求链路错误");
     } finally {
-      setLoading(false);
+      if (requestVersion === queryRequestVersion.current) setLoading(false);
     }
   }
 
@@ -1025,6 +1124,17 @@ export default function Home() {
                 ? "Sort by yield or position value. Expand a market for live bid/ask APR."
                 : "可按收益或市值排序，展开市场查看实时买卖盘口 APR。"}
             </p>
+            {data && (
+              <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                {dailyPositionHistory?.status === "ok" && dailyPositionHistory.recordedAt
+                  ? (isEnglish
+                    ? `D1 Change reference: ${formatShanghaiReference(dailyPositionHistory.recordedAt, language)} Beijing time (not rolling 24h).`
+                    : `较昨日参考：${formatShanghaiReference(dailyPositionHistory.recordedAt, language)}（北京时间，非滚动 24h）。`)
+                  : (isEnglish
+                    ? "D1 Change needs yesterday’s daily token snapshot; unavailable values show —."
+                    : "较昨日需要前一天的仓位价格快照；尚未积累历史数据时显示 —。")}
+              </p>
+            )}
             <p className="mt-1.5 text-[11px] text-slate-500 md:hidden">
               {isEnglish ? "Swipe horizontally to view more columns" : "左右滑动查看完整仓位数据"}
             </p>

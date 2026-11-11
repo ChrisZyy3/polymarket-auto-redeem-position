@@ -1,0 +1,40 @@
+name: Dashboard and Daily History Tests
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "lib/**"
+      - "scripts/**"
+      - "tests/**"
+      - "package.json"
+      - ".github/workflows/portfolio-history.yml"
+      - ".github/workflows/dashboard-history-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "lib/**"
+      - "scripts/**"
+      - "tests/**"
+      - "package.json"
+      - ".github/workflows/portfolio-history.yml"
+      - ".github/workflows/dashboard-history-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: TypeScript
+        run: npm run check

@@ -89,3 +89,21 @@ export async function appendSnapshotOnGitHub(
     throw new Error(`GitHub history write failed (${writeResponse.status}): ${details}`);
   }
 }
+
+/** Public read-only daily per-token reference. 404 = no snapshot (not zero price). */
+export async function readDailyPositionHistoryFromRawUrl(
+  options: PublicHistoryOptions,
+  date: string,
+): Promise<import("./position-change").DailyPositionHistory | null> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Invalid daily history date");
+  const branchPath = options.branch.split("/").map(encodeURIComponent).join("/");
+  const url = `https://raw.githubusercontent.com/${options.repository}/${branchPath}/data/position-history/${date}.json`;
+  const response = await fetch(url, { next: { revalidate: 300 } });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`GitHub position history read failed (${response.status})`);
+  const history = await response.json() as import("./position-change").DailyPositionHistory;
+  if (history.version !== 1 || history.date !== date || !Array.isArray(history.wallets)) {
+    throw new Error("Invalid GitHub daily position history");
+  }
+  return history;
+}
