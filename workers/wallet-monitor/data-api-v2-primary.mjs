@@ -79,7 +79,10 @@ async function walkV2(fetcher, endpoint, params, normalize, maxPages) {
   for (let page = 0; page < maxPages; page++) {
     const args = new URLSearchParams(params);
     if (cursor) args.set("cursor", cursor);
-    const payload = await dataApiJson(fetcher, ROOT + endpoint + "?" + args.toString());
+    // Positions are heavy queries: a 429 is handled by the shared circuit
+    // rather than making two more requests against an overloaded endpoint.
+    const payload = await dataApiJson(fetcher, ROOT + endpoint + "?" + args.toString(),
+      {retry429:endpoint!=="/v2/positions"});
     if (!payload || !Array.isArray(payload.data) ||
         typeof payload.pagination !== "object" || payload.pagination === null)
       throw new Error("Invalid Data API v2 envelope: " + endpoint);
