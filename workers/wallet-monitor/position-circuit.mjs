@@ -43,3 +43,29 @@ export function positionCircuitUpdate(previous,event,now,{
   const blockedUntil=now+seconds+randomJitter(random,30);
   return {...state,consecutive429,blockedUntil,probeLeaseUntil:0,last429At:now};
 }
+
+const CIRCUIT_ID="_system_position_circuit_v1";
+async function circuitRequest(env,path,payload){
+  if(!env?.MONITOR || String(env.POSITION_CIRCUIT_ENABLED??"true")==="false")
+    return null;
+  try{
+    const stub=env.MONITOR.get(env.MONITOR.idFromName(CIRCUIT_ID));
+    const response=await stub.fetch("https://internal"+path,{
+      method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify(payload)
+    });
+    if(!response.ok)throw new Error("Circuit operation failed");
+    return response.json();
+  }catch{
+    // Safety: failure of the limiter never becomes a missing activity/position.
+    console.warn("position_circuit_unavailable");
+    return null;
+  }
+}
+export async function beforePositionQuery(env,now){
+  const result=await circuitRequest(env,"/position-circuit-check",{now});
+  return result||{allowed:true,reason:"unavailable",nextAllowedAt:null};
+}
+export async function afterPositionQuery(env,now,event,retryAfterMs=null){
+  return circuitRequest(env,"/position-circuit-report",{now,event,retryAfterMs});
+}
