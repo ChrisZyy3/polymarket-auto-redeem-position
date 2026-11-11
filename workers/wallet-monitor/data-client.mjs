@@ -15,13 +15,14 @@ export function retryAfterMs(headers, now = Date.now()) {
 }
 
 function safeRay(headers) {
-  const value = String(headers?.get?.("cf-ray") || headers?.get?.("x-request-id") || "");
+  const value = String(headers?.get?.("x-trace-id") ||
+    headers?.get?.("cf-ray") || headers?.get?.("x-request-id") || "");
   return /^[a-zA-Z0-9-]{5,80}$/.test(value) ? value : null;
 }
 
 export class DataApiRequestError extends Error {
   constructor({status=null,host="data-api.polymarket.com",endpoint=null,
-    retryAfterMs=null,traceId=null,kind="http"}) {
+    retryAfterMs=null,traceId=null,errorCode=null,kind="http"}) {
     super(status === null ? "Network/timeout error from " + host :
       "HTTP " + status + " from " + host);
     this.name = "DataApiRequestError";
@@ -29,6 +30,7 @@ export class DataApiRequestError extends Error {
     this.endpoint = endpoint;
     this.retryAfterMs = retryAfterMs;
     this.traceId = traceId;
+    this.errorCode = errorCode;
     this.kind = status === 429 ? "rate_limit" :
       status !== null && status >= 500 ? "upstream" : kind;
   }
@@ -56,10 +58,22 @@ export async function dataApiJson(fetcher, url, {
     if (response.ok) return response.json();
 
     const status = response.status;
-    const traceId = safeRay(response.headers);
     const requested = retryAfterMs(response.headers);
-    const error = new DataApiRequestError({
-      host,endpoint,status,retryAfterMs:requested,traceId
+    // Official v2 responses carry x-trace-id and a JSON trace_id/error code.
+    // Only read this tiny error body, never log request URL or wallet params.
+    let errorPayload=null;
+    try{
+      if(typeof response.json==="function") errorPayload=await response.json();
+    }catch{
+      // Invalid/non-JSON errors are still handled by HTTP status.
+    }
+    const candidate=String(errorPayload?.trace_id||"");
+    const traceId=safeRay(response.headers) ||
+      (/^[A-Za-z0-9-]{5,80}$/.test(candidate)?candidate:null);
+    const code=String(errorPayload?.code||"");
+    const errorCode=/^[a-z][a-z0-9_]{0,48}$/.test(code)?code:null;
+    const error=new DataApiRequestError({
+      host,endpoint,status,retryAfterMs:requested,traceId,errorCode
     });
     if (!RETRYABLE.has(status) || attempt >= retries) throw error;
 
