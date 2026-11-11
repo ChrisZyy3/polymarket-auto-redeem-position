@@ -32,18 +32,31 @@ jobs:
         run: npm ci
 
       - name: Capture portfolio snapshot
+        id: capture
+        continue-on-error: true
         env:
           POLYMARKET_USER_ADDRESSES: ${{ vars.POLYMARKET_USER_ADDRESSES || secrets.POLYMARKET_USER_ADDRESS }}
         run: npm run snapshot
 
       - name: Commit updated history
+        # Keep successful wallet snapshots even if one wallet was rate-limited.
+        if: always() && steps.capture.outcome != 'skipped'
         run: |
-          if git diff --quiet -- data/portfolio-history.json; then
-            echo "History is already current for this UTC day."
+          git add data/portfolio-history.json
+          if [ -d data/position-history ]; then
+            git add data/position-history
+          fi
+          if git diff --cached --quiet; then
+            echo "No new portfolio or position price history."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/portfolio-history.json
-          git commit -m "data: record daily portfolio snapshot"
+          git commit -m "data: record daily portfolio and position prices"
           git push
+
+      - name: Mark partial snapshot runs as failed
+        if: steps.capture.outcome == 'failure'
+        run: |
+          echo "::error::Daily portfolio capture failed for one or more wallets. Successfully captured wallets were committed when available."
+          exit 1
