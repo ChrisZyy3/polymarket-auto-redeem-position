@@ -4,6 +4,7 @@ import { digestDate, digestWindow, composeDailyDigest,
   validDailySnapshots, enqueueDigest } from "./asset-digest.mjs";
 import { healthSummary, HEALTH_STALE_SECONDS } from "./health.mjs";
 import { healthTransition, healthNotification } from "./monitor-health.mjs";
+import { positionCircuitGate, positionCircuitUpdate } from "./position-circuit.mjs";
 
 // One configured wallet per Durable Object. Preserve the legacy address as a fallback.
 export function walletAddresses(env) {
@@ -122,6 +123,43 @@ export class WalletMonitor {
         pending:saved?.pending?.length||0,
         sent:saved?.audit?.pushCount||0});
     }
+
+    // Dedicated rate limiter DO. Wallets retain separate state/checkpoints.
+    // GET is internal only; the public proxy requires MONITOR_SECRET.
+    if(url.pathname==="/position-circuit-status" && request.method==="GET"){
+      return Response.json({ok:true,state:await this.ctx.storage.get("position-circuit")||null});
+    }
+    if((url.pathname==="/position-circuit-check" ||
+        url.pathname==="/position-circuit-report") && request.method==="POST"){
+      if(this.running)await this.running;
+      const work=(async()=>{
+        const body=await request.json();
+        const now=Number(body.now);
+        if(!Number.isFinite(now)||now<=0)
+          return Response.json({ok:false,error:"Invalid timestamp"},{status:400});
+        const old=await this.ctx.storage.get("position-circuit");
+        if(url.pathname==="/position-circuit-check"){
+          const gate=positionCircuitGate(old,now);
+          await this.ctx.storage.put("position-circuit",gate.state);
+          return Response.json({ok:true,allowed:gate.allowed,reason:gate.reason,
+            nextAllowedAt:gate.nextAllowedAt});
+        }
+        if(!["429","ok","other"].includes(body.event))
+          return Response.json({ok:false,error:"Invalid result"},{status:400});
+        const next=positionCircuitUpdate(old,body.event,now,{
+          retryAfterMs:body.retryAfterMs
+        });
+        await this.ctx.storage.put("position-circuit",next);
+        console.info("position_circuit_result",JSON.stringify({
+          at:now,event:body.event,consecutive429:next.consecutive429,
+          blockedUntil:next.blockedUntil
+        }));
+        return Response.json({ok:true,blockedUntil:next.blockedUntil,
+          consecutive429:next.consecutive429});
+      })();
+      this.running=work.finally(()=>{this.running=null});
+      return this.running;
+    }
     const wallet = url.searchParams.get("wallet");
     if (!wallet || !/^0x[a-f0-9]{40}$/.test(wallet)) {
       return Response.json({ ok: false, error: "Invalid wallet" }, { status: 400 });
@@ -193,12 +231,7 @@ function instance(env, wallet) {
 
 async function runAll(env, route) {
   const wallets = walletAddresses(env);
-  const results = await Promise.all(wallets.map(async (wallet, index) => {
-    // Spread API calls over ~5-6 seconds to reduce Data API rate-limit bursts.
-    if (route==="poll" && index>0){
-      await new Promise(resolve=>setTimeout(resolve,index*2500+
-        Math.floor(Math.random()*600)));
-    }
+  const runWallet = async wallet => {
     try {
       const response = await instance(env, wallet).fetch(
         "https://internal/" + route + "?wallet=" + wallet,
@@ -207,11 +240,24 @@ async function runAll(env, route) {
       const body = await response.json();
       return { wallet, ...body, ok: response.ok && body.ok !== false };
     } catch (error) {
-      console.error("Wallet " + route + " request failed for " + wallet, error?.message || "Unknown error");
-      return { wallet, ok: false, error: "Worker request failed" };
+      console.error("Wallet " + route + " request failed for " + wallet,
+        error?.message || "Unknown error");
+      return {wallet,ok:false,error:"Worker request failed"};
     }
-  }));
-  return { ok: results.every(r => r.ok), wallets: results };
+  };
+  // Sequential polls are deliberate: the first wallet can trip the shared
+  // 429 circuit before the next wallet attempts the costly positions query.
+  // Status/health reads remain concurrent and don't call Polymarket APIs.
+  let results;
+  if(route==="poll"){
+    results=[];
+    for (const [index,wallet] of wallets.entries()){
+      if(index>0)await new Promise(resolve=>setTimeout(resolve,300+
+        Math.floor(Math.random()*450)));
+      results.push(await runWallet(wallet));
+    }
+  } else results=await Promise.all(wallets.map(runWallet));
+  return {ok:results.every(r=>r.ok),wallets:results};
 }
 
 
@@ -340,6 +386,10 @@ export default {
     if (!env.MONITOR_SECRET ||
         request.headers.get("authorization") !== "Bearer " + env.MONITOR_SECRET) {
       return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
+    }
+    if(path==="/position-circuit-status" && request.method==="GET"){
+      const coordinator=env.MONITOR.get(env.MONITOR.idFromName("_system_position_circuit_v1"));
+      return coordinator.fetch("https://internal/position-circuit-status",{method:"GET"});
     }
     if(path==="/monitor-health-status" && request.method==="GET"){
       const coordinator=env.MONITOR.get(env.MONITOR.idFromName("_system_monitor_health_v1"));
