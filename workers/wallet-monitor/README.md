@@ -282,7 +282,7 @@ Polymarket 数据 API v1 官方迁移时间表标注 2026-10-24 退役。此 Wor
 
 ## 429 positions 服务容量保护与成交持续监控（2026-11-11）
 
-- 保留完整的 `/v2/positions` 查询覆盖：`status=OPEN`、`include_archived=true`、份数下限 0 和完整 cursor 分页。特别注意：**不要为了“减轻查询”而删掉 archived 或改动尘埃过滤，否则会漏掉已归档但仍持有的仓位**。服务端排序/请求参数优化须在真实返回集合对照后另行启用。
+- **2026-11-11 改为与 Dashboard 相同的 `/v2/positions` 查询方式**：`status=OPEN`、`filter_type=TOKENS`、`filter_amount=0`、`limit=500`、完整 cursor 分页；不传 `include_archived`（默认 `false`），不指定排序（默认按 `CURRENT_VALUE`）。用户明确选择与 Dashboard 统一。与原版不同，**归档市场中仍持有的仓位将不会出现在常规持仓快照中**，其相关结算/风控提醒可能缺失；即使未出现，也不得推断该仓位已清仓、已赎回或亏损。交易/赎回活动通过独立 `/v2/activity` 同步，仍按活动明细推送。
 - 新增独立 DO `_system_position_circuit_v1` 的**跨钱包持仓 API 429 熔断**：当任何钱包的 `/v2/positions` 响应 429 时，即使没有 `Retry-After`，也从 5 分钟开始按次数指数退避，最长默认 60 分钟；长 `Retry-After` 优先保证不提前重试，并加入短暂随机错峰。`/v2/positions` 收到首个 429 后不在单轮请求内再次重试，直接触发熔断，避免高负载期间重试放大。整个熔断由三个钱包共享，而不是每个钱包重复请求。同一时间只允许一个恢复探针。
 - Cron 仍为每 5 分钟，但三钱包的持仓刷新**顺序执行**，第一钱包触发熔断后后续钱包无需继续撞同一限流；钱包间仍有约 0.3–0.75 秒间隔。无需降低 BUY/SELL/REDEEM 活动检查频率。
 - **活动查询与持仓查询解耦**：`/v2/positions` 返回 429 或被熔断时，已初始化的钱包会单独查询完整 cursor 的 `/v2/activity`，核实 TRADE/REDEEM 的 transaction_hash、token_id、时间、方向和金额。成功后可发送精确的 BUY/SELL/REDEEM 活动通知，仍按 $100 门槛/5分钟合并。**不把这些交易反推为首次建仓、清仓或已结算**，不发基于陈旧持仓价格的 APR、WIN/LOSS 或风控提醒；成交通知正文明确说明当前仓位数据暂不可核实。
