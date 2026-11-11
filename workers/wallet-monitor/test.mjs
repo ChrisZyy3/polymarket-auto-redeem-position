@@ -493,8 +493,8 @@ prior.audit.consecutivePollSuccesses=0;
 prior.audit.lastPollErrorKind="rate_limit";
 await storage.put("monitor",prior);
 const blockedFetcher=async()=>{throw new Error("Upstream fetch must be skipped");};
-const deferred=await poll(storage,env,blockedFetcher,3900);
-assert(deferred.paused===true && deferred.nextAllowedPollAt===4200 &&
+const rateLimitedPoll=await poll(storage,env,blockedFetcher,3900);
+assert(rateLimitedPoll.paused===true && rateLimitedPoll.nextAllowedPollAt===4200 &&
   db.get("monitor").checkpoint===blockedAt,
   "Retry-After pause neither fetches upstream nor advances checkpoint");
 console.log("Passed: bounded API retries, persistent 429 diagnostics, checkpoint-safe deferral and durable outbox");
