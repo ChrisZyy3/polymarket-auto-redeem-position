@@ -223,7 +223,10 @@ export async function coordinateMonitorHealth(env, pollResult, tickMs=Date.now()
   const body={tick:now,wallets:pollResult.wallets.map(row=>({
     wallet:row.wallet,
     label:walletLabel(row.wallet),
-    initialized:row.initialized===true,
+    // The poll() return field "initialized:false" means "not a baseline
+    // initialization run", NOT "this wallet has no durable monitor state".
+    initialized:row.initialized===true || row.paused===true ||
+      (Number.isFinite(Number(row.lastSuccessAt)) && Number(row.lastSuccessAt)>0),
     lastSuccessAt:row.lastSuccessAt??null,
     consecutivePollFailures:row.consecutivePollFailures??0,
     consecutivePollSuccesses:row.consecutivePollSuccesses??0,
