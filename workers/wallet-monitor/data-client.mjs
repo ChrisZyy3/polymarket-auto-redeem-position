@@ -38,7 +38,7 @@ export class DataApiRequestError extends Error {
 
 export async function dataApiJson(fetcher, url, {
   retries = 2, sleep = delayDefault, random = Math.random,
-  timeoutMs = 15000, maxWaitMs = 4000
+  timeoutMs = 15000, maxWaitMs = 4000, retry429 = true
 } = {}) {
   const parsed = new URL(url);
   const host = parsed.hostname;
@@ -75,7 +75,10 @@ export async function dataApiJson(fetcher, url, {
     const error=new DataApiRequestError({
       host,endpoint,status,retryAfterMs:requested,traceId,errorCode
     });
-    if (!RETRYABLE.has(status) || attempt >= retries) throw error;
+    // Heavy /v2/positions 429 must immediately trip the shared circuit;
+    // retries in the same request amplify upstream overload.
+    if (!RETRYABLE.has(status) || attempt >= retries ||
+        (status===429 && retry429===false)) throw error;
 
     // Respect the server's Retry-After rather than hammering during overload.
     // Never hold a five-minute Cron invocation for a long Retry-After: the
