@@ -129,6 +129,8 @@ export function healthNotification(event, affected, now, lastState={}) {
     : "> 所有监控钱包已连续成功 3 次。活动数据会从保留的检查点补查；仍应以实际链上交易及结算为准。");
   return {
     formatVersion:2,
+    // Account-wide alert has no single wallet to query for pUSD.
+    skipBalanceFooter:true,
     title:event==="warning"?
       "⚠️ MONITOR · 汇总异常 · "+list.length+" 个钱包":
       "✅ MONITOR 恢复 · "+list.length+" 个钱包",
