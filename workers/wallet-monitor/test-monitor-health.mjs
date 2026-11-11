@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {healthTransition,healthNotification} from "./monitor-health.mjs";
-import {WalletMonitor} from "./worker.mjs";
+import {WalletMonitor,coordinateMonitorHealth} from "./worker.mjs";
 import {DataApiRequestError} from "./data-client.mjs";
 
 const A="0x9f7eb5bc88342f01d18754be0439fad79ec282ce";
@@ -160,3 +160,28 @@ try {
  globalThis.fetch=oldFetch;
 }
 console.log("Passed: Durable Object coordinator single push, idempotency, retries, single recovery");
+
+
+// Existing poll() returns "initialized:false" on every non-baseline SUCCESS;
+// do not treat it as an uninitialized DO when summarizing account health.
+const batches=[];
+const coordinatorStub={
+  idFromName:name=>name,
+  get:name=>({fetch:async(_url,opts)=>{
+    assert.equal(name,"_system_monitor_health_v1");
+    batches.push(JSON.parse(opts.body));
+    return Response.json({ok:true,event:null});
+  }})
+};
+const integrated=await coordinateMonitorHealth({MONITOR:coordinatorStub},{
+  wallets:[
+    {wallet:A,initialized:false,lastSuccessAt:20000,consecutivePollSuccesses:4},
+    {wallet:B,initialized:false,lastSuccessAt:20000,consecutivePollSuccesses:4},
+    {wallet:C,initialized:false,lastSuccessAt:20000,consecutivePollSuccesses:4}
+  ]
+},20_000_000);
+assert.equal(batches.length,1);
+assert.equal(batches[0].wallets.length,3);
+assert(batches[0].wallets.every(w=>w.initialized===true),
+  "successful non-baseline polls are initialized wallet states for recovery");
+console.log("Passed: account coordinator receives correct wallet initialization semantics");
