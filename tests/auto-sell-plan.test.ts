@@ -27,7 +27,7 @@ test("SELL target is rounded upward to the next legal tick, not down",()=>{
  assert.ok(p.priceAtLimitAprPercent! <= 12);
  assert.equal(p.quantity,1000);
  assert.equal(p.estimatedGrossProceeds,990);
- assert.equal(p.estimatedProfitVsAvgCost,70);
+ assert.ok(Math.abs(p.estimatedProfitVsAvgCost! - 70) < 1e-8);
 });
 
 test("a bid above planned limit would cross, but no fill is assumed",()=>{
