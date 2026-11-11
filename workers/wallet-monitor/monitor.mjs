@@ -136,6 +136,7 @@ function newAudit(now) {
     lastPollErrorStatus: null,
     lastPollErrorEndpoint: null,
     lastPollTraceId: null,
+    lastPollErrorCode: null,
     lastPollRetryAfterSeconds: null,
     nextAllowedPollAt: null,
     lastActivitySuccessAt: null,
@@ -174,6 +175,7 @@ export function auditSnapshot(state) {
     lastPollErrorStatus: a.lastPollErrorStatus ?? null,
     lastPollErrorEndpoint: a.lastPollErrorEndpoint ?? null,
     lastPollTraceId: a.lastPollTraceId ?? null,
+    lastPollErrorCode: a.lastPollErrorCode ?? null,
     lastPollRetryAfterSeconds: a.lastPollRetryAfterSeconds ?? null,
     nextAllowedPollAt: a.nextAllowedPollAt ?? null,
     lastActivitySuccessAt: a.lastActivitySuccessAt ?? state?.lastActivitySuccessAt ?? null,
@@ -292,6 +294,8 @@ export async function recordPollFailure(storage, env, fetcher = fetch,
   state.audit.lastPollErrorStatus=status;
   state.audit.lastPollErrorEndpoint=safePath(error?.endpoint);
   state.audit.lastPollTraceId=safeTrace(error?.traceId);
+  state.audit.lastPollErrorCode=/^[a-z][a-z0-9_]{0,48}$/.test(String(error?.errorCode||""))
+    ? error.errorCode:null;
   const delay=Number(error?.retryAfterMs);
   state.audit.lastPollRetryAfterSeconds=
     kind==="rate_limit" && Number.isFinite(delay) && delay>0
@@ -306,7 +310,8 @@ export async function recordPollFailure(storage, env, fetcher = fetch,
     at:now,failures:state.audit.consecutivePollFailures,
     kind,status,endpoint:state.audit.lastPollErrorEndpoint,
     retryAfterSeconds:state.audit.lastPollRetryAfterSeconds,
-    traceId:state.audit.lastPollTraceId
+    traceId:state.audit.lastPollTraceId,
+    code:state.audit.lastPollErrorCode
   });
   return {
     alerted:false,failures:state.audit.consecutivePollFailures,
@@ -556,6 +561,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
   state.audit.lastPollErrorStatus=null;
   state.audit.lastPollErrorEndpoint=null;
   state.audit.lastPollTraceId=null;
+  state.audit.lastPollErrorCode=null;
   state.audit.lastPollRetryAfterSeconds=null;
   state.audit.nextAllowedPollAt=null;
   state.audit.healthAlarmActive=false;
