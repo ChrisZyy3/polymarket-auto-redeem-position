@@ -96,7 +96,11 @@ export class WalletMonitor {
           queued=1;
         }
         await this.ctx.storage.put("monitor",saved);
-        const delivery=await deliverPending(this.ctx.storage,this.env,fetch,now,"health");
+        // The outbox alarm owns retries. A duplicate/unchanged Cron tick
+        // must not re-send a failed MONITOR notification.
+        const delivery=queued
+          ? await deliverPending(this.ctx.storage,this.env,fetch,now,"health")
+          : {accepted:0,pending:saved.pending?.length||0};
         console.info("wallet_health_aggregate",JSON.stringify({
           at:now,event:transition.event||"none",
           affected:transition.affected?.length||0,
