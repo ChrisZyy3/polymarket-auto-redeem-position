@@ -69,8 +69,7 @@ export async function dataApiJson(fetcher, url, {
     const jitter = Math.floor(random()*500);
     const normal = 500*(2**attempt)+jitter;
     const wait = requested === null ? normal
-      : status === 429 ? Math.max(500,requested+jitter)
-      : requested;
+      : Math.max(500,requested+jitter);
     if (wait > maxWaitMs) throw error;
     await sleep(wait);
   }
