@@ -1,59 +1,67 @@
 import "dotenv/config";
 
 import { appendSnapshot } from "../lib/portfolio-history";
-import {
-  readPortfolioHistory,
-  writePortfolioHistory,
-} from "../lib/portfolio-history-file";
+import { readPortfolioHistory, writePortfolioHistory } from "../lib/portfolio-history-file";
 import { parsePortfolioAddresses } from "../lib/portfolio-addresses";
-import { capturePortfolioSnapshot } from "../lib/portfolio-snapshot";
+import { capturePortfolioSnapshotWithPositions } from "../lib/portfolio-snapshot";
+import { mergeDailyPositionHistory, shanghaiCalendarDay } from "../lib/position-change";
+import {
+  readDailyPositionHistoryLocal,
+  writeDailyPositionHistoryLocal,
+} from "../lib/position-history-file";
 
 async function main(): Promise<void> {
   const addresses = parsePortfolioAddresses(
     process.env.POLYMARKET_USER_ADDRESSES || process.env.POLYMARKET_USER_ADDRESS,
   );
   const recordedAt = new Date();
+  const shanghaiDay = shanghaiCalendarDay(recordedAt);
 
-  const [history, results] = await Promise.all([
+  // Reuse the exact same positions fetch for total value and every token price.
+  const [history, yesterdayOrTodayFile, results] = await Promise.all([
     readPortfolioHistory(),
+    readDailyPositionHistoryLocal(shanghaiDay),
     Promise.allSettled(
-      addresses.map((address) => capturePortfolioSnapshot(address, recordedAt)),
+      addresses.map(address => capturePortfolioSnapshotWithPositions(address, recordedAt)),
     ),
   ]);
+  const captured = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
+  if (captured.length === 0) throw new Error("No portfolio snapshots were recorded");
 
-  const snapshots = results.flatMap((result, index) => {
-    if (result.status === "fulfilled") return [result.value];
-
-    console.error(`Failed to record ${addresses[index]}:`, result.reason);
-    return [];
-  });
-
-  if (snapshots.length === 0) {
-    throw new Error("No portfolio snapshots were recorded");
-  }
-
-  const updatedHistory = snapshots.reduce(
-    (currentHistory, snapshot) => appendSnapshot(currentHistory, snapshot),
+  const updatedHistory = captured.reduce(
+    (current, item) => appendSnapshot(current, item.portfolio),
     history,
   );
-  await writePortfolioHistory(updatedHistory);
+  const updatedPositions = mergeDailyPositionHistory(
+    yesterdayOrTodayFile,
+    shanghaiDay,
+    captured.map(item => item.walletPositions),
+  );
 
-  for (const snapshot of snapshots) {
+  // Commit both files together in a single GitHub Actions commit.
+  await writePortfolioHistory(updatedHistory);
+  await writeDailyPositionHistoryLocal(updatedPositions);
+
+  for (const entry of captured) {
+    const snapshot = entry.portfolio;
     console.log(
       `Recorded ${snapshot.recordedAt} for ${snapshot.address}: ` +
         `total=$${snapshot.totalBalance.toFixed(2)}, ` +
-        `positions=$${snapshot.positionsValue.toFixed(2)}, ` +
-        `cash=$${snapshot.availableBalance.toFixed(2)}`,
+        `positions=${snapshot.positionCount}, priceRecords=${entry.walletPositions.positions.length}`,
     );
   }
-
-  const failedCount = results.length - snapshots.length;
-  if (failedCount > 0) {
-    throw new Error(`${failedCount} portfolio snapshot(s) failed after successful snapshots were saved`);
+  const failures = results.flatMap((result, index) =>
+    result.status === "rejected" ? [addresses[index]] : [],
+  );
+  if (failures.length > 0) {
+    for (const address of failures) console.error(`Snapshot failed for wallet ${address}`);
+    // The workflow commits successful wallet files even if this step fails,
+    // but stays red so incomplete daily coverage cannot go unnoticed.
+    throw new Error(`${failures.length} wallet snapshot(s) failed; other wallets were saved`);
   }
 }
 
-main().catch((error) => {
+main().catch(error => {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;
 });
