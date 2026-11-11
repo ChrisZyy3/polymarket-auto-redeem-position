@@ -26,12 +26,12 @@ import {
   Zap,
   CalendarClock,
   Database,
-  ExternalLink,
   Languages,
   ChevronDown,
   ChevronUp,
   RefreshCw,
 } from "lucide-react";
+import { MarketTitle } from "@/app/components/market-title";
 import { PortfolioHistoryChart } from "@/app/components/portfolio-history-chart";
 import { calculateDailyPriceChange, type DailyPositionPoint } from "@/lib/position-change";
 import type { PortfolioHistoryMetrics, PortfolioSnapshot } from "@/lib/portfolio-history";
@@ -441,64 +441,43 @@ export default function Home() {
         accessorKey: "title",
         header: isEnglish ? "Market / outcome" : "分析市场 / 方向",
         cell: ({ row }) => {
-          const marketUrl = getMarketUrl(row.original);
-          const fullMarketName = `${row.original.title} - ${row.original.outcome}`;
-          const quoteKey = getPositionKey(row.original);
+          const position = row.original;
+          const marketUrl = getMarketUrl(position);
+          const quoteKey = getPositionKey(position);
           const quoteExpanded = expandedPositionKey === quoteKey;
-          const marketContent = (
-            <>
-              <div className="flex min-w-0 items-center gap-1 font-semibold text-slate-200 group-hover:text-cyan-400 transition-colors">
-                <span className="min-w-0 truncate">{row.original.title}</span>
-                {marketUrl && <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
-              </div>
-              <div className="mt-1 flex items-center gap-1.5">
-                <span className="hidden md:inline-flex text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
-                  {isEnglish ? "Outcome" : "持有方向"}
-                </span>
-                <span className="truncate text-xs font-semibold text-cyan-400">{row.original.outcome}</span>
-              </div>
-            </>
-          );
           const quoteToggleLabel = quoteExpanded
             ? (isEnglish ? "Hide live bid and ask APR" : "收起实时盘口 APR")
             : (isEnglish ? "Show live bid and ask APR" : "展开实时盘口 APR");
           return (
-            <div className="max-w-[280px]">
-              <div className="flex items-end gap-2 md:block">
-                {marketUrl ? (
-                  <a
-                    href={marketUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    title={fullMarketName}
-                    aria-label={`${isEnglish ? "Open market on Polymarket" : "打开 Polymarket 市场"}: ${fullMarketName}`}
-                    className="block min-w-0 flex-1 rounded-sm outline-none hover:text-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
-                  >
-                    {marketContent}
-                  </a>
-                ) : (
-                  <div className="min-w-0 flex-1" title={fullMarketName}>{marketContent}</div>
-                )}
-                {row.original.status !== "redeemable" ? (
+            <div className="w-[260px] min-w-[260px] md:w-[380px] md:min-w-[380px] xl:w-[420px] xl:min-w-[420px]">
+              <div className="flex items-start gap-2 md:block">
+                <MarketTitle
+                  key={quoteKey}
+                  title={position.title}
+                  outcome={position.outcome}
+                  marketUrl={marketUrl}
+                  language={language}
+                />
+                {position.status !== "redeemable" ? (
                   <button
                     type="button"
-                    onClick={() => handleQuoteToggle(row.original)}
+                    onClick={() => handleQuoteToggle(position)}
                     aria-expanded={quoteExpanded}
                     aria-label={quoteToggleLabel}
                     title={isEnglish ? "Market APR" : "查看盘口 APR"}
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-cyan-500/20 bg-cyan-500/5 text-cyan-400 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/10 focus:outline-none focus:ring-1 focus:ring-cyan-400 md:hidden"
+                    className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-cyan-500/20 bg-cyan-500/5 text-cyan-400 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 md:hidden"
                   >
                     {quoteExpanded ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
                   </button>
                 ) : null}
               </div>
-              {row.original.status !== "redeemable" ? (
+              {position.status !== "redeemable" ? (
                 <button
                   type="button"
-                  onClick={() => handleQuoteToggle(row.original)}
+                  onClick={() => handleQuoteToggle(position)}
                   aria-expanded={quoteExpanded}
                   aria-label={quoteToggleLabel}
-                  className="mt-2 hidden items-center gap-1 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2 py-1 text-[10px] font-semibold text-cyan-400 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/10 focus:outline-none focus:ring-1 focus:ring-cyan-400 md:inline-flex"
+                  className="mt-2 hidden items-center gap-1 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2 py-1 text-[10px] font-semibold text-cyan-400 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 md:inline-flex"
                 >
                   {quoteExpanded ? <ChevronUp className="h-3 w-3" aria-hidden="true" /> : <ChevronDown className="h-3 w-3" aria-hidden="true" />}
                   {isEnglish ? "Market APR" : "查看盘口 APR"}
