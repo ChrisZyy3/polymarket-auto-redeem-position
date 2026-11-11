@@ -417,12 +417,9 @@ export default function Home() {
 
   function handleTargetAprChange(asset: string, value: string) {
     if (value && !/^\d*(?:\.\d*)?$/.test(value)) return;
-    const nextInputs = { ...targetAprInputs };
-    if (value) {
-      nextInputs[asset] = value;
-    } else {
-      delete nextInputs[asset];
-    }
+    // Keep an intentionally blank in-progress input as blank. Otherwise
+    // the 12% default reappears instantly and makes editing impossible.
+    const nextInputs = { ...targetAprInputs, [asset]: value };
     setTargetAprInputs(nextInputs);
     try {
       localStorage.setItem(TARGET_APR_BY_ASSET_KEY, serializeTargetAprInputs(nextInputs));
