@@ -278,3 +278,18 @@ Polymarket 数据 API v1 官方迁移时间表标注 2026-10-24 退役。此 Wor
 - **查看状态**：`curl -H "Authorization: Bearer $MONITOR_SECRET" https://worker.example.workers.dev/monitor-health-status`，不会对外公开。
 - **不变**：$100 成交/赎回过滤、WIN/LOSS、低综合 APR、CLOB 风控、日报及独立的公开 `GET /health` 不变。独立的 GitHub Actions 外部可用性检查仍可探测 Worker 全局停机。
 - **升级边界**：新的协调器从第一次升级后的 Cron 建立状态，旧三个钱包的检查点和 pending 通知全部保留，不重置历史活动。此前已排队的旧 MONITOR 通知若尚未发送，仍需按原 Outbox 语义投递。
+
+
+## 429 positions 服务容量保护与成交持续监控（2026-11-11）
+
+- 保留完整的 `/v2/positions` 查询覆盖：`status=OPEN`、`include_archived=true`、份数下限 0 和完整 cursor 分页。特别注意：**不要为了“减轻查询”而删掉 archived 或改动尘埃过滤，否则会漏掉已归档但仍持有的仓位**。服务端排序/请求参数优化须在真实返回集合对照后另行启用。
+- 新增独立 DO `_system_position_circuit_v1` 的**跨钱包持仓 API 429 熔断**：当任何钱包的 `/v2/positions` 响应 429 时，即使没有 `Retry-After`，也从 5 分钟开始按次数指数退避，最长默认 60 分钟；长 `Retry-After` 优先保证不提前重试，并加入短暂随机错峰。整个熔断由三个钱包共享，而不是每个钱包重复请求。同一时间只允许一个恢复探针。
+- Cron 仍为每 5 分钟，但三钱包的持仓刷新**顺序执行**，第一钱包触发熔断后后续钱包无需继续撞同一限流；钱包间仍有约 0.3–0.75 秒间隔。无需降低 BUY/SELL/REDEEM 活动检查频率。
+- **活动查询与持仓查询解耦**：`/v2/positions` 返回 429 或被熔断时，已初始化的钱包会单独查询完整 cursor 的 `/v2/activity`，核实 TRADE/REDEEM 的 transaction_hash、token_id、时间、方向和金额。成功后可发送精确的 BUY/SELL/REDEEM 活动通知，仍按 $100 门槛/5分钟合并。**不把这些交易反推为首次建仓、清仓或已结算**，不发基于陈旧持仓价格的 APR、WIN/LOSS 或风控提醒；成交通知正文明确说明当前仓位数据暂不可核实。
+- 新增独立 `activityCheckpoint`，只有整个活动分页完整成功后才前进；保存 `seen` 和持久化 Outbox 避免重复通知。原有 `checkpoint`、`lastSuccessAt`、持仓快照、追踪状态仍以**完整持仓及活动都成功**为准，失败不会覆盖为零仓位。全量恢复后按活动检查点重读重叠窗口，回收已去重事件并重新评估持仓状态。
+- 如果 `/v2/activity` 也报错：不推进任何活动检查点，抛错进入原有 MONITOR 故障记录与汇总告警；仍保留历史未发送通知。
+- Data API 响应的 `x-trace-id` 及 JSON `trace_id`/`code` 按严格格式清洗后存储，供 `/status` 与汇总 MONITOR 诊断；不存储完整上游 URL、钱包地址参数或访问密钥。无 `Retry-After` 时的熔断状态可通过需要 `MONITOR_SECRET` 的 `GET /position-circuit-status` 检查。
+- 独立 `GET /health` 仍依据**完整持仓刷新**时间判断健康；仅活动还在同步但持仓陈旧时会显示不健康，避免误报“一切正常”。MONITOR 汇总通知在可确认时展示活动最近成功时间。
+- 禁止将异步限流视为钱包没有仓位；不自动交易、不改变风险阈值、5分钟成交监控或每日资产播报。此前独立 MONITOR 恢复须所有钱包连续完整成功 3 次。
+- `POSITION_CIRCUIT_ENABLED=false` 可显式关闭**共享熔断**（用于紧急回滚），但保留其他安全功能。没有该变量时默认开启。
+- 回归测试：`node workers/wallet-monitor/test-position-circuit.mjs`，覆盖无 Retry-After 429、全局熔断、恢复探针、限流时持续通知成交和独立检查点、不重复推送、完整恢复。
