@@ -4,7 +4,8 @@ import { dataApiJson } from "./data-client.mjs";
 // offset. Normalize snake_case results into the existing monitor contract so
 // wallet checkpoints, alert rules, notifications and DO storage remain intact.
 const ROOT = "https://data-api.polymarket.com";
-const PAGE_SIZE = 300;
+const POSITION_PAGE_SIZE = 500; // Match Dashboard's page size.
+const ACTIVITY_PAGE_SIZE = 300; // Preserve activity feed pagination.
 const MAX_POSITION_PAGES = 24;
 const MAX_ACTIVITY_PAGES = 24;
 
@@ -112,12 +113,11 @@ export async function primaryV2Positions(fetcher, wallet) {
   return walkV2(fetcher, "/v2/positions", {
     user: walletAddress(wallet),
     status: "OPEN",
-    include_archived: "true",
+    // Match Dashboard: default include_archived=false and CURRENT_VALUE sort.
+    // Existing cursors, OPEN/redeemable coverage and zero-token floor remain.
     filter_type: "TOKENS",
     filter_amount: "0",
-    sort_by: "TOKENS",
-    sort_direction: "DESC",
-    limit: String(PAGE_SIZE)
+    limit: String(POSITION_PAGE_SIZE)
   }, normalizeV2Position, MAX_POSITION_PAGES);
 }
 
@@ -130,7 +130,7 @@ export async function primaryV2Activity(fetcher, wallet, since) {
     start: String(Math.max(1, Math.floor(Number(since)))),
     sort_by: "TIMESTAMP",
     sort_direction: "DESC",
-    limit: String(PAGE_SIZE)
+    limit: String(ACTIVITY_PAGE_SIZE)
   }, normalizeV2Activity, MAX_ACTIVITY_PAGES);
   // Align chronological notification order with the retired v1 ASC feed.
   return rows.sort((x,y)=>x.timestamp-y.timestamp);
