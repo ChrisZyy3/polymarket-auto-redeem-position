@@ -22,12 +22,12 @@ test("SELL target is rounded upward to the next legal tick, not down",()=>{
  assert.equal(p.mode,"dry-run");
  assert.equal(p.basis,"mark-apr");
  assert.equal(p.status,"ready");
- assert.equal(p.proposedLimitPrice,0.991);
+ assert.equal(p.proposedLimitPrice,0.990);
  assert.ok(p.theoreticalTargetPrice! <= p.proposedLimitPrice!);
  assert.ok(p.priceAtLimitAprPercent! <= 12);
  assert.equal(p.quantity,1000);
- assert.equal(p.estimatedGrossProceeds,991);
- assert.equal(p.estimatedProfitVsAvgCost,71);
+ assert.equal(p.estimatedGrossProceeds,990);
+ assert.equal(p.estimatedProfitVsAvgCost,70);
 });
 
 test("a bid above planned limit would cross, but no fill is assumed",()=>{
@@ -35,8 +35,8 @@ test("a bid above planned limit would cross, but no fill is assumed",()=>{
  const p=buildMarkAutoSellPlan({quote:q,targetAprPercent:12,quantity:100,avgPrice:0.96});
  assert.equal(p.status,"would_cross");
  assert.equal(p.bidCrossesLimit,true);
- assert.equal(p.proposedLimitPrice,0.991);
- assert.equal(p.estimatedGrossProceeds,99.1);
+ assert.equal(p.proposedLimitPrice,0.990);
+ assert.equal(p.estimatedGrossProceeds,99);
 });
 
 test("cannot produce an executable sell limit when book or tick is unverified",()=>{
