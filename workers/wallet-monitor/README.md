@@ -293,3 +293,17 @@ Polymarket 数据 API v1 官方迁移时间表标注 2026-10-24 退役。此 Wor
 - 禁止将异步限流视为钱包没有仓位；不自动交易、不改变风险阈值、5分钟成交监控或每日资产播报。此前独立 MONITOR 恢复须所有钱包连续完整成功 3 次。
 - `POSITION_CIRCUIT_ENABLED=false` 可显式关闭**共享熔断**（用于紧急回滚），但保留其他安全功能。没有该变量时默认开启。
 - 回归测试：`node workers/wallet-monitor/test-position-circuit.mjs`，覆盖无 Retry-After 429、全局熔断、恢复探针、限流时持续通知成交和独立检查点、不重复推送、完整恢复。
+
+
+## Auto Sell Planner · Mark APR Dry Run (V1, 2026-11-11)
+
+- 此阶段**完全只读**。不会连接钱包、签名、提交、取消或更改真实挂单，也不会创建虚构的订单 ID。自动 SELL 只是一条计划，不是实际订单。
+- 复用 Cloudflare Worker 原有每 5 分钟 Cron。仅在正常取得完整持仓时，按同一次位置快照更新 `autoSellPlan`，不额外请求 Data API；429 熔断或 activity-only 降级时，不覆盖最后一次完整计划。
+- 独立于现有 `LOW COMBINED APR`：后者仍按综合 Mark + Holding Rewards APR 每 30 分钟检查、10% 触发和 12% 恢复；本模块仅使用 **Mark APR** 计算 SELL 理论价。默认目标 `AUTO_SELL_TARGET_MARK_APR_PCT=12`，`AUTO_SELL_DRY_RUN_ENABLED=true`（不配置变量时即默认 Dry Run 开启），也可在 Cloudflare vars 中关闭或调整。
+- 每个钱包的现有 Durable Object 中新增 `autoSellPlan` 持久化字段，按 Token ID 存储计划。包括仓位份额、Mark APR、预计结算日、未按 Tick 取整的理论价、模拟变更意向和最近完成检查时间。仅利用已有同钱包 DO，不重建 Namespace，也不覆盖原有 checkpoints/推送队列。
+- 只在已授权的 Worker `GET /auto-sell-plans` 返回三钱包合并的只读状态。不会公开钱包仓位或目标价。
+- Worker 没有读取 Tick Size、订单簿、可用份额和现有挂单，因此**不提供可执行挂单价格**：`proposedLimitPrice:null`，仅提供 `theoreticalPrice`。不发新的模拟状态提醒，以免造成推送噪音。
+- Dashboard 的打开盘口详情会每五分钟刷新一次当前合约 CLOB 报价和 Mark APR（页面前台可见时），使用当前验证过的 Tick Size 将理论 SELL 价格**向上取整**；如果目标价已超过市场允许的价格上限，不会向下强行调整，而是显示不可执行状态。它仍不查询钱包实际可用于下单的 shares、已有卖单、交易费，因此所有价格和金额仅供规划。
+- Dashboard 的 Target APR 保存在浏览器本地，默认显示 12%（每个 Token 可单独设置）。它**还未同步到 Cloudflare Worker**：后台统一使用 12% 或环境变量配置。后续实现真实交易前，必须将策略配置持久化到后端，并验证钱包授权、订单占用和订单生命周期。
+- 目标价随剩余预计期限动态提高；市场在 endDate 后仍未 resolve 时不能计算有效目标 APR。实际延迟结算将改变年化，且合约结算输掉时损失本金。
+- Tests: `npm test`, `npm run check`, `node workers/wallet-monitor/test-auto-sell-planner.mjs`; 当前低 APR 通知不改阈值、不改行为。

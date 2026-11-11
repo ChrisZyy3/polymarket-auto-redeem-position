@@ -28,6 +28,7 @@ export interface PositionQuote {
   bestBidApr: number | null;
   bestAskApr: number | null;
   tickSize: number | null;
+  tickVerified: boolean;
   orderBookAvailable: boolean;
   note?: string;
 }
@@ -171,6 +172,9 @@ export function buildPositionQuote(input: PositionQuoteInput): PositionQuote {
     : null;
   const orderBookAvailable = usableOrderBook !== null;
   const tickSize = orderBookAvailable ? parseTickSize(usableOrderBook) : null;
+  const rawTick = Number(usableOrderBook?.tick_size);
+  const tickVerified = orderBookAvailable && Number.isFinite(rawTick) &&
+    rawTick > 0 && rawTick < 1;
   const roundingTick = parseTickSize(usableOrderBook);
   const bid = usableOrderBook ? bestLevelPrice(usableOrderBook.bids, "highest") : null;
   const ask = usableOrderBook ? bestLevelPrice(usableOrderBook.asks, "lowest") : null;
@@ -193,6 +197,7 @@ export function buildPositionQuote(input: PositionQuoteInput): PositionQuote {
       bestBidApr,
       bestAskApr,
       tickSize,
+      tickVerified,
       orderBookAvailable,
       note: buildNote(normalizedInput, rawDaysToSettle, currentApr),
     };
@@ -218,6 +223,7 @@ export function buildPositionQuote(input: PositionQuoteInput): PositionQuote {
     bestBidApr,
     bestAskApr,
     tickSize,
+    tickVerified,
     orderBookAvailable,
     note: buildNote(normalizedInput, rawDaysToSettle, currentApr),
   };

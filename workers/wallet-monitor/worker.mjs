@@ -175,6 +175,19 @@ export class WalletMonitor {
         lastSuccessAt:state?.lastSuccessAt??null,
         snapshot:state?.dailySnapshot??null});
     }
+    if (url.pathname === "/auto-sell-plans" && request.method === "GET") {
+      const saved=await this.ctx.storage.get("monitor");
+      return Response.json({
+        initialized:Boolean(saved),
+        mode:saved?.autoSellPlan?.mode??"not_initialized",
+        basis:saved?.autoSellPlan?.basis??"mark-apr-dry-run-v1",
+        checkedAt:saved?.autoSellPlan?.checkedAt??null,
+        lastFullPositionsAt:saved?.lastSuccessAt??null,
+        targetAprPct:saved?.autoSellPlan?.targetAprPct??null,
+        summary:saved?.autoSellPlan?.summary??null,
+        plans:saved?.autoSellPlan?.plans??{}
+      },{headers:{"cache-control":"no-store"}});
+    }
     if (url.pathname === "/status") {
       const s = await this.ctx.storage.get("monitor");
       return Response.json({
@@ -235,7 +248,7 @@ async function runAll(env, route) {
     try {
       const response = await instance(env, wallet).fetch(
         "https://internal/" + route + "?wallet=" + wallet,
-        { method: route === "status" || route === "health" ? "GET" : "POST" }
+        { method: ["status","health","auto-sell-plans"].includes(route) ? "GET" : "POST" }
       );
       const body = await response.json();
       return { wallet, ...body, ok: response.ok && body.ok !== false };
@@ -398,6 +411,11 @@ export default {
     if(path==="/monitor-health-status" && request.method==="GET"){
       const coordinator=env.MONITOR.get(env.MONITOR.idFromName("_system_monitor_health_v1"));
       return coordinator.fetch("https://internal/monitor-health-status",{method:"GET"});
+    }
+    if (path === "/auto-sell-plans" && request.method === "GET") {
+      return Response.json(await runAll(env,"auto-sell-plans"),{
+        headers:{"cache-control":"no-store"}
+      });
     }
     if (path === "/status" && request.method === "GET") {
       return Response.json(await runAll(env, "status"));

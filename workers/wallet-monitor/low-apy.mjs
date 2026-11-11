@@ -69,7 +69,7 @@ function endMs(raw) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function remainingYears(endDate, nowSec) {
+export function remainingYears(endDate, nowSec) {
   const maturity = endMs(endDate);
   const nowMs = Number(nowSec) * 1000;
   if (maturity === null || !Number.isFinite(nowMs) || maturity <= nowMs) return null;

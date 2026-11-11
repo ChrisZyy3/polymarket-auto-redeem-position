@@ -52,10 +52,20 @@ const fetcher = async (url, init) => {
   return { ok: true, json: async () => s.includes("/positions?") ? positions : activity };
 };
 await poll(storage, env, fetcher, 1000);
+const initialDryRun=db.get("monitor").autoSellPlan;
+assert(initialDryRun?.basis==="mark-apr-dry-run-v1" &&
+  initialDryRun.mode==="dry-run" &&
+  initialDryRun.plans.a?.proposedLimitPrice===null &&
+  initialDryRun.plans.a?.targetAprPct===12 &&
+  sent===0,
+  "initial live wallet baseline seeds a 12% Mark APR read-only plan without any orders or pushes");
 assert(sent === 0, "first run must only establish baseline");
 activity = [{ transactionHash: "tx", type: "TRADE", asset: "a",
   timestamp: 1020, side: "BUY", size: 5, usdcSize: 4.5, price: .9 }];
 let result = await poll(storage, env, fetcher, 1060);
+assert(db.get("monitor").autoSellPlan.checkedAt===1060 &&
+  db.get("monitor").autoSellPlan.plans.a.indicativeAction==="unchanged",
+  "existing full poll refreshes the read-only plan without extra alerts");
 assert(sent === 1 && result.alerts === 1, "new buy sends one notification");
 assert(delivered[0].title.startsWith("🟢 BUY · ChrisZyy"), "rich notification title");
 assert(delivered[0].desp.includes("账户：** ChrisZyy"), "wallet in detailed notification");
