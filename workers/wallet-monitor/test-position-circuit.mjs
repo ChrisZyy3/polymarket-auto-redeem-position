@@ -126,6 +126,7 @@ assert.equal(down.activitySynced,true);
 assert.equal(down.lastPollErrorStatus,429);
 assert.equal(down.lastPollErrorCode,"rate_limited");
 assert.equal(down.lastPollTraceId,"aabbccdd0011");
+assert.equal(positionCalls,2,"one baseline + one 429; positions must not retry 429 in a burst");
 assert.equal(walletStore.get("monitor").checkpoint,20000);
 assert.equal(walletStore.get("monitor").lastSuccessAt,20000);
 assert.equal(walletStore.get("monitor").activityCheckpoint,20300);
@@ -163,3 +164,27 @@ assert(walletStore.get("monitor").seen[activityKey({
   timestamp:20500,size:110/.9,usdcSize:110,price:.9
 })]!==undefined);
 console.log("Passed: activity-only fallback preserves 100% of verified trades, retries, and checkpoints");
+
+// If both upstream feeds fail, do not invent zero holdings or advance the
+// independent activity checkpoint. The worker's outer error handler records
+// the failed poll; the next scheduled tick can replay the same activity range.
+const beforeFailed=structuredClone(walletStore.get("monitor"));
+const beforePush=notifications.length;
+const failBoth=async(url,init)=>{
+  const u=new URL(String(url));
+  if(u.pathname==="/v2/positions" || u.pathname==="/v2/activity")
+    return {ok:false,status:429,
+      headers:{get:k=>k==="retry-after"?"900":null},
+      json:async()=>({code:"rate_limited"})};
+  return fetcher(url,init);
+};
+let failedBoth=false;
+try{await poll(storage,env,failBoth,24400,wallet)}
+catch(e){failedBoth=e.status===429 && e.endpoint==="/v2/activity"}
+assert(failedBoth,"activity API failure must be reported, not silently ignored");
+assert.equal(walletStore.get("monitor").checkpoint,beforeFailed.checkpoint);
+assert.equal(walletStore.get("monitor").activityCheckpoint,beforeFailed.activityCheckpoint);
+assert.deepEqual(walletStore.get("monitor").seen,beforeFailed.seen);
+assert.equal(notifications.length,beforePush);
+console.log("Passed: dual upstream 429 fails closed without advancing either checkpoint");
+
