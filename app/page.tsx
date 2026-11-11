@@ -778,35 +778,50 @@ export default function Home() {
   // Primary API trigger to run positions and balance check on a wallet address
   // 核心查询函数：触发后端 API 获取指定钱包的持仓分析数据以及 pUSD 现金资产
   async function runQuery(addr: string) {
+    const requestVersion = ++queryRequestVersion.current;
     setLoading(true);
     setError(null);
+    setDailyPositionHistory(null);
     quoteRequestVersion.current += 1;
     setExpandedPositionKey(null);
     setQuoteStates({});
     try {
-      const [res, historyRes] = await Promise.all([
-        fetch(`/api/positions?address=${encodeURIComponent(addr)}&aprThreshold=${holdAprThreshold}&minValue=${DUST_POSITION_VALUE_USD}`),
-        fetch(`/api/portfolio-history?address=${encodeURIComponent(addr)}`),
+      const encodedAddress = encodeURIComponent(addr);
+      const [res, historyRes, positionHistoryRes] = await Promise.all([
+        fetch(`/api/positions?address=${encodedAddress}&aprThreshold=${holdAprThreshold}&minValue=${DUST_POSITION_VALUE_USD}`),
+        fetch(`/api/portfolio-history?address=${encodedAddress}`).catch(() => null),
+        fetch(`/api/position-change?address=${encodedAddress}`).catch(() => null),
       ]);
       const json = await res.json();
       if (!res.ok) {
         throw new Error(json.error || (isEnglish ? "Request failed. Check your connection or wallet address." : "请求接口失败，请检查网络或钱包地址格式"));
       }
+      // History is auxiliary: failed GitHub reads must never break live data.
+      const [historyJson, changeJson] = await Promise.all([
+        historyRes?.ok
+          ? historyRes.json().catch(() => null) as Promise<HistoryResponse | null>
+          : Promise.resolve(null),
+        positionHistoryRes?.ok
+          ? positionHistoryRes.json().catch(() => null) as Promise<DailyPositionResponse | null>
+          : Promise.resolve(null),
+      ]);
+      if (requestVersion !== queryRequestVersion.current) return;
       setData(json as ApiResponse);
-      setPortfolioHistory(historyRes.ok ? ((await historyRes.json()) as HistoryResponse) : null);
+      setPortfolioHistory(historyJson);
+      setDailyPositionHistory(changeJson);
       pushHistory(addr);
 
-      // Sync active search address into query param context
-      // 将当前正在查询的地址反映在浏览器 URL 参数中，方便刷新不丢失
       const url = new URL(window.location.href);
       url.searchParams.set("address", addr);
       window.history.replaceState(null, "", url);
     } catch (err) {
+      if (requestVersion !== queryRequestVersion.current) return;
       setData(null);
       setPortfolioHistory(null);
+      setDailyPositionHistory(null);
       setError(err instanceof Error ? err.message : isEnglish ? "Unexpected request error" : "未知的请求链路错误");
     } finally {
-      setLoading(false);
+      if (requestVersion === queryRequestVersion.current) setLoading(false);
     }
   }
 
@@ -1109,6 +1124,17 @@ export default function Home() {
                 ? "Sort by yield or position value. Expand a market for live bid/ask APR."
                 : "可按收益或市值排序，展开市场查看实时买卖盘口 APR。"}
             </p>
+            {data && (
+              <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                {dailyPositionHistory?.status === "ok" && dailyPositionHistory.recordedAt
+                  ? (isEnglish
+                    ? `D1 Change reference: ${formatShanghaiReference(dailyPositionHistory.recordedAt, language)} Beijing time (not rolling 24h).`
+                    : `较昨日参考：${formatShanghaiReference(dailyPositionHistory.recordedAt, language)}（北京时间，非滚动 24h）。`)
+                  : (isEnglish
+                    ? "D1 Change needs yesterday’s daily token snapshot; unavailable values show —."
+                    : "较昨日需要前一天的仓位价格快照；尚未积累历史数据时显示 —。")}
+              </p>
+            )
             <p className="mt-1.5 text-[11px] text-slate-500 md:hidden">
               {isEnglish ? "Swipe horizontally to view more columns" : "左右滑动查看完整仓位数据"}
             </p>
