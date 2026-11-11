@@ -34,7 +34,7 @@ const circuitContext={storage:{
 const circuitDO=new WalletMonitor(circuitContext,{});
 const monitorStub={
   idFromName:name=>name,
-  get:id=>{assert.equal(id,"_system_position_circuit_v1");return circuitDO;}
+  get:id=>{assert.equal(id,"_system_position_circuit_v1");return {fetch:(url,options)=>circuitDO.fetch(new Request(url,options))};}
 };
 const circuitEnv={MONITOR:monitorStub};
 const first=await beforePositionQuery(circuitEnv,10000);
