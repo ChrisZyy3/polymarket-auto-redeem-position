@@ -36,7 +36,7 @@ export async function capturePortfolioSnapshotWithPositions(
       price: Number.isFinite(position.curPrice) && position.curPrice >= 0 && position.curPrice <= 1
         ? roundAmount(position.curPrice)
         : null,
-      size: roundAmount(position.size),
+      size: position.size,
       value: Number.isFinite(position.currentValue) ? roundAmount(position.currentValue) : null,
     }));
   return {
