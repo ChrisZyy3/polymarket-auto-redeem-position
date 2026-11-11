@@ -151,7 +151,8 @@ assert(unauthorized.status === 401, "status endpoint is protected");
 let scheduled = null;
 worker.scheduled({ scheduledTime: Date.UTC(2026,9,23,3,0,0) }, protectedEnv, { waitUntil: task => { scheduled = task; } });
 await scheduled;
-assert(polled.length === 6, "single Cron checks each wallet once");
+assert(polled.length === 7 && polled[6].name === "_system_monitor_health_v1",
+  "single Cron checks each wallet once and runs one shared health coordinator");
 console.log("Passed: multi-wallet parser, duplicate elimination, single-wallet fallback, validation, authorization, independent DO routing, Cron fan-out");
 
 
@@ -417,17 +418,23 @@ const retryResponse=async () => {
 };
 const retried=await dataApiJson(retryResponse,"https://data-api.polymarket.com/positions",
   {sleep:async ms=>{waits.push(ms)},random:()=>0});
-assert(attempts===3 && waits.length===2 && waits[0]===1000 && waits[1]===0 &&
+assert(attempts===3 && waits.length===2 && waits[0]===1000 && waits[1]===500 &&
   Array.isArray(retried.data), "API honors Retry-After and retries transient errors");
 assert(retryAfterMs({get:()=>null})===null,"absent Retry-After handled");
 let tooLong=false, longAttempts=0;
 try{
   await dataApiJson(async()=>{
-    longAttempts++;return {ok:false,status:429,headers:{get:()=> "30"}}},
-    "https://data-api.polymarket.com/activity",
+    longAttempts++;return {ok:false,status:429,headers:{get:(name)=>
+      name==="retry-after"?"30":name==="cf-ray"?"abcdef12-XYZ":null}}},
+    "https://data-api.polymarket.com/activity?user=wallet-hidden",
     {sleep:async()=>{throw Error("must not wait 30 seconds")},random:()=>0});
-}catch{tooLong=true}
-assert(tooLong && longAttempts===1,"long Retry-After defers to later Cron without busy wait");
+}catch(error){
+  tooLong=error.status===429 && error.retryAfterMs===30000 &&
+    error.endpoint==="/activity" && error.traceId==="abcdef12-XYZ" &&
+    !error.message.includes("wallet-hidden");
+}
+assert(tooLong && longAttempts===1,
+  "long Retry-After preserves sanitized diagnostics and defers without busy wait");
 let bad400=0;
 try{
   await dataApiJson(async()=>{bad400++;return {ok:false,status:400}}, 
@@ -456,27 +463,41 @@ assert(succeeded.accepted===1 && succeeded.pending===0 &&
   pendingMap.get("monitor").audit.pushCount===1 && retryCalls===1,
   "alarm retry delivers durable message and clears outbox");
 
-// API health warning and recovery are emitted once, even through ongoing failures.
+// Per-wallet failures are durable data; MONITOR messages are emitted only by
+// the account-wide coordinator so three wallets never each send a duplicate.
 const beforeHealth=delivered.length;
 await recordPollFailure(storage,env,fetcher,2100,new Error("HTTP 429 from data-api.polymarket.com"));
 await recordPollFailure(storage,env,fetcher,2400,new Error("HTTP 429 from data-api.polymarket.com"));
-assert(delivered.length===beforeHealth && db.get("monitor").audit.consecutivePollFailures===2,
-  "no premature health notification");
+assert(delivered.length===beforeHealth &&
+  db.get("monitor").audit.consecutivePollFailures===2,
+  "per-wallet 429 does not independently notify after 2 rounds");
 await recordPollFailure(storage,env,fetcher,2700,new Error("HTTP 429 from data-api.polymarket.com"));
-assert(delivered.length===beforeHealth+1 &&
-  delivered[beforeHealth].title.includes("MONITOR") &&
-  db.get("monitor").audit.healthAlarmActive,
-  "exactly one health warning after three failed five-minute rounds");
 await recordPollFailure(storage,env,fetcher,3000,new Error("HTTP 429 from data-api.polymarket.com"));
-assert(delivered.length===beforeHealth+1,"no repeated outage warning while still unhealthy");
+assert(delivered.length===beforeHealth &&
+  db.get("monitor").audit.consecutivePollFailures===4 &&
+  db.get("monitor").audit.lastPollErrorKind==="rate_limit",
+  "rate limiting retained in audit without per-wallet duplicate warning");
 const recovered=await poll(storage,env,fetcher,3300);
-assert(delivered.length===beforeHealth+2 &&
-  delivered[beforeHealth+1].title.includes("MONITOR 恢复") &&
-  recovered.deliveryDeferred===false && db.get("monitor").audit.consecutivePollFailures===0 &&
-  db.get("monitor").audit.healthAlarmActive===false,
-  "recovery notification emitted only after full successful wallet poll");
-console.log("Passed: bounded 429/503 retries, durable alarm retry, streak health warning and recovery");
+assert(delivered.length===beforeHealth &&
+  recovered.deliveryDeferred===false &&
+  db.get("monitor").audit.consecutivePollFailures===0 &&
+  db.get("monitor").audit.consecutivePollSuccesses>=1,
+  "a single successful wallet poll only advances the coordinator recovery streak");
 
+// Long Retry-After pauses a wallet without reading from Data API or moving its
+// successful activity checkpoint, and remains visible to the coordinator.
+const prior=structuredClone(db.get("monitor")),blockedAt=prior.checkpoint;
+prior.audit.nextAllowedPollAt=4200;
+prior.audit.consecutivePollFailures=1;
+prior.audit.consecutivePollSuccesses=0;
+prior.audit.lastPollErrorKind="rate_limit";
+await storage.put("monitor",prior);
+const blockedFetcher=async()=>{throw new Error("Upstream fetch must be skipped");};
+const rateLimitedPoll=await poll(storage,env,blockedFetcher,3900);
+assert(rateLimitedPoll.paused===true && rateLimitedPoll.nextAllowedPollAt===4200 &&
+  db.get("monitor").checkpoint===blockedAt,
+  "Retry-After pause neither fetches upstream nor advances checkpoint");
+console.log("Passed: bounded API retries, persistent 429 diagnostics, checkpoint-safe deferral and durable outbox");
 
 // Data API v2 read-only comparison (cursor pages) without any side effects.
 const v1Fixtures=[{asset:"101",size:3},{asset:"202",size:5},{asset:"303",size:0}];

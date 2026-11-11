@@ -3,6 +3,7 @@ import { walletPusdBalance } from "./notification.mjs";
 import { digestDate, digestWindow, composeDailyDigest,
   validDailySnapshots, enqueueDigest } from "./asset-digest.mjs";
 import { healthSummary, HEALTH_STALE_SECONDS } from "./health.mjs";
+import { healthTransition, healthNotification } from "./monitor-health.mjs";
 
 // One configured wallet per Durable Object. Preserve the legacy address as a fallback.
 export function walletAddresses(env) {
@@ -65,6 +66,62 @@ export class WalletMonitor {
         return Response.json({ok:false,error:"Digest enqueue failure"},{status:502});
       }
     }
+    // Dedicated account-wide health coordinator uses its own DO ID and
+    // independently persisted outbox. It must not share per-wallet checkpoints
+    // or the daily-digest coordinator's storage.
+    if (url.pathname==="/monitor-health-batch" && request.method==="POST") {
+      if(this.running) await this.running;
+      const job=(async()=>{
+        const {tick,wallets}=await request.json();
+        const now=Number(tick);
+        if(!Number.isFinite(now)||now<=0||!Array.isArray(wallets)||
+           wallets.length<1||wallets.length>20)
+          return Response.json({ok:false,error:"Invalid health batch"},{status:400});
+        let saved=await this.ctx.storage.get("monitor");
+        if(!saved) saved={user:"_system_monitor_health_v1",pending:[],
+          audit:{pushCount:0,pushFailureCount:0}};
+        const transition=healthTransition(saved.healthState,wallets,now,{
+          rateLimitFailures:Number(this.env.MONITOR_429_FAILURE_ROUNDS??6),
+          otherFailures:Number(this.env.MONITOR_OTHER_FAILURE_ROUNDS??3),
+          rateLimitSeconds:Number(this.env.MONITOR_429_ALERT_MINUTES??30)*60,
+          recoverSuccesses:Number(this.env.MONITOR_RECOVERY_SUCCESS_ROUNDS??3),
+          cooldownSeconds:Number(this.env.MONITOR_ALERT_COOLDOWN_HOURS??6)*3600
+        });
+        saved.healthState=transition.state;
+        let queued=0;
+        const note=healthNotification(transition.event,transition.affected,now);
+        if(note){
+          saved.pending??=[];
+          saved.pending.push(note);
+          queued=1;
+        }
+        await this.ctx.storage.put("monitor",saved);
+        // The outbox alarm owns retries. A duplicate/unchanged Cron tick
+        // must not re-send a failed MONITOR notification.
+        const delivery=queued
+          ? await deliverPending(this.ctx.storage,this.env,fetch,now,"health")
+          : {accepted:0,pending:saved.pending?.length||0};
+        console.info("wallet_health_aggregate",JSON.stringify({
+          at:now,event:transition.event||"none",
+          affected:transition.affected?.length||0,
+          queued,accepted:delivery.accepted,pending:delivery.pending
+        }));
+        return Response.json({ok:true,event:transition.event,
+          queued,accepted:delivery.accepted,pending:delivery.pending});
+      })();
+      this.running=job.finally(()=>{this.running=null});
+      try{return await this.running;}
+      catch(error){
+        console.error("wallet_health_aggregate_failed",String(error?.message||"error").slice(0,150));
+        return Response.json({ok:false,error:"Health coordinator failed"},{status:502});
+      }
+    }
+    if(url.pathname==="/monitor-health-status" && request.method==="GET"){
+      const saved=await this.ctx.storage.get("monitor");
+      return Response.json({ok:true,state:saved?.healthState||null,
+        pending:saved?.pending?.length||0,
+        sent:saved?.audit?.pushCount||0});
+    }
     const wallet = url.searchParams.get("wallet");
     if (!wallet || !/^0x[a-f0-9]{40}$/.test(wallet)) {
       return Response.json({ ok: false, error: "Invalid wallet" }, { status: 400 });
@@ -100,16 +157,31 @@ export class WalletMonitor {
       return Response.json({ ok: true, ...await this.running });
     } catch (error) {
       // Best-effort health tracking must not obscure the original failure.
+      let diagnosis=null;
       try {
-        await recordPollFailure(this.ctx.storage, this.env, fetch,
-          Math.floor(Date.now() / 1000), error);
+        diagnosis=await recordPollFailure(this.ctx.storage,this.env,fetch,
+          Math.floor(Date.now()/1000),error);
       } catch (healthError) {
         console.error("Wallet health bookkeeping failed for " + wallet,
           healthError?.message || "Unknown error");
       }
       // Do not log request URLs: PUSH_URL contains the send key.
       console.error("Wallet poll failed for " + wallet, error?.message || "Unknown error");
-      return Response.json({ ok: false, error: "Poll failed; check Worker logs" }, { status: 502 });
+      return Response.json({ok:false,
+        error:"Poll failed; check Worker logs",
+        initialized:diagnosis?.initialized??false,
+        lastSuccessAt:diagnosis?.lastSuccessAt??null,
+        consecutivePollFailures:diagnosis?.consecutivePollFailures??0,
+        consecutivePollSuccesses:0,
+        firstPollFailureAt:diagnosis?.firstPollFailureAt??null,
+        lastPollFailureAt:diagnosis?.lastPollFailureAt??null,
+        lastPollErrorKind:diagnosis?.lastPollErrorKind??"other",
+        lastPollErrorStatus:diagnosis?.lastPollErrorStatus??null,
+        lastPollErrorEndpoint:diagnosis?.lastPollErrorEndpoint??null,
+        lastPollTraceId:diagnosis?.lastPollTraceId??null,
+        lastPollRetryAfterSeconds:diagnosis?.lastPollRetryAfterSeconds??null,
+        nextAllowedPollAt:diagnosis?.nextAllowedPollAt??null
+      },{status:502});
     }
   }
 }
@@ -122,9 +194,10 @@ function instance(env, wallet) {
 async function runAll(env, route) {
   const wallets = walletAddresses(env);
   const results = await Promise.all(wallets.map(async (wallet, index) => {
-    // Spread API calls over ~2 seconds to avoid a 3-wallet synchronized burst.
-    if (route === "poll" && index > 0) {
-      await new Promise(resolve => setTimeout(resolve, index * 800));
+    // Spread API calls over ~5-6 seconds to reduce Data API rate-limit bursts.
+    if (route==="poll" && index>0){
+      await new Promise(resolve=>setTimeout(resolve,index*2500+
+        Math.floor(Math.random()*600)));
     }
     try {
       const response = await instance(env, wallet).fetch(
@@ -141,6 +214,39 @@ async function runAll(env, route) {
   return { ok: results.every(r => r.ok), wallets: results };
 }
 
+
+// One coordinator DO combines all three wallets' health transitions per
+// scheduled tick. It owns the only MONITOR alert/recovery outbox.
+export async function coordinateMonitorHealth(env, pollResult, tickMs=Date.now()) {
+  const coordinator=env.MONITOR.get(env.MONITOR.idFromName("_system_monitor_health_v1"));
+  const now=Math.floor(tickMs/1000);
+  const body={tick:now,wallets:pollResult.wallets.map(row=>({
+    wallet:row.wallet,
+    label:walletLabel(row.wallet),
+    // The poll() return field "initialized:false" means "not a baseline
+    // initialization run", NOT "this wallet has no durable monitor state".
+    initialized:row.initialized===true || row.paused===true ||
+      (Number.isFinite(Number(row.lastSuccessAt)) && Number(row.lastSuccessAt)>0),
+    lastSuccessAt:row.lastSuccessAt??null,
+    consecutivePollFailures:row.consecutivePollFailures??0,
+    consecutivePollSuccesses:row.consecutivePollSuccesses??0,
+    firstPollFailureAt:row.firstPollFailureAt??null,
+    lastPollFailureAt:row.lastPollFailureAt??null,
+    lastPollErrorKind:row.lastPollErrorKind??null,
+    lastPollErrorStatus:row.lastPollErrorStatus??null,
+    lastPollErrorEndpoint:row.lastPollErrorEndpoint??null,
+    lastPollTraceId:row.lastPollTraceId??null,
+    lastPollRetryAfterSeconds:row.lastPollRetryAfterSeconds??null,
+    nextAllowedPollAt:row.nextAllowedPollAt??null
+  }))};
+  const r=await coordinator.fetch("https://internal/monitor-health-batch",{
+    method:"POST",
+    headers:{"content-type":"application/json"},
+    body:JSON.stringify(body)
+  });
+  if(!r.ok)throw new Error("MONITOR coordinator request failed");
+  return r.json();
+}
 
 export async function runDailyDigest(env, fetcher=fetch, ms=Date.now()) {
   if(String(env.DAILY_REPORT_ENABLED??"true")!=="true")
@@ -184,7 +290,16 @@ export async function runDailyDigest(env, fetcher=fetch, ms=Date.now()) {
 export default {
   async scheduled(_event, env, ctx) {
     ctx.waitUntil((async () => {
-      const result = await runAll(env, "poll");
+      const result = await runAll(env,"poll");
+      try {
+        await coordinateMonitorHealth(env,result,
+          Number.isFinite(_event?.scheduledTime)?_event.scheduledTime:Date.now());
+      } catch (error) {
+        // A coordinator outage must not erase the successful wallet checkpoint.
+        // Next scheduled tick retries from persistent per-wallet audits.
+        console.error("wallet_health_coordinator_deferred",
+          String(error?.message||"error").slice(0,150));
+      }
       if (!result.ok) {
         const failed = result.wallets.filter(r => !r.ok).map(r => r.wallet);
         throw new Error("Wallet monitor poll failed for: " + failed.join(", "));
@@ -225,6 +340,10 @@ export default {
     if (!env.MONITOR_SECRET ||
         request.headers.get("authorization") !== "Bearer " + env.MONITOR_SECRET) {
       return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
+    }
+    if(path==="/monitor-health-status" && request.method==="GET"){
+      const coordinator=env.MONITOR.get(env.MONITOR.idFromName("_system_monitor_health_v1"));
+      return coordinator.fetch("https://internal/monitor-health-status",{method:"GET"});
     }
     if (path === "/status" && request.method === "GET") {
       return Response.json(await runAll(env, "status"));

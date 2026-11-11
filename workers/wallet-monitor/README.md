@@ -164,11 +164,11 @@ endDate 只有日期时注明「仅提供日期」；缺失或占位符标注「
 - **每 5 分钟 Cron**：`*/5 * * * *`。同钱包、同 outcome token、同 BUY/SELL 方向、同五分钟 UTC bucket 内的拆单合并成一条通知；成交金额/份数求和，成交价格按金额加权。普通 TRADE/REDEEM 走 $100 推送门槛，WIN/LOSS/PARTIAL 等结算事件仍独立提醒。
 - **可靠 Outbox**：先将检测到的事件、checkpoint 与待发消息存储到原 Durable Object，再尝试 Server酱。推送失败不会阻断新数据检测，原消息持久留队，由 DO Alarm 进行退避重试。
 - **60 分钟活动回查窗口**：针对索引延迟保留 60 分钟重叠，结合逐 fill 的 activityKey 去重；极端超过窗口的索引延迟仍需更深的定期回查。
-- **429/503 恢复**：对 Data API 429/502/503/504 进行最多两次短退避重试，支持 Retry-After，超过短等待预算则交给下一轮 Cron 补查；三个钱包请求错峰 800ms。
-- **健康指标**：同钱包连续 3 轮失败发送一次故障告警，恢复后发一条恢复通知；不等于 Worker 全局停机监测，后者需要独立健康检查服务。
+- **429/503 恢复**：对 Data API 429/502/503/504 最多重试两次，加入随机抖动，遵守 Retry-After；如果服务端要求等待时间超过单轮预算，会在每个钱包 DO 中持久化 `nextAllowedPollAt`，届时才恢复上游查询，期间仍保留交易活动检查点。三个钱包错峰约 2.5 秒。
+- **健康指标**：每个钱包 DO 只持久化轮询错误和成功/失败次数；由 `_system_monitor_health_v1` 这个独立 Durable Object **统一发送 MONITOR 异常和恢复通知**。纯 429 连续失败 6 轮或距离上次成功超过 30 分钟才升级；其他错误连续失败 3 次升级；三个钱包均连续成功 3 次后发一条汇总恢复。发生同类新故障时 6 小时冷却。
 - **Data API v2 Shadow**：每个钱包每六小时对 `/v2/positions` 进行一次只读游标分页查询，与当前 v1 仓位做 token 集合和 share 数量对照。仅记录数量与差异，不修改结算判断、PnL、Outbox 或检查点。`V2_SHADOW_ENABLED=true` 开启，设置为 false 关闭。v2 故障不会影响 v1 通知。
 - **状态兼容**：本升级继续沿用全部钱包独立的 DO ID、pending、seen、checkpoint、audit，密钥和历史账本不需要迁移/重置。
-- **状态接口**：原 `/status` 返回推送审计、数据连续失败次数、健康告警状态和最近一次 v2 shadow 对比报告。
+- **状态接口**：原 `/status` 返回每个钱包的推送审计、Data API 错误分类、Retry-After 和当前退避状态；需带 `MONITOR_SECRET` 的新 `/monitor-health-status` 显示跨钱包告警协调器状态与其 Outbox 待发条数。
 
 
 ## V2 position lifecycle + winning ROI/APR + settlement net (2026-10-23)
@@ -263,3 +263,18 @@ Polymarket 数据 API v1 官方迁移时间表标注 2026-10-24 退役。此 Wor
 - **不受过滤影响**：WIN、LOSS、PARTIAL 结算通知，低 APR 与价格风控，MONITOR 故障/恢复，日常资产报告及任何独立异常告警。
 - 若不希望过滤，可以将变量改为 `MIN_ACTIVITY_ALERT_USD=0`。未设置变量的旧部署也保持全部成交活动推送的兼容行为。
 - 这是**成交/赎回金额过滤**，并非对浮动市值、日内 P&L 或单次价格涨跌的 $100 门槛。
+
+
+## 多钱包 MONITOR 限流防抖和聚合告警
+
+- **轮询节奏**：维持 `*/5 * * * *`。3 个钱包 DO 独立检查点，启动时间错峰约 2.5 秒；某一个钱包被限流不会令其他钱包的正常持仓活动丢失。
+- **429 防抖**：客户端对可重试错误最多两次有界重试；尊重 `Retry-After` 头，不会等待几十分钟占用 Worker。钱包 DO 记住允许重试的最早时刻，并在需要时跳过若干 Cron tick。跳过不会算成功，也不会前进活动 checkpoint。到期后继续从上次成功记录补查。
+- **错误信息**：日志和钱包审计仅记录安全的端点路径、HTTP 状态、Retry-After 秒数、CF Ray 或 request ID（存在且格式合规时）；不记录 URL 参数、推送密钥或交易细节。
+- **单份合并告警**：专用 DO `_system_monitor_health_v1` 在三个钱包本轮轮询结束时评估并通过**自己的持久化 Outbox**仅发送一份汇总 MONITOR 异常/恢复推送。送达失败使用 DO Alarm 重试。
+- **触发门槛**：纯 429 连续 6 轮失败或最后一次成功已经超过 30 分钟（含正在 Retry-After 暂停的情况）；其他持续性数据/运行时错误连续 3 轮。忽略零星 429。
+- **恢复门槛**：全部监控钱包均至少连续 3 轮检查成功，且最近成功时间不陈旧，才会发一条统一恢复通知；单次成功不能清除告警。
+- **再次告警冷却**：同一监控服务在 6 小时内不会重复发送新的 MONITOR 故障消息；若短暂恢复后又故障，冷却期内会静默记录并继续检查，只有确实再次超过冷却且仍持续故障时才发送。持续同一故障不会每 6 小时自动骚扰。
+- **可调配置**：`MONITOR_429_FAILURE_ROUNDS=6`、`MONITOR_OTHER_FAILURE_ROUNDS=3`、`MONITOR_429_ALERT_MINUTES=30`、`MONITOR_RECOVERY_SUCCESS_ROUNDS=3`、`MONITOR_ALERT_COOLDOWN_HOURS=6`。
+- **查看状态**：`curl -H "Authorization: Bearer $MONITOR_SECRET" https://worker.example.workers.dev/monitor-health-status`，不会对外公开。
+- **不变**：$100 成交/赎回过滤、WIN/LOSS、低综合 APR、CLOB 风控、日报及独立的公开 `GET /health` 不变。独立的 GitHub Actions 外部可用性检查仍可探测 Worker 全局停机。
+- **升级边界**：新的协调器从第一次升级后的 Cron 建立状态，旧三个钱包的检查点和 pending 通知全部保留，不重置历史活动。此前已排队的旧 MONITOR 通知若尚未发送，仍需按原 Outbox 语义投递。
