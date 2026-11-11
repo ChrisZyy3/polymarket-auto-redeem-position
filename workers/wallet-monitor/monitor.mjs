@@ -13,6 +13,7 @@ import { summarizeWalletPositions } from "./asset-digest.mjs";
 import { findRedeemReminders, redemptionReminder } from "./redeem-reminders.mjs";
 import { inspectPriceRisk, priceRiskMessage } from "./price-risk.mjs";
 import { inspectLowApy, lowApyMessage } from "./low-apy.mjs";
+import { buildAutoSellDryRun } from "./auto-sell-planner.mjs";
 const API = "https://data-api.polymarket.com";
 const PAGE = 500;
 const OVERLAP = 60 * 60; // 60-minute late-indexing overlap for five-minute polling
@@ -497,6 +498,11 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
       redeemTrackers: findRedeemReminders(positions,null,now).trackers,
       priceRiskTrackers: inspectPriceRisk(positions,null,now).trackers,
       lowApyState: { lastCheckedAt: now, tokens: {} },
+      autoSellPlan: buildAutoSellDryRun(positions,null,now,{
+        enabled:String(env.AUTO_SELL_DRY_RUN_ENABLED??"true")==="true",
+        targetAprPct:Number(env.AUTO_SELL_TARGET_MARK_APR_PCT??12),
+        minUsd:minimum
+      }),
       seen: {}, pending: [],
       lastSuccessAt: now,activityCheckpoint:now,lastActivitySuccessAt:now, audit: { ...newAudit(now),lastPollAt:now,consecutivePollSuccesses:1,lastActivitySuccessAt:now } };
     await storage.put("monitor", state);
@@ -643,6 +649,13 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     const item = lowApyMessage(walletLabel(user), lowApy.raised, lowAprThreshold, now);
     if(item)pending.push(item);
   }
+  // Uses the same five-minute full snapshot. No extra Data API, CLOB or order calls.
+  // When positions fail, no new plan overwrites the last known full snapshot.
+  const autoSellPlan=buildAutoSellDryRun(positions,state.autoSellPlan,now,{
+    enabled:String(env.AUTO_SELL_DRY_RUN_ENABLED??"true")==="true",
+    targetAprPct:Number(env.AUTO_SELL_TARGET_MARK_APR_PCT??12),
+    minUsd:minimum
+  });
   const dailySnapshot = summarizeWalletPositions(positions,now);
   for (const key of Object.keys(seen)) {
     if (seen[key] < now - OVERLAP) delete seen[key];
@@ -656,6 +669,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     redeemTrackers: reminders.trackers,
     priceRiskTrackers: risks.trackers,
     lowApyState: lowApy.state,
+    autoSellPlan,
     dailySnapshot,
     pending: [...(state.pending || []), ...pending], lastSuccessAt: now,
     audit: {
