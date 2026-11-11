@@ -5,6 +5,7 @@ import { mergeTradeFills } from "./trade-batch.mjs";
 import { shouldNotifyActivity } from "./activity-alert-filter.mjs";
 import { drainOutbox } from "./outbox.mjs";
 import { dataApiJson } from "./data-client.mjs";
+import { beforePositionQuery, afterPositionQuery } from "./position-circuit.mjs";
 import { primaryV2Positions, primaryV2Activity,
   legacyActivityIdentities, cutoverIdentity } from "./data-api-v2-primary.mjs";
 import { compareV2Positions } from "./v2-shadow.mjs";
@@ -135,8 +136,11 @@ function newAudit(now) {
     lastPollErrorStatus: null,
     lastPollErrorEndpoint: null,
     lastPollTraceId: null,
+    lastPollErrorCode: null,
     lastPollRetryAfterSeconds: null,
     nextAllowedPollAt: null,
+    lastActivitySuccessAt: null,
+    lastPositionQueryMode: null,
     healthAlarmActive: false,
     shadowV2LastAttemptAt: null,
     shadowV2LastSuccessAt: null,
@@ -171,8 +175,11 @@ export function auditSnapshot(state) {
     lastPollErrorStatus: a.lastPollErrorStatus ?? null,
     lastPollErrorEndpoint: a.lastPollErrorEndpoint ?? null,
     lastPollTraceId: a.lastPollTraceId ?? null,
+    lastPollErrorCode: a.lastPollErrorCode ?? null,
     lastPollRetryAfterSeconds: a.lastPollRetryAfterSeconds ?? null,
     nextAllowedPollAt: a.nextAllowedPollAt ?? null,
+    lastActivitySuccessAt: a.lastActivitySuccessAt ?? state?.lastActivitySuccessAt ?? null,
+    lastPositionQueryMode: a.lastPositionQueryMode ?? null,
     healthAlarmActive: a.healthAlarmActive ?? false,
     shadowV2LastAttemptAt: a.shadowV2LastAttemptAt ?? null,
     shadowV2LastSuccessAt: a.shadowV2LastSuccessAt ?? null,
@@ -287,6 +294,8 @@ export async function recordPollFailure(storage, env, fetcher = fetch,
   state.audit.lastPollErrorStatus=status;
   state.audit.lastPollErrorEndpoint=safePath(error?.endpoint);
   state.audit.lastPollTraceId=safeTrace(error?.traceId);
+  state.audit.lastPollErrorCode=/^[a-z][a-z0-9_]{0,48}$/.test(String(error?.errorCode||""))
+    ? error.errorCode:null;
   const delay=Number(error?.retryAfterMs);
   state.audit.lastPollRetryAfterSeconds=
     kind==="rate_limit" && Number.isFinite(delay) && delay>0
@@ -301,7 +310,8 @@ export async function recordPollFailure(storage, env, fetcher = fetch,
     at:now,failures:state.audit.consecutivePollFailures,
     kind,status,endpoint:state.audit.lastPollErrorEndpoint,
     retryAfterSeconds:state.audit.lastPollRetryAfterSeconds,
-    traceId:state.audit.lastPollTraceId
+    traceId:state.audit.lastPollTraceId,
+    code:state.audit.lastPollErrorCode
   });
   return {
     alerted:false,failures:state.audit.consecutivePollFailures,
@@ -340,6 +350,76 @@ export async function auditV2Shadow(storage, env, fetcher, user, v1Positions, no
   }
 }
 
+// When only the positions endpoint is blocked, trade/redeem activity may
+// still be fetched independently. This updates only activity dedupe and outbox;
+// neither the full position checkpoint nor any settlement/risk APR baselines
+// are advanced using stale holdings.
+export async function pollActivityOnly(storage,env,fetcher,now,user,positionError=null){
+  const state=await storage.get("monitor");
+  if(!state)return {initialized:false,paused:true,positionsStale:true,
+    activitySynced:false,lastSuccessAt:null};
+  const since=Math.max(state.startedAt,
+    Number(state.activityCheckpoint??state.checkpoint)-OVERLAP);
+  const activity=await primaryV2Activity(fetcher,user,since);
+  const legacy=state.dataApiPrimary!=="v2"?
+    legacyActivityIdentities(state.seen):null;
+  const seen={...(state.seen||{})},fresh=[];
+  for(const item of activity){
+    const key=activityKey(item);
+    if(Object.hasOwn(seen,key)||num(item.timestamp)<state.startedAt)continue;
+    if(legacy?.has(cutoverIdentity(item))){
+      seen[key]=num(item.timestamp);
+      continue;
+    }
+    seen[key]=num(item.timestamp);
+    if(["TRADE","REDEEM"].includes(item.type))fresh.push(item);
+  }
+  const pending=mergeTradeFills(fresh)
+    .filter(item=>shouldNotifyActivity(item,Number(env.MIN_ACTIVITY_ALERT_USD??0)))
+    .map(item=>tradeAlert(item,item,[
+        "预计结束：暂无可靠持仓快照",
+        "当前该选项总持仓：暂不可核实（持仓接口限流）",
+        "当前持仓市值：暂不可核实",
+        "买入均价：暂不可核实",
+        "> 数据源：本条仅根据已核实的成交/赎回活动；持仓数量、估值及首次建仓/清仓分类暂不判断。"
+      ],walletLabel(user),link(item),{
+        lifecycle:null,forecast:null,reconciliationAttempted:false
+      }));
+  const updated={...state,seen,
+    activityCheckpoint:now,lastActivitySuccessAt:now,
+    pending:[...(state.pending||[]),...pending],
+    audit:{...state.audit,
+      lastActivitySuccessAt:now,
+      lastPollAt:now,lastPollAlerts:pending.length,
+      alertsDetectedCount:Number(state.audit?.alertsDetectedCount||0)+pending.length,
+      lastAlertAt:pending.length?now:state.audit?.lastAlertAt??null,
+      lastAlertType:pending.length?alertType(pending[pending.length-1].title):
+        state.audit?.lastAlertType??null
+    }};
+  await storage.put("monitor",updated);
+  // The full-position failure is recorded AFTER activity-only progress is
+  // durable, with lastSuccessAt/checkpoint deliberately unchanged.
+  let diagnosis;
+  if(positionError){
+    diagnosis=await recordPollFailure(storage,env,fetcher,now,positionError);
+  } else {
+    diagnosis={initialized:true,lastSuccessAt:state.lastSuccessAt,
+      ...auditSnapshot(updated)};
+  }
+  const delivery=await deliverPending(storage,env,fetcher,now,"activity_only");
+  auditLog("wallet_activity_only",user,{
+    at:now,positionError:positionError?.status??null,
+    lastPositionAt:state.lastSuccessAt,
+    newActivities:fresh.length,queued:pending.length,
+    accepted:delivery.accepted,pending:delivery.pending
+  });
+  return {initialized:false,paused:true,positionsStale:true,
+    activitySynced:true,activityAlerts:pending.length,
+    pushesAccepted:delivery.accepted,pending:delivery.pending,
+    activityCheckpoint:now,lastActivitySuccessAt:now,
+    lastSuccessAt:state.lastSuccessAt??null,...diagnosis};
+}
+
 export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.now() / 1000), walletAddress = env.WALLET_ADDRESS) {
   const user = (walletAddress || "").toLowerCase();
   if (!/^0x[a-f0-9]{40}$/.test(user)) throw new Error("Invalid WALLET_ADDRESS");
@@ -354,13 +434,17 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     throw new Error("Invalid MIN_ACTIVITY_ALERT_USD");
   let state = await storage.get("monitor");
   if (state && state.user !== user) throw new Error("Wallet changed: use a new Durable Object instance");
-  if (state && Number(state.audit?.nextAllowedPollAt)>now) {
-    state.audit.lastPollAt=now;
-    await storage.put("monitor",state);
-    auditLog("wallet_poll_deferred",user,{
+  const walletWait=state && Number(state.audit?.nextAllowedPollAt)>now;
+  // Distinguish a paused holdings refresh from the independent trade feed:
+  // a long Retry-After must not disable BUY/SELL/REDEEM detection.
+  if(walletWait && useV2 && state){
+    auditLog("wallet_position_deferred",user,{
       at:now,nextAllowedPollAt:state.audit.nextAllowedPollAt,
       reason:"429_retry_after"
     });
+    return pollActivityOnly(storage,env,fetcher,now,user);
+  }
+  if(walletWait){
     return {initialized:true,paused:true,
       lastSuccessAt:state.lastSuccessAt??null,...auditSnapshot(state)};
   }
@@ -369,10 +453,34 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     state.audit ??= newAudit(now);
     state.audit.lastPollAccepted = 0;
   }
-  const positions = useV2 ? await primaryV2Positions(fetcher, user) :
-    await pages(fetcher, "/positions", {
+  let positions;
+  if(useV2){
+    // Shared across all wallets and acquired once per expensive positions call.
+    // A 429 without Retry-After still opens a durable exponential circuit.
+    const gate=await beforePositionQuery(env,now);
+    if(!gate.allowed){
+      auditLog("wallet_position_deferred",user,{
+        at:now,nextAllowedAt:gate.nextAllowedAt,reason:gate.reason
+      });
+      return pollActivityOnly(storage,env,fetcher,now,user);
+    }
+    try{
+      positions=await primaryV2Positions(fetcher,user);
+      await afterPositionQuery(env,now,"ok");
+    }catch(error){
+      await afterPositionQuery(env,now,error?.status===429?"429":"other",
+        error?.retryAfterMs??null);
+      // Always retain the independently checked original Data API error; if
+      // activity also fails, outer error bookkeeping still holds checkpoint.
+      if(state && error?.status===429)
+        return pollActivityOnly(storage,env,fetcher,now,user,error);
+      throw error;
+    }
+  } else {
+    positions=await pages(fetcher, "/positions", {
       user, sizeThreshold: "0", includeArchived: "true", sortBy: "TOKENS", sortDirection: "DESC"
     }, 10000);
+  }
   if (!state) {
     const tracked = {};
     for (const p of positions) {
@@ -390,7 +498,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
       priceRiskTrackers: inspectPriceRisk(positions,null,now).trackers,
       lowApyState: { lastCheckedAt: now, tokens: {} },
       seen: {}, pending: [],
-      lastSuccessAt: now, audit: { ...newAudit(now),lastPollAt:now,consecutivePollSuccesses:1 } };
+      lastSuccessAt: now,activityCheckpoint:now,lastActivitySuccessAt:now, audit: { ...newAudit(now),lastPollAt:now,consecutivePollSuccesses:1,lastActivitySuccessAt:now } };
     await storage.put("monitor", state);
     auditLog("wallet_poll_success", user, { at: now, initialized: true,
       positions: Object.keys(tracked).length, alertsDetected: 0, pushesAccepted: 0, pending: 0 });
@@ -400,7 +508,8 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
   // for this first upgraded poll. Existing checkpoints and sent notifications stay intact.
   const previousSnapshots = state.positionSnapshots ?? null;
   const currentSnapshots = snapshotHoldings(positions);
-  const since = Math.max(state.startedAt, state.checkpoint - OVERLAP);
+  const since = Math.max(state.startedAt,
+    Number(state.activityCheckpoint??state.checkpoint) - OVERLAP);
   const activity = useV2 ? await primaryV2Activity(fetcher, user, since) :
     await pages(fetcher, "/activity", {
       user, type: "TRADE,REDEEM", start: String(since),
@@ -452,6 +561,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
   state.audit.lastPollErrorStatus=null;
   state.audit.lastPollErrorEndpoint=null;
   state.audit.lastPollTraceId=null;
+  state.audit.lastPollErrorCode=null;
   state.audit.lastPollRetryAfterSeconds=null;
   state.audit.nextAllowedPollAt=null;
   state.audit.healthAlarmActive=false;
@@ -541,6 +651,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
   const alertCount = pending.length;
   state = { ...state, checkpoint: now, dataApiPrimary: apiVersion,
     positions: tracked,
+    activityCheckpoint:now,lastActivitySuccessAt:now,
     positionSnapshots: currentSnapshots, seen,
     redeemTrackers: reminders.trackers,
     priceRiskTrackers: risks.trackers,
@@ -549,7 +660,7 @@ export async function poll(storage, env, fetcher = fetch, now = Math.floor(Date.
     pending: [...(state.pending || []), ...pending], lastSuccessAt: now,
     audit: {
       ...state.audit,
-      lastPollAt: now,
+      lastPollAt: now,lastActivitySuccessAt:now,
       lastPollAlerts: alertCount,
       lastPollAccepted: 0,
       alertsDetectedCount: state.audit.alertsDetectedCount + alertCount,

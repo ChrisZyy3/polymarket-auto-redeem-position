@@ -113,9 +113,13 @@ export function healthNotification(event, affected, now, lastState={}) {
         "- 连续失败："+failures+" 次（Cron 每 5 分钟）",
         "- 最后成功："+timestamp(row.lastSuccessAt)+(age!==null?"（约 "+age+" 分钟前）":""),
         row.lastPollErrorEndpoint?"- 端点：\`"+clampText(row.lastPollErrorEndpoint)+"\`":"",
+        row.lastPollErrorCode?"- 上游错误码：\`"+clampText(row.lastPollErrorCode)+"\`":"",
         Number(row.lastPollErrorStatus)>0?"- HTTP 状态："+Number(row.lastPollErrorStatus):"",
         Number(row.lastPollRetryAfterSeconds)>0?"- Retry-After："+Math.round(row.lastPollRetryAfterSeconds)+" 秒":"",
-        row.lastPollTraceId?"- CF Ray / Request ID：\`"+clampText(row.lastPollTraceId)+"\`":"",
+        row.lastPollTraceId?"- Trace ID：\`"+clampText(row.lastPollTraceId)+"\`":"",
+        valid(row.lastActivitySuccessAt)?
+          "- 成交活动最近成功："+timestamp(row.lastActivitySuccessAt):"",
+        row.activitySynced===true?"- 当前状态：**成交活动仍在同步，持仓快照暂不可用**":"",
         valid(row.nextAllowedPollAt) && row.nextAllowedPollAt>now?
           "- 下次允许重试："+timestamp(row.nextAllowedPollAt):"",
         "");
