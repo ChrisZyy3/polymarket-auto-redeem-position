@@ -17,7 +17,7 @@ const base=(extra={})=>({
  wallet,tokenId,nowSec:now,positionShares:1000,positionAsOf:now-60,
  authOrders:{complete:true,asOf:now-10,orders:[]},
  managedOrderIds:[],targetFloorPrice:0.9903,
- quote:{bestBid:0.992,bestAsk:0.994,tickSize:0.0001,asOf:now-5},
+ quote:{bestBid:0.992,bestAsk:0.994,tickSize:0.0001,tickVerified:true,asOf:now-5},
  minOrderShares:1,...extra
 });
 const run=(orders=[],extra={})=>reconcileAutoSellMaker(base({
@@ -38,7 +38,7 @@ assert.equal(ceilMakerPrice(0.999999,0.001),null);
 assert.equal(gtdExpirationForSubmission(now),now+604860);
 console.log("Passed: maker-first best ask, 7-day GTD, correct security offset, tick ceiling");
 
-p=run([], {quote:{bestBid:0.985,bestAsk:0.989,tickSize:0.001,asOf:now}});
+p=run([], {quote:{bestBid:0.985,bestAsk:0.989,tickSize:0.001,tickVerified:true,asOf:now}});
 assert.equal(p.action,"would_create_post_only");
 assert.equal(p.proposedLimitPrice,0.991, "never sell below minimum APR floor");
 
@@ -53,7 +53,7 @@ assert.deepEqual(p.managedOrders,[]);
 console.log("Passed: existing manual SELL reduces total shares; never canceled or taken over");
 
 p=run([order("managed-1",{price:"0.996",original_size:"900",size_matched:"100"})],
-  {managedOrderIds:["managed-1"],quote:{bestBid:0.995,bestAsk:0.997,tickSize:0.001,asOf:now}});
+  {managedOrderIds:["managed-1"],quote:{bestBid:0.995,bestAsk:0.997,tickSize:0.001,tickVerified:true,asOf:now}});
 assert.equal(p.action,"keep_existing");
 assert.equal(p.protectedOrderId,"managed-1");
 assert.equal(p.reservedShares,800);
@@ -94,12 +94,17 @@ assert.equal(missing.reason,"authenticated_open_orders_unavailable");
 assert.equal(reconcileAutoSellMaker(base({authOrders:{complete:false,asOf:now,orders:[]}})).action,"blocked");
 assert.equal(reconcileAutoSellMaker(base({authOrders:{complete:true,asOf:now-121,orders:[]}})).reason,"orders_stale");
 assert.equal(reconcileAutoSellMaker(base({positionAsOf:now-601})).reason,"positions_stale");
-assert.equal(run([],{quote:{bestBid:0.995,bestAsk:0.994,tickSize:0.001,asOf:now}}).reason,"crossed_or_invalid_orderbook");
-assert.equal(run([],{quote:{bestBid:0.992,bestAsk:0.994,tickSize:0.001,asOf:now-121}}).reason,"live_orderbook_or_tick_unverified");
-assert.equal(run([],{targetFloorPrice:0.9999,quote:{bestBid:0.99,bestAsk:0.995,tickSize:0.001,asOf:now}}).reason,"floor_above_legal_tick");
+assert.equal(run([],{quote:{bestBid:0.995,bestAsk:0.994,tickSize:0.001,tickVerified:true,asOf:now}}).reason,"crossed_or_invalid_orderbook");
+assert.equal(run([],{quote:{bestBid:0.992,bestAsk:0.994,tickSize:0.001,tickVerified:true,asOf:now-121}}).reason,"live_orderbook_or_tick_unverified");
+assert.equal(run([],{targetFloorPrice:0.9999,quote:{bestBid:0.99,bestAsk:0.995,tickSize:0.001,tickVerified:true,asOf:now}}).reason,"floor_above_legal_tick");
 assert.equal(run([order("duplicate"),order("duplicate")]).reason,"missing_or_duplicate_order_id");
 assert.equal(run([order("unknown-status",{status:"DELAYED"})]).reason,"unknown_sell_order_status");
 assert.equal(run([order("unconfirmed-expiry",{expiration:String(now+30)})]).reason,"live_order_expiration_unconfirmed");
+assert.equal(run([],{managedOrderIds:["prior-managed"]}).reason,"managed_order_terminal_state_unverified");
+assert.equal(run([],{managedOrderIds:["prior-managed"],confirmedTerminalOrderIds:["prior-managed"]}).action,"would_create_post_only");
+assert.equal(run([],{quote:{bestBid:0.992,bestAsk:0.994,tickSize:0.001,asOf:now}}).reason,"live_orderbook_or_tick_unverified");
+assert.equal(run([],{quote:{bestBid:0.992,bestAsk:0.9945,tickSize:0.001,tickVerified:true,asOf:now}}).reason,"best_ask_not_on_tick");
+assert.equal(run([order("bad-numeric",{original_size:"invalid"})]).reason,"invalid_order_numeric_fields");
 assert.equal(run([order("other-maker",{maker_address:other})]).reservedShares,0);
 assert.equal(run([order("bids-dont-reserve",{side:"BUY"})]).reservedShares,0);
 assert.equal(run([order("settling",{status:"MATCHED",original_size:"300",size_matched:"100"})]).reason,"matched_status_has_unconfirmed_remainder");
