@@ -6,3 +6,7 @@ dist
 state.json
 *.tsbuildinfo
 .next
+
+# Cloudflare local secrets: NEVER commit
+**/.dev.vars*
+**/.env*
