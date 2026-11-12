@@ -84,6 +84,7 @@ test("foreign-maker orders are not assigned to wrong Polymarket wallet",async()=
 });
 
 test("missing pagination, HTTP errors and malformed order fields fail closed",async()=>{
+ let cursorSequence=0;
  const cases=[
   [()=>goodResponse([order("array")]),"unpaginated_orders_response_unverified"],
   [()=>goodResponse({data:[order("no-cursor")]}),"order_pagination_not_verifiable"],
