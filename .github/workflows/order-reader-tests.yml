@@ -1,0 +1,29 @@
+name: CLOB Order Reader Security Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'workers/order-reader/**'
+      - 'tools/clob-credentials-local/**'
+      - '.github/workflows/order-reader-tests.yml'
+  pull_request:
+    paths:
+      - 'workers/order-reader/**'
+      - 'tools/clob-credentials-local/**'
+      - '.github/workflows/order-reader-tests.yml'
+
+jobs:
+  read-only:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate local signer syntax
+        run: node --check tools/clob-credentials-local/server.mjs && node --check tools/clob-credentials-local/client.js
+      - name: Test authenticated read-only CLOB API integration
+        run: node --test workers/order-reader/test-order-reader.mjs

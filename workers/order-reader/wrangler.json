@@ -1,0 +1,11 @@
+{
+  "name": "polymarket-order-reader",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-11-12",
+  "vars": {
+    "ORDER_READER_MODE": "read-only"
+  },
+  "observability": {
+    "enabled": true
+  }
+}
