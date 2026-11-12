@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Local CLOB Credential Setup · MetaMask / Rabby</title>
+<link rel="stylesheet" href="/styles.css">
+<script src="/client.js" defer></script>
+</head>
+<body>
+<main>
+<header><p class="eyebrow">LOCALHOST ONLY · 127.0.0.1</p>
+<h1>Polymarket CLOB 凭据配置</h1>
+<p>使用 MetaMask / Rabby 签署官方 <code>ClobAuth</code> 消息。<strong>不导出私钥、不发交易、不向 Dashboard 上传凭据。</strong></p>
+</header>
+<section>
+<h2>1 · 连接签名钱包</h2>
+<label for="provider">钱包扩展</label>
+<select id="provider"><option value="">请选择钱包</option></select>
+<button id="connect" type="button">连接 MetaMask / Rabby</button>
+<p id="connected" class="muted">尚未连接</p>
+</section>
+<section>
+<h2>2 · 选择 Polymarket 持仓钱包</h2>
+<p>请在 Polymarket 网站核对该钱包的实际持仓地址。外部 EOA Signer 与 Safe/代理持仓地址可能不同。</p>
+<label for="funder">实际持仓 / Funder Address</label>
+<select id="funder"></select>
+<p class="muted">如果显示的地址不是你预期的账户，不要继续。此工具不会自动证明账户映射正确，后续需要通过真实订单核验。</p>
+</section>
+<section>
+<h2>3 · 派生已有 L2 凭据</h2>
+<p>先尝试<strong>派生已有凭据</strong>，避免覆盖正在运行的交易机器人凭据。</p>
+<button id="derive" type="button" disabled>钱包签名并派生已有凭据</button>
+<button id="create" class="danger" type="button" disabled>没有已有凭据时，明确确认创建</button>
+<p id="status" role="status" aria-live="polite"></p>
+</section>
+<section>
+<h2>4 · 放入 Cloudflare Secrets</h2>
+<p>只有收到完整 L2 三字段后才允许复制。Secret 名称按你选中的钱包顺序使用 <code>CLOB_ACCOUNT_1</code>、<code>CLOB_ACCOUNT_2</code>、<code>CLOB_ACCOUNT_3</code>。</p>
+<button id="copy" type="button" disabled>复制当前钱包的 Secret JSON</button>
+<button id="clear" class="secondary" type="button">清空临时凭据与剪贴板</button>
+<p class="muted">粘贴到 Cloudflare 的 <strong>Secrets（加密）</strong>，不要发聊天、邮件、Issue 或提交 GitHub。复制后立即清空剪贴板并关闭本地服务。</p>
+</section>
+<footer>此页面仅绑定 127.0.0.1；页面请求只会发送至本机，本机服务只向官方 Polymarket CLOB 的凭据接口发起请求。</footer>
+</main>
+</body></html>
