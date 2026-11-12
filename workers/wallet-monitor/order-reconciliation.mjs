@@ -53,7 +53,7 @@ export function ceilMakerPrice(price,tick) {
 export function reconcileAutoSellMaker(input) {
   const {wallet,tokenId,nowSec,positionShares,positionAsOf,authOrders,
     managedOrderIds=[],targetFloorPrice,quote,
-    availableBalanceShares=null,minOrderShares=0.01} = input||{};
+    availableBalanceShares=null,minOrderShares=0.01,confirmedTerminalOrderIds=[]} = input||{};
   if(!Number.isInteger(nowSec)||nowSec<=0||!validWallet(wallet)||
       !String(tokenId??"").trim())return blocked("invalid_identity_or_clock");
   if(!validFresh(positionAsOf,nowSec,600))return blocked("positions_stale");
@@ -61,8 +61,10 @@ export function reconcileAutoSellMaker(input) {
   if(authOrders==null||authOrders.complete!==true||!Array.isArray(authOrders.orders))
     return blocked("authenticated_open_orders_unavailable");
   if(!validFresh(authOrders.asOf,nowSec,120))return blocked("orders_stale");
-  if(!Array.isArray(managedOrderIds)||managedOrderIds.some(x=>typeof x!=="string"||!x))
-    return blocked("invalid_managed_order_ids");
+  if(!Array.isArray(managedOrderIds)||managedOrderIds.some(x=>typeof x!=="string"||!x)||
+     !Array.isArray(confirmedTerminalOrderIds) ||
+     confirmedTerminalOrderIds.some(x=>typeof x!=="string"||!x))
+    return blocked("invalid_order_identity_list");
   if(!finite(targetFloorPrice)||Number(targetFloorPrice)<=0||Number(targetFloorPrice)>=1)
     return blocked("target_apr_floor_unverified");
   const total=Number(positionShares);
@@ -74,7 +76,8 @@ export function reconcileAutoSellMaker(input) {
     netCap=Math.min(total,Math.max(0,Number(availableBalanceShares)));
   }
   const target=String(tokenId);
-  const ids=new Set(), managed=new Set(managedOrderIds), live=[];
+  const ids=new Set(), managed=new Set(managedOrderIds),
+    terminalConfirmed=new Set(confirmedTerminalOrderIds),live=[];
   const unknownStatuses=[];
   for(const order of authOrders.orders){
     if(!order||typeof order!=="object")return blocked("malformed_order_page");
@@ -93,8 +96,11 @@ export function reconcileAutoSellMaker(input) {
     if(!isLive(status)&&!terminal(status)){
       unknownStatuses.push(status);continue;
     }
-    const orig=numeric(order.original_size,"original size");
-    const matched=numeric(order.size_matched,"matched size");
+    let orig, matched;
+    try{
+      orig=numeric(order.original_size,"original size");
+      matched=numeric(order.size_matched,"matched size");
+    }catch{return blocked("invalid_order_numeric_fields");}
     if(matched>orig+EPS)return blocked("matched_exceeds_original");
     const remain=roundShares(Math.max(0,orig-matched));
     if(status==="MATCHED"||status==="ORDER_STATUS_MATCHED"){
@@ -103,7 +109,9 @@ export function reconcileAutoSellMaker(input) {
     }
     if(!isLive(status))continue;
     if(remain<=EPS)continue;
-    const px=numeric(order.price,"order price");
+    let px;
+    try{px=numeric(order.price,"order price");}
+    catch{return blocked("invalid_order_numeric_fields");}
     if(px<=0||px>=1)return blocked("invalid_order_price");
     const expiry=Number(order.expiration??0);
     if(!Number.isFinite(expiry)||expiry<0)return blocked("invalid_order_expiration");
@@ -116,6 +124,12 @@ export function reconcileAutoSellMaker(input) {
       autoManaged:managed.has(id)});
   }
   if(unknownStatuses.length)return blocked("unknown_sell_order_status");
+  // /data/orders often returns only LIVE orders. A missing Auto Sell order
+  // may be filled, canceled, or a stale response. Require an independent
+  // terminal confirmation before treating its reserved shares as reusable.
+  const stillLive=new Set(live.filter(o=>o.autoManaged).map(o=>o.id));
+  if([...managed].some(id=>!stillLive.has(id)&&!terminalConfirmed.has(id)))
+    return blocked("managed_order_terminal_state_unverified");
   const reserved=roundShares(live.reduce((sum,o)=>sum+o.remainingShares,0));
   if(reserved>total+EPS)return blocked("orders_reserved_exceed_position");
   const manual=live.filter(o=>!o.autoManaged),owned=live.filter(o=>o.autoManaged);
@@ -135,7 +149,7 @@ export function reconcileAutoSellMaker(input) {
     const expiredSoon=o.expiration>0 &&
       (o.expiration-GTD_SECURITY_OFFSET_SECONDS-nowSec)<=GTD_RENEW_WINDOW_SECONDS;
     const compliantPrice=o.price+EPS>=Number(targetFloorPrice);
-    if(!compliantPrice||o.orderType!=="GTD"){
+    if(!compliantPrice||o.orderType!=="GTD"||o.expiration<=0){
       return {mode:RECONCILIATION_MODE,action:"would_cancel_then_reconcile",postOnly:true,
         orderType:"GTD",reason:!compliantPrice?"managed_price_below_apr_floor":"managed_order_not_gtd",
         protectedOrderId:o.id,proposedLimitPrice:null,expirationToSubmit:null,...common};
@@ -156,12 +170,16 @@ export function reconcileAutoSellMaker(input) {
       proposedLimitPrice:null,expirationToSubmit:null,...common};
   }
   if(!quote||!validFresh(quote.asOf,nowSec,120)||
+     quote.tickVerified!==true||
      !finite(quote.tickSize)||Number(quote.tickSize)<=0||
      !finite(quote.bestAsk)||!finite(quote.bestBid))
     return blocked("live_orderbook_or_tick_unverified",common);
   const tick=Number(quote.tickSize),bid=Number(quote.bestBid),ask=Number(quote.bestAsk);
   if(!(bid>=0 && bid<1 && ask>0 && ask<1) || bid>=ask-EPS)
     return blocked("crossed_or_invalid_orderbook",common);
+  // Never silently move the displayed best ask to a different price level.
+  if(Math.abs(roundPrice(ask/Number(quote.tickSize))*Number(quote.tickSize)-ask)>EPS)
+    return blocked("best_ask_not_on_tick",common);
   const floor=ceilMakerPrice(Number(targetFloorPrice),tick);
   const price=ceilMakerPrice(Math.max(ask,Number(targetFloorPrice)),tick);
   if(floor===null||price===null)return blocked("floor_above_legal_tick",common);
