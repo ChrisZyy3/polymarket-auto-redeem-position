@@ -178,7 +178,7 @@ export function reconcileAutoSellMaker(input) {
   if(!(bid>=0 && bid<1 && ask>0 && ask<1) || bid>=ask-EPS)
     return blocked("crossed_or_invalid_orderbook",common);
   // Never silently move the displayed best ask to a different price level.
-  if(Math.abs(roundPrice(ask/Number(quote.tickSize))*Number(quote.tickSize)-ask)>EPS)
+  if(Math.abs(Math.round(ask/Number(quote.tickSize))*Number(quote.tickSize)-ask)>EPS)
     return blocked("best_ask_not_on_tick",common);
   const floor=ceilMakerPrice(Number(targetFloorPrice),tick);
   const price=ceilMakerPrice(Math.max(ask,Number(targetFloorPrice)),tick);
