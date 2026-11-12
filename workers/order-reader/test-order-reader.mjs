@@ -92,7 +92,7 @@ test("missing pagination, HTTP errors and malformed order fields fail closed",as
   [()=>goodResponse(page([order("bad",{original_size:"NaN"})])),"invalid_clob_order_schema"],
   [()=>goodResponse(page([order("same"),order("same")])),"repeated_open_order_id"],
   [()=>goodResponse(page([order("1")],"LTE=",2)),"clob_orders_total_count_mismatch"],
-  [()=>goodResponse(page([order("1")],"MQ==",1)),"repeated_order_cursor"]
+  [()=>goodResponse(page([order(String(++cursorSequence))],"MQ==",1)),"repeated_order_cursor"]
  ];
  for(const [handler,code] of cases){
    let calls=0;
