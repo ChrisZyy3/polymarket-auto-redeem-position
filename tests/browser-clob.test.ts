@@ -19,3 +19,15 @@ test("rejects unauthenticated, CORS, unpaginated and wrong-maker responses",asyn
  await assert.rejects(()=>fetchBrowserOpenOrders(creds,signer,funder,(async()=>Response.json({data:[{...order,maker_address:signer}],next_cursor:"LTE="})) as typeof fetch),/maker_mismatch/);
  await assert.rejects(()=>fetchBrowserOpenOrders(creds,signer,funder,(async()=>new Response("",{status:429})) as typeof fetch),/rate_limited/);
 });
+
+test("conditional balance uses Safe signature type and signs the correct path",async()=>{
+ const {fetchConditionalBalance}=await import("../lib/browser-clob");
+ const mock=(async (url,init)=>{const u=new URL(String(url));const h=new Headers(init?.headers);assert.equal(u.pathname,"/balance-allowance");assert.equal(u.searchParams.get("asset_type"),"CONDITIONAL");assert.equal(u.searchParams.get("token_id"),"123");assert.equal(u.searchParams.get("signature_type"),"2");assert.equal(h.get("POLY_SIGNATURE"),createHmac("sha256",Buffer.from(creds.secret,"base64")).update(`${h.get("POLY_TIMESTAMP")}GET/balance-allowance`).digest("base64url")+"=");return Response.json({balance:"10000000",allowances:{[funder]:"999999999"}});}) as typeof fetch;
+ const data=await fetchConditionalBalance(creds,signer,"123",mock);assert.equal(data.balance,"10000000");
+});
+test("conditional balance rejects invalid identifiers, payloads and upstream failure",async()=>{
+ const {fetchConditionalBalance}=await import("../lib/browser-clob");
+ await assert.rejects(()=>fetchConditionalBalance(creds,signer,"bad",fetch),/invalid_asset/);
+ await assert.rejects(()=>fetchConditionalBalance(creds,signer,"123",(async()=>Response.json({balance:"5"})) as typeof fetch),/invalid_balance/);
+ await assert.rejects(()=>fetchConditionalBalance(creds,signer,"123",(async()=>new Response("",{status:429})) as typeof fetch),/rate_limited/);
+});
