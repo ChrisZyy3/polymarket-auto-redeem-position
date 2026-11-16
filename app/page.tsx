@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { MarketTitle } from "@/app/components/market-title";
 import { AutoSellPlannerPanel } from "@/app/components/auto-sell-planner-panel";
+import { useConnection } from "wagmi";
 import { WalletConnectPanel } from "@/app/components/wallet-connect-panel";
 import { CardToggle } from "@/app/components/card-toggle";
 import { PortfolioSellSummary } from "@/app/components/portfolio-sell-summary";
@@ -214,6 +215,11 @@ function getPositionKey(position: EnrichedPosition): string {
  */
 export default function Home() {
   const [address, setAddress] = useState("");
+  const { address: signerAddress, isConnected } = useConnection();
+  const [profileStatus, setProfileStatus] = useState<"idle" | "loading" | "found" | "not_found" | "unavailable" | "invalid_profile">("idle");
+  const [profileAddress, setProfileAddress] = useState<string | null>(null);
+  const profileRequestVersion = useRef(0);
+  const previousSigner = useRef<string | null>(null);
   const [data, setData] = useState<ApiResponse | null>(null);
   const [portfolioHistory, setPortfolioHistory] = useState<HistoryResponse | null>(null);
   const [dailyPositionHistory, setDailyPositionHistory] = useState<DailyPositionResponse | null>(null);
@@ -294,6 +300,49 @@ export default function Home() {
   useEffect(() => {
     document.documentElement.lang = isEnglish ? "en" : "zh-CN";
   }, [isEnglish]);
+
+  // Resolve only a connected signer. A profile lookup is not proof of signing authority.
+  useEffect(() => {
+    const signer = isConnected && signerAddress ? signerAddress.toLowerCase() : null;
+    if (previousSigner.current === signer) return;
+    const previous = previousSigner.current;
+    previousSigner.current = signer;
+    const version = ++profileRequestVersion.current;
+    // Invalidate previous portfolio and quote requests when the connected account changes.
+    if (signer || previous) {
+      queryRequestVersion.current += 1;
+      quoteRequestVersion.current += 1;
+      setData(null); setPortfolioHistory(null); setDailyPositionHistory(null);
+      setQuoteStates({}); setExpandedPositionKey(null); setLoading(false); setError(null);
+      setAddress(""); setProfileAddress(null);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("address");
+      window.history.replaceState(null, "", url);
+    }
+    if (!signer) { setProfileStatus("idle"); return; }
+    const controller = new AbortController();
+    setProfileStatus("loading");
+    void (async () => {
+      try {
+        const response = await fetch(`/api/wallet-profile?address=${encodeURIComponent(signer)}`, { cache: "no-store", signal: controller.signal });
+        const result = await response.json();
+        if (version !== profileRequestVersion.current) return;
+        if (result.status === "found" && typeof result.proxyWallet === "string" && /^0x[a-fA-F0-9]{40}$/.test(result.proxyWallet)) {
+          setProfileAddress(result.proxyWallet); setProfileStatus("found");
+          setAddress(result.proxyWallet);
+          void runQuery(result.proxyWallet);
+        } else {
+          setProfileStatus(result.status === "not_found" || result.status === "invalid_profile" ? result.status : "unavailable");
+        }
+      } catch {
+        if (version === profileRequestVersion.current && !controller.signal.aborted) setProfileStatus("unavailable");
+      }
+    })();
+    return () => controller.abort();
+    // Run on signer changes only; request version guards stale async responses.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, signerAddress]);
+
 
   function changeLanguage(nextLanguage: Language) {
     setLanguage(nextLanguage);
@@ -826,6 +875,8 @@ export default function Home() {
   // 提交输入表单执行查询
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    profileRequestVersion.current += 1;
+    setProfileStatus(status => status === "loading" ? "idle" : status);
     const trimmed = address.trim();
     if (!trimmed) return;
     await runQuery(trimmed);
@@ -834,6 +885,8 @@ export default function Home() {
   // Click handler to trigger queries from search history pills
   // 快捷查询：点击历史记录徽章时快速激活对应地址查询
   function handleHistoryClick(addr: string) {
+    profileRequestVersion.current += 1;
+    setProfileStatus(status => status === "loading" ? "idle" : status);
     setAddress(addr);
     void runQuery(addr);
   }
@@ -897,6 +950,13 @@ export default function Home() {
       </div>
 
       <WalletConnectPanel language={language} />
+      {isConnected && <div role="status" className="mt-2 rounded-xl border border-slate-800 bg-slate-900/55 px-4 py-3 text-xs leading-5 text-slate-300">
+        {profileStatus === "loading" ? (isEnglish ? "Looking up Polymarket profile…" : "正在查找 Polymarket 账户…") :
+         profileStatus === "found" ? <span className="break-all">{isEnglish ? "Polymarket position address" : "Polymarket 持仓地址"}: <span className="font-mono text-cyan-200">{profileAddress}</span>{isEnglish ? " · Check against your Polymarket profile." : " · 请与 Polymarket 个人资料中的地址核对。"}</span> :
+         profileStatus === "not_found" ? (isEnglish ? "No public profile found. Enter the position address manually." : "未找到公开资料，请手动输入 Polymarket 持仓地址。") :
+         profileStatus === "invalid_profile" ? (isEnglish ? "Profile has no valid position address. Enter it manually." : "公开资料未返回有效持仓地址，请手动输入。") :
+         profileStatus === "unavailable" ? (isEnglish ? "Profile lookup unavailable. Enter the position address manually or reconnect to retry." : "账户查询暂不可用，请手动输入持仓地址，或重新连接重试。") : null}
+      </div>}
 
       {/* 
         * Search Bar & Configurations Container
@@ -934,7 +994,7 @@ export default function Home() {
                 pattern="0x[a-fA-F0-9]{40}"
                 title={isEnglish ? "Enter a valid 42-character EVM wallet address." : "请输入以 0x 开头的 42 位 EVM 钱包地址。"}
                 value={address}
-                onChange={(e) => setAddress(e.target.value)}
+                onChange={(e) => { profileRequestVersion.current += 1; setProfileStatus(status => status === "loading" ? "idle" : status); setAddress(e.target.value); }}
                 placeholder={isEnglish ? "EVM wallet address, e.g. 0x1234…" : "输入 EVM 钱包地址，如 0x1234…"}
                 className="h-11 w-full rounded-xl border border-slate-700 bg-slate-950/75 py-2.5 pl-3.5 pr-11 font-mono text-sm text-slate-100 shadow-inner outline-none transition-[border-color,box-shadow] placeholder:font-sans placeholder:text-slate-500 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/25"
               />
