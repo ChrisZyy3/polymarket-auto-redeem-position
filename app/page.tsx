@@ -34,6 +34,7 @@ import {
 import { MarketTitle } from "@/app/components/market-title";
 import { AutoSellPlannerPanel } from "@/app/components/auto-sell-planner-panel";
 import { useConnection } from "wagmi";
+import { BrowserClobPanel } from "@/app/components/browser-clob-panel";
 import { WalletConnectPanel } from "@/app/components/wallet-connect-panel";
 import { CardToggle } from "@/app/components/card-toggle";
 import { PortfolioSellSummary } from "@/app/components/portfolio-sell-summary";
@@ -1169,6 +1170,8 @@ export default function Home() {
       <PortfolioHistoryChart snapshots={portfolioHistory?.snapshots ?? []} language={language} />
 
       <PortfolioSellSummary key={data?.positions.map(p => `${p.proxyWallet}:${p.asset}`).join("|") ?? "empty"} positions={positions} language={language} />
+
+      <BrowserClobPanel profileAddress={profileAddress} queryAddress={address} positions={positions} language={language} />
 
       {/* Positions detailed tables container / 仓位细分数据列表 */}
       <div className="relative mt-8 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/45 shadow-[0_14px_36px_rgba(0,0,0,0.14)]">

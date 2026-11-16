@@ -1,0 +1,36 @@
+"use client";
+import { useEffect, useRef, useState } from "react";
+import { useConnection, useSignTypedData } from "wagmi";
+import { encodeAbiParameters,getAddress,getCreate2Address,keccak256 } from "viem";
+import { deriveClobCredentials, fetchBrowserOpenOrders, type ClobCredentials, type ClobOrder } from "@/lib/browser-clob";
+import type { EnrichedPosition } from "@/lib/types";
+
+export function BrowserClobPanel({profileAddress,queryAddress,positions,language}:{profileAddress:string|null;queryAddress:string;positions:EnrichedPosition[];language:"zh"|"en"}){
+ const en=language==="en",{address,isConnected,chainId}=useConnection(),{signTypedDataAsync}=useSignTypedData();
+ const creds=useRef<ClobCredentials|null>(null),version=useRef(0);
+ const [orders,setOrders]=useState<ClobOrder[]|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(""),[time,setTime]=useState<number|null>(null);
+ useEffect(()=>{version.current++;creds.current=null;setOrders(null);setError("");setBusy(false);setTime(null);},[address,profileAddress,queryAddress,chainId]);
+ if(!isConnected||!address||!profileAddress)return null;
+ const matches=profileAddress.toLowerCase()===queryAddress.trim().toLowerCase();
+ async function read(){
+  if(!address||!profileAddress||!matches||chainId!==137)return;
+  const safe=getCreate2Address({from:"0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b",salt:keccak256(encodeAbiParameters([{type:"address"}],[getAddress(address)])),bytecodeHash:"0x2bce2127ff07fb632d16c8347c4ebf501f4841168bed00d9e6ef715ddb6fcecf"});
+  if(safe.toLowerCase()!==profileAddress.toLowerCase()){setError("safe_mismatch");return;}
+  const current=++version.current;setBusy(true);setOrders(null);setError("");
+  try{
+   let session=creds.current;
+   if(!session){
+    const timestamp=Math.floor(Date.now()/1000);
+    const signature=await signTypedDataAsync({domain:{name:"ClobAuthDomain",version:"1",chainId:137},types:{ClobAuth:[{name:"address",type:"address"},{name:"timestamp",type:"string"},{name:"nonce",type:"uint256"},{name:"message",type:"string"}]},primaryType:"ClobAuth",message:{address,timestamp:String(timestamp),nonce:0n,message:"This message attests that I control the given wallet"}});
+    if(current!==version.current)return;
+    session=await deriveClobCredentials(address,signature,timestamp);if(current!==version.current)return;creds.current=session;
+   }
+   const snapshot=await fetchBrowserOpenOrders(session,address,profileAddress);if(current!==version.current)return;setOrders(snapshot);setTime(Date.now());
+  }catch(e){if(current===version.current){creds.current=null;setError(e instanceof Error?e.message:"unknown");}}
+  finally{if(current===version.current)setBusy(false);}
+ }
+ const messages:Record<string,string>={safe_mismatch:en?"Safe address does not match this signer.":"签名地址与持仓 Safe 不匹配。",credentials_not_found:en?"Existing CLOB credentials were not found; no new key was created.":"未找到已有 CLOB 凭据，本次没有创建新凭据。",connection_or_cors:en?"Browser could not reach CLOB; cross-origin access may be blocked.":"浏览器无法访问 CLOB，可能受到跨域或网络限制。",incomplete_pagination:en?"Order pagination is incomplete; no result shown.":"订单分页无法确认完整，已停止展示。",maker_mismatch:en?"Order maker does not match the Safe.":"订单所属地址与 Safe 不匹配。",rate_limited:en?"CLOB rate-limited this request.":"CLOB 限流，请稍后重试。"};
+ return <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/55 p-4 sm:p-5"><div className="flex flex-wrap justify-between gap-3"><div><h2 className="font-semibold text-slate-100">{en?"CLOB session · read only":"CLOB 会话 · 只读挂单"}</h2><p className="mt-1 text-xs text-slate-400">{en?"Derive existing credentials in this browser session; no orders are submitted.":"通过钱包签名派生已有凭据，仅保存在当前页面内存；不会下单。"}</p></div><button type="button" disabled={busy||!matches||chainId!==137} onClick={()=>void read()} className="rounded-lg border border-cyan-500/40 px-3 py-2 text-sm text-cyan-200 disabled:opacity-50">{busy?(en?"Reading…":"读取中…"):(en?"Read open orders":"读取已有挂单")}</button></div>
+ {!matches&&<p className="mt-2 text-xs text-amber-300">{en?"Analyze the connected Safe first.":"当前查询地址与连接钱包不一致，请先查询连接钱包。"}</p>}{chainId!==137&&<p className="mt-2 text-xs text-amber-300">{en?"Switch to Polygon.":"请切换至 Polygon。"}</p>}{error&&<p role="alert" className="mt-2 text-sm text-amber-300">{messages[error]??(en?"Authentication or order read failed; no empty result assumed.":"认证或读取失败，未将其视为空挂单。")}</p>}
+ {orders&&<div className="mt-3 overflow-x-auto"><p className="mb-2 text-xs text-slate-400">{en?"Read only; account-wide order coverage and available shares not verified.":"仅供查看；尚未确认该凭据覆盖全部挂单和可卖份额。"} {time&&new Date(time).toLocaleTimeString()}</p><table className="w-full min-w-[560px] text-sm"><thead><tr className="text-left text-slate-400"><th>{en?"Market":"市场"}</th><th>{en?"Side":"方向"}</th><th>{en?"Price":"价格"}</th><th>{en?"Remaining":"未成交"}</th></tr></thead><tbody>{orders.map(o=>{const p=positions.find(x=>x.asset===o.asset_id);return <tr key={o.id} className="border-t border-slate-800"><td className="py-2">{p?`${p.title} · ${p.outcome}`:o.asset_id}</td><td>{o.side}</td><td>{o.price}</td><td>{(Number(o.original_size)-Number(o.size_matched)).toLocaleString(undefined,{maximumFractionDigits:6})}</td></tr>;})}</tbody></table>{orders.length===0&&<p className="py-3 text-sm text-amber-300">{en?"No orders returned; an empty result does not prove wallet mapping or full coverage.":"未返回挂单；空结果不能证明钱包映射或查询范围完整。"}</p>}</div>}</section>;
+}
