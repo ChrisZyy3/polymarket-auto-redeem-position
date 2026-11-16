@@ -15,12 +15,12 @@ export async function deriveClobCredentials(signer:string, signature:string, tim
   if(typeof c.apiKey!=="string"||c.apiKey.length<8||typeof c.secret!=="string"||c.secret.length<12||typeof c.passphrase!=="string"||!c.passphrase)throw new ClobReadError("invalid_credentials");
   return {apiKey:c.apiKey,secret:c.secret,passphrase:c.passphrase};
 }
-async function signatureFor(secret:string,timestamp:number) {
+async function signatureFor(secret:string,timestamp:number,path="/data/orders") {
   try {
     let base64=secret.replace(/-/g,"+").replace(/_/g,"/");base64+="=".repeat((4-base64.length%4)%4);
     const bytes=Uint8Array.from(atob(base64),c=>c.charCodeAt(0));
     const key=await crypto.subtle.importKey("raw",bytes,{name:"HMAC",hash:"SHA-256"},false,["sign"]);
-    const signature=await crypto.subtle.sign("HMAC",key,new TextEncoder().encode(`${timestamp}GET/data/orders`));
+    const signature=await crypto.subtle.sign("HMAC",key,new TextEncoder().encode(`${timestamp}GET${path}`));
     return btoa(String.fromCharCode(...new Uint8Array(signature))).replace(/\+/g,"-").replace(/\//g,"_");
   }catch{throw new ClobReadError("invalid_credentials");}
 }
@@ -55,4 +55,22 @@ export async function fetchBrowserOpenOrders(credentials:ClobCredentials,signer:
     if(typeof next!=="string"||cursors.has(next))throw new ClobReadError("incomplete_pagination");cursors.add(next);cursor=next;
   }
   throw new ClobReadError("incomplete_pagination");
+}
+
+/** Returns CLOB wire balance and allowances unchanged; does not infer spendable shares. */
+export async function fetchConditionalBalance(credentials:ClobCredentials, signer:string, tokenId:string, fetcher:typeof fetch=fetch) {
+  if(!/^\d{1,100}$/.test(tokenId)) throw new ClobReadError("invalid_asset");
+  const timestamp=Math.floor(Date.now()/1000), path="/balance-allowance";
+  const signed=await signatureFor(credentials.secret,timestamp,path);
+  const url=new URL(`${CLOB}${path}`);url.searchParams.set("asset_type","CONDITIONAL");url.searchParams.set("token_id",tokenId);url.searchParams.set("signature_type","2");
+  let response:Response;
+  try{response=await fetcher(url,{method:"GET",headers:{POLY_ADDRESS:signer,POLY_API_KEY:credentials.apiKey,POLY_PASSPHRASE:credentials.passphrase,POLY_TIMESTAMP:String(timestamp),POLY_SIGNATURE:signed},credentials:"omit",cache:"no-store",redirect:"error",signal:AbortSignal.timeout(15000)});}catch{throw new ClobReadError("connection_or_cors");}
+  if(!response.ok)throw new ClobReadError(response.status===429?"rate_limited":"balance_failed");
+  let body:unknown;try{body=await response.json();}catch{throw new ClobReadError("invalid_balance");}
+  if(!body||typeof body!=="object"||Array.isArray(body))throw new ClobReadError("invalid_balance");
+  const data=body as Record<string,unknown>;
+  if(typeof data.balance!=="string"||!/^\d+$/.test(data.balance)||!data.allowances||typeof data.allowances!=="object"||Array.isArray(data.allowances))throw new ClobReadError("invalid_balance");
+  const entries=Object.entries(data.allowances as Record<string,unknown>);
+  if(entries.some(([k,v])=>!/^0x[a-f0-9]{40}$/i.test(k)||typeof v!=="string"||!/^\d+$/.test(v)))throw new ClobReadError("invalid_balance");
+  return {balance:data.balance,allowances:Object.fromEntries(entries) as Record<string,string>};
 }
