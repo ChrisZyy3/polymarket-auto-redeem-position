@@ -86,7 +86,7 @@ export function AutoSellPlannerPanel({
           </strong>
         </p>
       ) : null}
-      <p className="mt-2 text-[11px] leading-5 text-slate-400">
+      <details className="mt-2 text-[11px] leading-5 text-slate-400"><summary className="cursor-pointer text-slate-300">{en?"Calculation and limitations":"计算说明与限制"}</summary><p className="mt-1">
         {en
           ? "The Dashboard refreshes an expanded quote every 5 minutes; the Worker calculates portfolio-wide theoretical targets on successful 5-minute polls. No order IDs, signatures or real orders are created."
           : "展开盘口时每 5 分钟刷新一次报价；Worker 成功轮询持仓后同步更新理论目标价。不创建订单 ID、不签名、不下真实订单。"}
@@ -95,7 +95,7 @@ export function AutoSellPlannerPanel({
         {en
           ? "Plan excludes fees, existing sell orders and share reservations; end date is an estimate. A bid crossing the limit does not guarantee full fill."
           : "未扣交易费，未核实既有卖单及股份占用；预计结算日可能延迟。即使买一达到目标价，也不代表全仓能够成交。"}
-      </p>
+      </p></details>
     </section>
   );
 }
