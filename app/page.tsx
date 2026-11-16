@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { MarketTitle } from "@/app/components/market-title";
 import { AutoSellPlannerPanel } from "@/app/components/auto-sell-planner-panel";
+import { PortfolioSellSummary } from "@/app/components/portfolio-sell-summary";
 import { PortfolioHistoryChart } from "@/app/components/portfolio-history-chart";
 import { calculateDailyPriceChange, type DailyPositionPoint } from "@/lib/position-change";
 import type { PortfolioHistoryMetrics, PortfolioSnapshot } from "@/lib/portfolio-history";
@@ -1101,6 +1102,8 @@ export default function Home() {
       </div>
 
       <PortfolioHistoryChart snapshots={portfolioHistory?.snapshots ?? []} language={language} />
+
+      <PortfolioSellSummary key={data?.positions.map(p => `${p.proxyWallet}:${p.asset}`).join("|") ?? "empty"} positions={positions} language={language} />
 
       {/* Positions detailed tables container / 仓位细分数据列表 */}
       <div className="relative mt-8 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/45 shadow-[0_14px_36px_rgba(0,0,0,0.14)]">
