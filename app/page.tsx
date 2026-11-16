@@ -32,6 +32,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { MarketTitle } from "@/app/components/market-title";
+import { SellPlanner } from "@/app/components/sell-planner";
 import { AutoSellPlannerPanel } from "@/app/components/auto-sell-planner-panel";
 import { PortfolioHistoryChart } from "@/app/components/portfolio-history-chart";
 import { calculateDailyPriceChange, type DailyPositionPoint } from "@/lib/position-change";
@@ -211,6 +212,7 @@ function getPositionKey(position: EnrichedPosition): string {
  */
 export default function Home() {
   const [address, setAddress] = useState("");
+  const [loadedAddress, setLoadedAddress] = useState("");
   const [data, setData] = useState<ApiResponse | null>(null);
   const [portfolioHistory, setPortfolioHistory] = useState<HistoryResponse | null>(null);
   const [dailyPositionHistory, setDailyPositionHistory] = useState<DailyPositionResponse | null>(null);
@@ -800,6 +802,7 @@ export default function Home() {
       ]);
       if (requestVersion !== queryRequestVersion.current) return;
       setData(json as ApiResponse);
+      setLoadedAddress(addr);
       setPortfolioHistory(historyJson);
       setDailyPositionHistory(changeJson);
       pushHistory(addr);
@@ -810,6 +813,7 @@ export default function Home() {
     } catch (err) {
       if (requestVersion !== queryRequestVersion.current) return;
       setData(null);
+      setLoadedAddress("");
       setPortfolioHistory(null);
       setDailyPositionHistory(null);
       setError(err instanceof Error ? err.message : isEnglish ? "Unexpected request error" : "未知的请求链路错误");
@@ -1038,6 +1042,7 @@ export default function Home() {
       {/* Dashboard Summary Statistics Cards Grid / 指标概览区块 */}
       <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
             <SummaryCard
+              href={data && /^0x[0-9a-f]{40}$/i.test(loadedAddress) ? `https://polymarket.com/${loadedAddress}` : undefined}
               label={isEnglish ? "Total portfolio value" : "资产总价值"}
               value={data ? `$${formatNumber(data.summary.totalBalance)}` : "—"}
               icon={<DollarSign className="h-4 w-4 text-cyan-400" />}
@@ -1066,6 +1071,8 @@ export default function Home() {
               tooltip={isEnglish ? "Mark APR plus verified eligible holding rewards, weighted by position value" : "按当前市值加权的综合 APR = 市场 Mark APR + 已核实 Holding Rewards APR；未确认资格的奖励不计入"}
             />
       </div>
+
+     <SellPlanner currentAddress={loadedAddress} language={language} />
 
      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <HistoryMetric
@@ -1597,12 +1604,14 @@ function SummaryCard({
   icon,
   glowColor,
   tooltip,
+  href,
 }: {
   label: string;
   value: string | number;
   icon?: React.ReactNode;
   glowColor: "cyan" | "green" | "purple" | "red";
   tooltip?: string;
+  href?: string;
 }) {
   const accents = {
     cyan: "hover:border-cyan-500/35",
@@ -1613,8 +1622,9 @@ function SummaryCard({
 
   return (
     <div
-      className={`group/card flex min-h-[116px] min-w-0 flex-col justify-between rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-[0_8px_24px_rgba(0,0,0,0.1)] transition-[background-color,border-color] hover:bg-slate-900/80 sm:p-5 ${accents[glowColor]}`}
+      className={`group/card relative flex min-h-[116px] min-w-0 flex-col justify-between rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-[0_8px_24px_rgba(0,0,0,0.1)] transition-[background-color,border-color] hover:bg-slate-900/80 sm:p-5 ${accents[glowColor]}`}
     >
+      {href && <a href={href} target="_blank" rel="noopener noreferrer" aria-label={`${label} · Polymarket`} className="absolute inset-0 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400" />}
       <div className="flex items-center justify-between gap-2">
         <span className="min-w-0 text-xs font-medium leading-5 text-slate-400">{label}</span>
         {icon && <div className="shrink-0 rounded-lg border border-slate-800 bg-slate-950/70 p-1.5">{icon}</div>}
@@ -1623,7 +1633,7 @@ function SummaryCard({
         <AutoFitValue value={value} />
       </div>
       {tooltip && (
-        <details className="group/tip mt-1 text-right">
+        <details className="group/tip relative z-10 mt-1 text-right">
           <summary
             aria-label={`More about ${label}`}
             className="ml-auto inline-flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 [&::-webkit-details-marker]:hidden"
