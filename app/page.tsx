@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { MarketTitle } from "@/app/components/market-title";
 import { AutoSellPlannerPanel } from "@/app/components/auto-sell-planner-panel";
+import { WalletConnectPanel } from "@/app/components/wallet-connect-panel";
 import { CardToggle } from "@/app/components/card-toggle";
 import { PortfolioSellSummary } from "@/app/components/portfolio-sell-summary";
 import { PortfolioHistoryChart } from "@/app/components/portfolio-history-chart";
@@ -894,6 +895,8 @@ export default function Home() {
           </button>
         </div>
       </div>
+
+      <WalletConnectPanel language={language} />
 
       {/* 
         * Search Bar & Configurations Container

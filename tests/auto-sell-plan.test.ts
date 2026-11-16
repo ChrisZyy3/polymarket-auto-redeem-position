@@ -72,3 +72,25 @@ test("target sell floor rises as settlement approaches at fixed APR",()=>{
  assert.ok(b.theoreticalTargetPrice! > a.theoreticalTargetPrice!);
  assert.ok(b.proposedLimitPrice! > a.proposedLimitPrice!);
 });
+
+test("sell floor matches independent simple APR for multiple durations and legal ticks", () => {
+  const base = quote();
+  for (const days of [1, 7, 30, 180, 365]) {
+    for (const target of [5, 12, 25, 100]) {
+      for (const tick of [0.01, 0.001, 0.0001]) {
+        const q = { ...base, daysToSettle: days, tickSize: tick, tickVerified: true, orderBookAvailable: true, bestBid: 0.5 };
+        const plan = buildMarkAutoSellPlan({ quote: q, targetAprPercent: target, quantity: 100, avgPrice: 0.8 });
+        const theoretical = 1 / (1 + (target / 100) * days / 365);
+        assert.ok(Math.abs(plan.theoreticalTargetPrice! - theoretical) < 1e-12);
+        if (plan.proposedLimitPrice !== null) {
+          const price = plan.proposedLimitPrice;
+          assert.ok(price + 1e-12 >= theoretical);
+          assert.ok(price - tick < theoretical + 1e-12);
+          assert.ok(((1 - price) / price) * 365 / days * 100 <= target + 1e-8);
+        } else {
+          assert.equal(plan.status, "unreachable_tick");
+        }
+      }
+    }
+  }
+});

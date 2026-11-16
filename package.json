@@ -17,13 +17,17 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.107.1",
     "@tanstack/react-table": "^8.21.3",
+    "@walletconnect/ethereum-provider": "^2.26.0",
     "axios": "^1.8.0",
     "dotenv": "^16.4.0",
     "lucide-react": "^1.18.0",
     "next": "^16.2.9",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "viem": "^2.57.20",
+    "wagmi": "^3.7.11"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.1",

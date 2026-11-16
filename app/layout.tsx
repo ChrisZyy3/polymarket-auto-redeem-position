@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { WalletProvider } from "@/app/components/wallet-provider";
 
 // Global SEO Metadata settings
 // 全局搜索引擎优化 (SEO) 元数据设置
@@ -31,7 +32,7 @@ export default function RootLayout({
         >
           Skip to main content / 跳转到主要内容
         </a>
-        {children}
+        <WalletProvider>{children}</WalletProvider>
       </body>
     </html>
   );
