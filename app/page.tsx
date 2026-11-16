@@ -1443,7 +1443,10 @@ function PositionQuotePanel({
                 {isEnglish ? "Enter a non-negative APR." : "请输入不小于 0 的 APR。"}
               </p>
             ) : targetAprPlan ? (
-              <TargetAprPlanPanel plan={targetAprPlan} tickSize={quote.tickSize} language={language} />
+              <details className="mt-3 rounded-lg border border-slate-700/60 bg-slate-950/40 px-3 py-2">
+                <summary className="cursor-pointer text-xs font-semibold text-slate-300">{isEnglish ? "Show buy-side APR analysis" : "查看买入侧 APR 分析"}</summary>
+                <TargetAprPlanPanel plan={targetAprPlan} tickSize={quote.tickSize} language={language} />
+              </details>
             ) : (
               <p className="mt-2 rounded-lg border border-dashed border-slate-700 px-3 py-2 text-xs text-slate-400">
                 {isEnglish
