@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { MarketTitle } from "@/app/components/market-title";
 import { AutoSellPlannerPanel } from "@/app/components/auto-sell-planner-panel";
+import { CardToggle } from "@/app/components/card-toggle";
 import { PortfolioSellSummary } from "@/app/components/portfolio-sell-summary";
 import { PortfolioHistoryChart } from "@/app/components/portfolio-history-chart";
 import { calculateDailyPriceChange, type DailyPositionPoint } from "@/lib/position-change";
@@ -221,6 +222,7 @@ export default function Home() {
   const [history, setHistory] = useState<string[]>([]);
   const [holdAprThreshold, setHoldAprThreshold] = useState(DEFAULT_HOLD_APR_THRESHOLD);
   const [language, setLanguage] = useState<Language>("zh");
+  const [positionsExpanded, setPositionsExpanded] = useState(true);
   const [expandedPositionKey, setExpandedPositionKey] = useState<string | null>(null);
   const [quoteStates, setQuoteStates] = useState<Record<string, QuoteState>>({});
   const [targetAprInputs, setTargetAprInputs] = useState<Record<string, string>>({});
@@ -1144,6 +1146,7 @@ export default function Home() {
                 {isEnglish ? `${lowAprCount} below APR threshold` : `${lowAprCount} 个低 APR`}
               </span>
             )}
+            <CardToggle expanded={positionsExpanded} onToggle={() => setPositionsExpanded(value => !value)} controls="positions-table-content" label={isEnglish ? "positions and yield" : "持仓收益与市场报价"} language={language} />
           </div>
         </div>
 
@@ -1151,6 +1154,8 @@ export default function Home() {
           role="region"
           tabIndex={0}
           aria-label={isEnglish ? "Scrollable positions table" : "可横向滚动的仓位明细表"}
+          id="positions-table-content"
+          hidden={!positionsExpanded}
           className="overflow-x-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/70"
         >
           <table className="w-full border-collapse text-left text-sm tabular-nums">
