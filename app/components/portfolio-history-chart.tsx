@@ -2,8 +2,9 @@
 
 import { useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { CalendarDays, ChevronDown, ChevronUp, LineChart } from "lucide-react";
+import { CalendarDays, LineChart } from "lucide-react";
 
+import { CardToggle } from "@/app/components/card-toggle";
 import type { PortfolioSnapshot } from "@/lib/portfolio-history";
 
 type Range = 30 | 90 | "all";
@@ -121,17 +122,6 @@ export function PortfolioHistoryChart({
           <h2 id="portfolio-history-title" className="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-100">
             <LineChart aria-hidden="true" className="h-5 w-5 text-cyan-400" />
             {isEnglish ? "Portfolio history" : "总资产历史曲线"}
-            <button
-              type="button"
-              onClick={() => setIsExpanded((expanded) => !expanded)}
-              aria-expanded={isExpanded}
-              aria-controls="portfolio-history-content"
-              aria-label={isExpanded ? (isEnglish ? "Collapse chart" : "收起历史曲线") : isEnglish ? "Expand chart" : "展开历史曲线"}
-              title={isExpanded ? (isEnglish ? "Collapse" : "收起") : isEnglish ? "Expand" : "展开"}
-              className="ml-1 inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-            >
-              {isExpanded ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
-            </button>
           </h2>
           {isExpanded && (
             <p className="mt-1 text-xs text-slate-500">
@@ -141,6 +131,7 @@ export function PortfolioHistoryChart({
             </p>
           )}
         </div>
+        <div className="flex flex-wrap items-center gap-2">
         {isExpanded && (
           <div role="group" className="inline-flex min-h-10 self-start rounded-xl border border-slate-700 bg-slate-950/75 p-1" aria-label={isEnglish ? "Time range" : "曲线时间范围"}>
             {([30, 90, "all"] as const).map((value) => (
@@ -163,6 +154,8 @@ export function PortfolioHistoryChart({
             ))}
           </div>
         )}
+          <CardToggle expanded={isExpanded} onToggle={() => setIsExpanded(value => !value)} controls="portfolio-history-content" label={isEnglish ? "portfolio history" : "总资产历史曲线"} language={language} />
+        </div>
       </div>
 
       {isExpanded && (chart ? (
