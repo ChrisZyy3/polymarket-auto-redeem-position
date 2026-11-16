@@ -1,0 +1,8 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { prepareManualSell, type SellPreflightInput } from "../lib/manual-sell-preflight";
+const now=1794510000000;
+const valid:SellPreflightInput={nowMs:now,signer:"0x"+"1".repeat(40),funder:"0x"+"2".repeat(40),safeMatches:true,assetId:"123",targetAprPercent:12,settlementMs:now+30*86400000,settlementConfirmed:true,positionShares:100,positionAsOfMs:now,orders:[{id:"a",assetId:"123",side:"SELL",originalSize:30,matchedSize:10}],ordersAsOfMs:now,ordersComplete:true,ordersCoverWallet:true,availableShares:80,balanceAsOfMs:now,bestBid:0.992,bestAsk:0.994,tick:0.001,tickVerified:true,bookAsOfMs:now,minimumOrderShares:1,requestedShares:80};
+test("review preparation retains bid-safe maker ask, net balance and seven-day GTD",()=>{const r=prepareManualSell(valid);assert.equal(r.status,"review");if(r.status==="review"){assert.equal(r.price,0.994);assert.equal(r.quantity,80);assert.equal(r.observedReservedShares,20);assert.equal(r.expirationSec,Math.floor(now/1000)+604860);assert.equal(r.postOnly,true);}});
+test("unverified scope, ambiguous settlement or stale data blocks preparation",()=>{for(const change of [{ordersCoverWallet:false},{ordersComplete:false},{settlementConfirmed:false},{bookAsOfMs:now-120001},{balanceAsOfMs:null},{safeMatches:false}])assert.equal(prepareManualSell({...valid,...change}).status,"blocked");});
+test("does not allow overselling or invalid orders or a crossed book",()=>{for(const change of [{requestedShares:81},{bestBid:0.995},{orders:[...valid.orders!,valid.orders![0]]},{orders:[{...valid.orders![0],matchedSize:31}]}])assert.equal(prepareManualSell({...valid,...change}).status,"blocked");});
