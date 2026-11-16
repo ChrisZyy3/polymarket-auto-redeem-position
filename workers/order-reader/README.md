@@ -93,3 +93,13 @@ Relevant official docs:
 - https://docs.polymarket.com/getting-started/api#authentication
 - https://docs.polymarket.com/trading/manage-orders
 - https://developers.cloudflare.com/workers/configuration/secrets/
+
+## Deposit Wallet read-only key adapter (experimental)
+
+Polymarket documents `GET /data/wallet-open-orders` for Deposit Wallets, using `POLY_ADDRESS` and `POLY_READONLY_API_KEY`. This endpoint reads wallet-wide live orders across signers and uses the `cursor` query parameter. It must be paginated until an empty `next_cursor`, even after an empty page. The adapter is disabled unless a Secret named `CLOB_READONLY_ACCOUNT_1` (or `_2`, `_3`) is configured as JSON containing `walletType: "deposit"`, `signerAddress`, `funderAddress`, and `readonlyApiKey`. Do not set both a regular and read-only account entry for the same funder. The existing L2 path remains unchanged for other account types.
+
+This is **experimental and not validated against a real account**. Never assume a legacy Safe/Proxy wallet supports this endpoint or that a public-profile mapping proves wallet type or ownership. Validate signer, funder, and actual wallet type independently, and compare a complete snapshot with the official UI. An empty result is not proof of identity. Snapshot results remain `actionableForTrading:false`.
+
+Creating the read-only key itself can require normal L2 credentials and an authenticated management request. The existing Relayer API key does not replace that step. Do not paste API keys, L2 credentials or signatures into chat or GitHub; store the read-only key as an encrypted Worker Secret. `ORDER_READER_TOKEN` is still required, and the Worker must not be exposed as an unauthenticated Dashboard endpoint. No credential creation, installation or deployment is performed by these code changes.
+
+Reference: https://docs.polymarket.com/api-reference/trade/get-wallet-open-orders

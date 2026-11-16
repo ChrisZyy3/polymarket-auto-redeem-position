@@ -1,5 +1,6 @@
 import { isAddress, parseAccountSecret } from "./clob-auth.mjs";
 import { fetchOpenOrders, OrderReaderError } from "./clob-orders.mjs";
+import { fetchWalletOpenOrders, parseReadonlyAccount } from "./wallet-open-orders.mjs";
 
 // Isolated read-only service: no mutation routes, no order signing, no wallet key.
 const json=(payload,status=200)=>new Response(JSON.stringify(payload),{
@@ -17,6 +18,13 @@ function credentialsFromEnv(env) {
       const a=parseAccountSecret(env[key]);
       if(accounts.some(x=>x.funderAddress===a.funderAddress))
         throw new Error("duplicate_account_funder");
+      accounts.push(a);
+    }
+  }
+  for(const key of ["CLOB_READONLY_ACCOUNT_1","CLOB_READONLY_ACCOUNT_2","CLOB_READONLY_ACCOUNT_3"]){
+    if(env[key]!==undefined&&env[key]!==null&&env[key]!==""){
+      const a=parseReadonlyAccount(env[key]);
+      if(accounts.some(x=>x.funderAddress===a.funderAddress)) throw new Error("duplicate_account_funder");
       accounts.push(a);
     }
   }
@@ -50,7 +58,9 @@ export function createReaderHandler(fetcher=fetch,clock=()=>Math.floor(Date.now(
     const account=accounts.find(a=>a.funderAddress===wallet.toLowerCase());
     if(!account)return json({error:"wallet_not_configured"},404);
     try{
-      const snapshot=await fetchOpenOrders(account,fetcher,clock());
+      const snapshot=account.walletType === "deposit"
+        ? await fetchWalletOpenOrders(account,fetcher,clock())
+        : await fetchOpenOrders(account,fetcher,clock());
       // matchingMakerObserved may be false for legitimate empty accounts.
       // Treat zero matching orders as unverified funder mapping before an
       // execution adapter is ever allowed to act on this result.
