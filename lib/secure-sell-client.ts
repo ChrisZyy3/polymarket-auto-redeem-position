@@ -1,7 +1,7 @@
 import { createSecureClient, OrderSide } from '@polymarket/client';
 import { signerFrom } from '@polymarket/client/viem';
 import type { WalletClient } from 'viem';
-import { validateSignedSell } from './validate-signed-sell';
+import { signedSellMismatchFields } from './validate-signed-sell';
 import type { ClobCredentials } from './browser-clob';
 import { isExpectedExchangeDomain } from './clob-sell-approval';
 
@@ -18,5 +18,5 @@ export async function createSafeSellClient(wallet:WalletClient, funder:string, c
  };
  const client=await createSecureClient({signer,wallet:funder,credentials:{key:credentials.apiKey,secret:credentials.secret,passphrase:credentials.passphrase} as NonNullable<Parameters<typeof createSecureClient>[0]["credentials"]>,fetch:restrictedFetch});
  if(client.account.wallet.toLowerCase()!==funder.toLowerCase() || Number(client.account.walletType)!==2) throw Error('safe_mismatch');
- return {sign:async (assetId:string,price:number,size:number,expiration:number)=>{permitOrderSignature=true;try{const order=await client.createLimitOrder({assetId,side:OrderSide.SELL,price:String(price),size:String(size),postOnly:true,expiration});if(!validateSignedSell(order,{assetId,funder,signer:wallet.account!.address,price,size,expiration}))throw Error("signed_order_differs");return order;}finally{permitOrderSignature=false;}},post:(order:Parameters<typeof client.postOrder>[0])=>client.postOrder(order)};
+ return {sign:async (assetId:string,price:number,size:number,expiration:number)=>{permitOrderSignature=true;try{const order=await client.createLimitOrder({assetId,side:OrderSide.SELL,price:String(price),size:String(size),postOnly:true,expiration});const mismatches=signedSellMismatchFields(order,{assetId,funder,signer:wallet.account!.address,price,size,expiration});if(mismatches.length)throw Error("signed_order_differs:"+mismatches.join(","));return order;}finally{permitOrderSignature=false;}},post:(order:Parameters<typeof client.postOrder>[0])=>client.postOrder(order)};
 }
