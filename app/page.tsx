@@ -1236,6 +1236,11 @@ export default function Home() {
                <button type="button" role="tab" aria-selected={tradeMode==='sell'} onClick={()=>{setTradeMode('sell');setPositionsExpanded(true);}}
                  className={tradeMode==='sell'?"rounded-md bg-indigo-500/20 px-3 py-2 font-semibold text-indigo-200":"rounded-md px-3 py-2 text-slate-400 hover:text-slate-100"}>{isEnglish?"SELL planning":"卖出规划"}</button>
              </div>
+            <button type="button" disabled={!isConnected||!profileAddress} onClick={()=>openOrderCenter()}
+              title={!isConnected?(isEnglish?"Connect wallet first":"请先连接钱包"):undefined}
+              className="rounded-lg border border-slate-600 px-3 py-2 font-semibold text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-35">
+              {isEnglish?"Order center":"订单中心"} · {clobSnapshot.orders?.length??"—"}
+            </button>
             <span className="rounded-lg border border-slate-700/70 bg-slate-950/60 px-3 py-1.5 font-medium text-slate-300">
               {isEnglish ? `${positions.length} positions` : `${positions.length} 个仓位`}
             </span>
@@ -1262,8 +1267,6 @@ export default function Home() {
           <button type="button" disabled={!sellSelected.length} onClick={()=>setSellSelected([])}
             className="rounded border border-slate-700 px-2 py-1.5 text-slate-300 disabled:opacity-40">{isEnglish?"Clear":"清空"}</button>
           <span className="flex-1"/>
-          <button type="button" onClick={()=>openOrderCenter()}
-            className="rounded border border-slate-600 px-3 py-2 text-slate-200 hover:bg-slate-800">{isEnglish?"Order center":"订单中心"} · {clobSnapshot.orders?.length??"—"}</button>
           <button type="button" onClick={()=>beginReview('batch')}
             disabled={!clobSnapshot.ready||!sellSelected.length}
             className="rounded bg-indigo-500 px-3 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-35">{isEnglish?"Review selected":"逐笔审核已选"}</button>

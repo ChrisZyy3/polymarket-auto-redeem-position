@@ -85,10 +85,6 @@ export function BrowserClobPanel({profileAddress,queryAddress,positions,language
           className="rounded-lg border border-cyan-500/40 px-3 py-2 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-40">
           {busy?(en?'Refreshing…':'读取中…'):(en?'Read / refresh orders':'读取 / 刷新挂单')}
         </button>
-        <button type="button" onClick={()=>{setOrderCenterAsset(null);setOrderCenterOpen(true);}}
-          className="rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-200 hover:bg-slate-800">
-          {en?'Order center':'订单中心'} · {currentOrders.length}
-        </button>
       </div>
     </div>
     {!matches&&<p className="mt-2 text-xs text-amber-300">{en?'Query the connected Safe first.':'当前查询地址与钱包 Safe 不匹配，请先切换查询账户。'}</p>}

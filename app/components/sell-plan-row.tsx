@@ -72,12 +72,12 @@ export function SellPlanRow({position,language,aprInput,quantityInput,quote,orde
    <td className="whitespace-nowrap px-2 py-3 text-xs">
      {position.redeemable?<span className="text-emerald-300">{en?"Redeemable":"可赎回"}</span>:
       !ordersReady?<span className="text-amber-300">{en?"DRY RUN":"仅模拟"}</span>:
-      <span className="text-slate-300">{en?"Ready to review":"可进入审核"}</span>}
+      <span className={openSell!==null&&openSell>0?"text-amber-300":"text-slate-300"}>{openSell!==null&&openSell>0?(en?"Existing SELL order":"已有 SELL 挂单"):(en?"Ready to review":"可进入审核")}</span>}
    </td>
    <td className="px-3 py-3">
      <button type="button" disabled={!ordersReady||position.redeemable||!validApr||!validQuantity}
        onClick={onReview} className="rounded-lg border border-indigo-500/50 px-3 py-2 text-xs font-semibold text-indigo-200 hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-35">
-       {en?"Review SELL":"审核 SELL"}
+       {openSell!==null&&openSell>0?(en?"Review add SELL":"追加审核"):(en?"Review SELL":"审核 SELL")}
      </button>
    </td>
  </tr>;
