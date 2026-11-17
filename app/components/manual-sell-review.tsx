@@ -10,11 +10,11 @@ import { observedSellShares } from '@/lib/order-review-status';
 import {
   indicativeUnreservedShares, nextReviewAsset, pendingAttemptKey, isCurrentPendingAttempt,
   sameSellIntent, matchingLiveSellOrder, matchingPendingOpenSell, persistedAcceptedOrder,
-  type QueueRecord
+  type QueueRecord, displayedSellQueueRecord
 } from '@/lib/manual-sell-queue';
 import { loadSellReview } from '@/lib/sell-snapshot';
 import { sellQueueStatusLabel } from '@/lib/sell-queue-status';
-import { settlementConfirmedForDate, nextAfterVerifiedSell } from '@/lib/sell-workbench-flow';
+import { settlementConfirmedForDate, nextAfterVerifiedSell, sellReviewConfigKey, sellQuantityForPercent, sellLimitSummary } from '@/lib/sell-workbench-flow';
 import type { EnrichedPosition } from '@/lib/types';
 
 type Snapshot = Awaited<ReturnType<typeof loadSellReview>>;
@@ -53,6 +53,9 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
   const [pending,setPending] = useState(false);
   const generation=useRef(0), lock=useRef(false);
   const previousConfirm=useRef('');
+  const [reviewSignature,setReviewSignature]=useState('');
+  const batchIds=useRef<string[]|null>(null);
+  const [batchMode,setBatchMode]=useState(false);
   const closeButton=useRef<HTMLButtonElement|null>(null);
   const dialogRef=useRef<HTMLElement|null>(null);
   const pendingKey = pendingAttemptKey(address,funder);
@@ -94,7 +97,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
     closeButton.current?.focus();
     const interval=window.setInterval(()=>setClock(Date.now()),5000);
     function onKey(event:KeyboardEvent){
-      if(event.key==='Escape'&&!lock.current){setActive(null);setReview(null);}
+      if(event.key==='Escape'&&!lock.current)leaveReview();
       if(event.key==='Tab'){
         const elements=dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), a[href], select:not([disabled])');
         if(!elements?.length)return;
@@ -119,7 +122,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
   function updateDraft(id:string,change:Draft){
     setDrafts(old=>({...old,[id]:{...old[id],...change}}));
     setQuotes(old=>({...old,[id]:null}));
-    if(id===active){generation.current++;setReview(null);setMessage('');}
+    if(id===active){generation.current++;setReview(null);setReviewSignature('');setMessage('');}
   }
   function status(id:string,state:QueueRecord['status'],reason?:string,orderId?:string){
     setQueue(old=>({...old,[id]:{status:state,reason,orderId,updatedAt:Date.now()}}));
@@ -138,6 +141,13 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
     setMessage(en?'Manual reconciliation recorded; reread orders before any new submission.':'已记录人工核对；再次操作前请重新读取官网挂单。');
   }
 
+  async function readOnchainBalance(token:string,account:string,asset:string):Promise<bigint>{
+    if(!wallet||!publicClient||wallet.chain?.id!==137||wallet.account.address.toLowerCase()!==address.toLowerCase())throw Error('wallet_changed');
+    if(!/^0x[0-9a-f]{40}$/i.test(token)||!/^0x[0-9a-f]{40}$/i.test(account)||!/^\d{1,100}$/.test(asset))throw Error('invalid_balance_request');
+    return publicClient.readContract({address:token as Address,abi:[{type:'function',name:'balanceOf',stateMutability:'view',
+      inputs:[{name:'account',type:'address'},{name:'id',type:'uint256'}],outputs:[{name:'',type:'uint256'}]}] as const,
+      functionName:'balanceOf',args:[account as Address,BigInt(asset)]});
+  }
   async function readOnchainApproval(token:string,operator:string,account:string):Promise<boolean>{
     if(!wallet||!publicClient||wallet.chain?.id!==137||wallet.account.address.toLowerCase()!==address.toLowerCase())throw Error('wallet_changed');
     if(!/^0x[0-9a-f]{40}$/i.test(token)||!/^0x[0-9a-f]{40}$/i.test(operator)||!/^0x[0-9a-f]{40}$/i.test(account))throw Error('invalid_address');
@@ -146,20 +156,25 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
   function requestFor(id:string,apr:string,quantity:string,confirmedCoverage=coverage,confirmedSettlement=isSettled(id)){
     return {credentials,signer:address,funder,asset:id,apr:Number(apr),quantity:Number(quantity),
       coverageConfirmed:confirmedCoverage,settlementConfirmed:confirmedSettlement,
-      readOnchainApproval:wallet?readOnchainApproval:undefined};
+      readOnchainApproval:wallet?readOnchainApproval:undefined,readOnchainBalance:wallet?readOnchainBalance:undefined};
   }
 
+  function configKey(id:string){
+    const pos=positionFor(id),v=draftFor(id);
+    return sellReviewConfigKey({asset:id,apr:v.apr,quantity:v.quantity,coverage,
+      settlementConfirmed:isSettled(id),endDate:pos?.endDate});
+  }
   async function prepareFor(id:string){
-    if(lock.current || !positionFor(id))return;
-    const config=draftFor(id);
-    previousConfirm.current=id+':'+coverage+':'+isSettled(id);
+    if(lock.current||!positionFor(id)||uncertain||pending)return;
+    const config=draftFor(id),key=configKey(id);
+    previousConfirm.current=key;
     const g=++generation.current;
-    lock.current=true;setBusy(true);setActive(id);setReview(null);setMessage('');
+    lock.current=true;setBusy(true);setActive(id);setReview(null);setReviewSignature('');setMessage('');
     status(id,'reviewing');
     try{
       const snapshot=await loadSellReview(requestFor(id,config.apr,config.quantity));
       if(g===generation.current){
-        setReview(snapshot);
+        setReview(snapshot);setReviewSignature(key);
         status(id,snapshot.result.status==='review'?'reviewing':'blocked',snapshot.result.status==='blocked'?snapshot.result.reasons.join(', '):undefined);
       }
     }catch(error){
@@ -176,13 +191,12 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
 
   // Confirmations are deliberate user actions, but the fresh read starts automatically afterward.
   useEffect(()=>{
-    if(!active)return;
-    const key=active+':'+coverage+':'+isSettled(active);
+    if(!active||busy||lock.current||pending||uncertain)return;
+    const key=configKey(active);
     if(previousConfirm.current===key)return;
-    previousConfirm.current=key;
-    if(!lock.current&&!pending&&!uncertain)void prepareFor(active);
+    void prepareFor(active);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[active,coverage,settlementDates]);
+  },[active,coverage,settlementDates,globalApr,drafts,busy,pending,uncertain,activePosition?.endDate]);
 
   async function refreshQuotes(){
     if(quoteBusy||busy||selected.length===0)return;
@@ -204,8 +218,8 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
 
   async function execute(){
     if(lock.current||!active||!review||review.position.asset!==active||review.result.status!=='review'
-      ||!wallet||!coverage||!isSettled(active)||pending||uncertain
-      ||review.checks.marketStatus!=='accepting'||!review.checks.authorizationVerified||!review.checks.operator||Date.now()-review.asOf>60000)return;
+      ||!wallet||!coverage||!isSettled(active)||pending||uncertain||reviewSignature!==configKey(active)
+      ||review.checks.marketStatus!=='accepting'||!review.checks.authorizationVerified||review.checks.tokenBalanceStatus!=='verified'||!review.checks.operator||Date.now()-review.asOf>60000)return;
     const id=active,config=draftFor(id);
     lock.current=true;const g=generation.current;setBusy(true);setMessage('');
     let posting=false,nextId:string|null=null;
@@ -217,7 +231,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
       const fresh=await loadSellReview(request());
       if(g!==generation.current||fresh.result.status!=='review'||!sameSellIntent(fresh.result,review.result)
         ||fresh.position.endDate!==review.position.endDate||fresh.checks.marketStatus!=='accepting'
-        ||!fresh.checks.authorizationVerified||fresh.checks.operator!==review.checks.operator)throw Error('review_changed');
+        ||!fresh.checks.authorizationVerified||fresh.checks.tokenBalanceStatus!=='verified'||fresh.checks.operator!==review.checks.operator||configKey(id)!==reviewSignature)throw Error('review_changed');
       const client=await createSafeSellClient(wallet,funder,credentials,review.checks.operator);
       if(g!==generation.current)throw Error('wallet_changed');
       const signed=await client.sign(id,review.result.price,review.result.quantity,review.result.expirationSec);
@@ -225,7 +239,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
       const final=await loadSellReview(request());
       if(g!==generation.current||final.result.status!=='review'||!sameSellIntent(final.result,review.result)
         ||final.position.endDate!==review.position.endDate||final.checks.marketStatus!=='accepting'
-        ||!final.checks.authorizationVerified||final.checks.operator!==review.checks.operator
+        ||!final.checks.authorizationVerified||final.checks.tokenBalanceStatus!=='verified'||final.checks.operator!==review.checks.operator||configKey(id)!==reviewSignature
         ||Date.now()-review.asOf>60000)throw Error('review_changed');
       // Store before POST. A failed network response must never trigger a silent replay.
       try{
@@ -257,8 +271,9 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
                 status(id,filled?'partially_filled':'open',undefined,response.orderId);
                 onOrdersRefresh?.(latest);
                 setMessage((en?'Order verified in CLOB: ':'已精确回读 SELL：')+response.orderId);
-                if(selected.includes(id)){
-                  nextId=nextAfterVerifiedSell(selected,queue,id,true);
+                if(batchIds.current?.includes(id)){
+                  nextId=nextAfterVerifiedSell(batchIds.current,queue,id,true);
+                  if(!nextId){batchIds.current=null;setBatchMode(false);}
                 }
               }else{
                 setMessage(en?'Accepted, but exact LIVE SELL readback was not verified. Reconcile before another order.':'订单已受理，但未能精确确认 LIVE SELL；核对订单历史后才能继续。');
@@ -288,13 +303,22 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
   }
 
   function startBatch(){
-    const next=nextReviewAsset(selected,queue,'');
-    if(next && !uncertain)void prepareFor(next);
+    if(uncertain||pending)return;
+    const chosen=[...selected],next=nextReviewAsset(chosen,queue,'');
+    if(next){batchIds.current=chosen;setBatchMode(true);void prepareFor(next);}
   }
-  const previewReady=!!review && review.result.status==='review' && !!active && review.position.asset===active;
+  function startSingle(id:string){batchIds.current=null;setBatchMode(false);void prepareFor(id);}
+  function leaveReview(){
+    if(lock.current)return;
+    batchIds.current=null;setBatchMode(false);setActive(null);setReview(null);setReviewSignature('');
+  }
+  const previewReady=!!review && review.result.status==='review' && !!active && review.position.asset===active && reviewSignature===configKey(active);
   const signReady=previewReady&&!busy&&!pending&&!uncertain&&!!wallet&&coverage&&!!active
     &&isSettled(active)&&review.checks.marketStatus==='accepting'
-    &&review.checks.authorizationVerified&&!!review.checks.operator&&clock-review.asOf<60000;
+    &&review.checks.authorizationVerified&&review.checks.tokenBalanceStatus==='verified'&&!!review.checks.operator&&clock-review.asOf<60000;
+  const summary=review?.result.status==='review'&&activePosition
+    ?sellLimitSummary(review.result.price,review.result.quantity,activePosition.avgPrice,activePosition.endDate):null;
+  const seconds=review?Math.max(0,Math.ceil((review.asOf+60000-clock)/1000)):0;
 
   const draftFields=(p:EnrichedPosition,compact=false)=>{
     const id=p.asset,configuration=draftFor(id),remaining=indicativeUnreservedShares(p.size,id,orders);
@@ -372,7 +396,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
           <th className="w-[10%] py-3">{en?'Limit':'限价'}</th><th className="w-[11%] py-3">{en?'Review':'审核进度'}</th><th className="w-[7%] py-3 text-right pr-1">{en?'Action':'操作'}</th>
         </tr></thead>
         <tbody>{tradable.map(p=>{
-          const d=draftFields(p),record=queue[p.asset];
+          const d=draftFields(p),record=displayedSellQueueRecord(queue[p.asset],p.asset,orders,true);
           return <tr key={p.asset} className="border-b border-slate-800/80 align-middle text-slate-200 hover:bg-slate-800/20">
             <td className="py-3 pl-2"><input type="checkbox" aria-label={(en?'Select ':'勾选 ')+p.title} checked={selected.includes(p.asset)} disabled={busy}
               onChange={e=>setSelected(old=>e.target.checked?[...new Set([...old,p.asset])]:old.filter(id=>id!==p.asset))} className="accent-indigo-400"/></td>
@@ -386,7 +410,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
               {record?.orderId&&<p title={record.orderId} className="max-w-[100px] truncate text-[10px] text-slate-400">{record.orderId}</p>}
               {record?.reason&&<p title={record.reason} className="max-w-[120px] truncate text-[10px] text-rose-300">{record.reason}</p>}
             </td>
-            <td className="py-3 pr-1 text-right"><button type="button" disabled={busy||uncertain} onClick={()=>void prepareFor(p.asset)}
+            <td className="py-3 pr-1 text-right"><button type="button" disabled={busy||uncertain||pending} onClick={()=>startSingle(p.asset)}
               className="rounded-lg border border-cyan-500/40 px-2.5 py-1.5 font-medium text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-40">
               {d.heldSell>0?(en?'Add review':'追加审核'):(en?'Review':'审核')}</button></td>
           </tr>;
@@ -395,14 +419,14 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
     </div>
 
     <div className="mt-3 space-y-2 lg:hidden">{tradable.map(p=>{
-      const d=draftFields(p,true),record=queue[p.asset];
+      const d=draftFields(p,true),record=displayedSellQueueRecord(queue[p.asset],p.asset,orders,true);
       return <div key={p.asset} className="rounded-xl border border-slate-700/80 bg-slate-950/40 p-3">
         <div className="flex items-start gap-2">
           <input type="checkbox" aria-label={(en?'Select ':'勾选 ')+p.title} className="mt-1 accent-indigo-400"
             checked={selected.includes(p.asset)} disabled={busy} onChange={e=>setSelected(old=>e.target.checked?[...new Set([...old,p.asset])]:old.filter(id=>id!==p.asset))}/>
           <div className="min-w-0 flex-1"><p className="text-sm font-semibold leading-5 text-slate-100">{p.title}</p>
             <p className="mt-1 text-xs text-indigo-300">{p.outcome}</p></div>
-          <button type="button" disabled={busy||uncertain} onClick={()=>void prepareFor(p.asset)}
+          <button type="button" disabled={busy||uncertain||pending} onClick={()=>startSingle(p.asset)}
             className="shrink-0 rounded-lg bg-indigo-500/20 px-3 py-2 text-xs font-semibold text-indigo-200 disabled:opacity-40">{en?'Review':'审核'}</button>
         </div>
         <div className="mt-3 grid grid-cols-2 gap-3">
@@ -431,18 +455,18 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
     {message&&!active&&<p role="status" className="mt-3 break-all text-xs text-amber-200">{message}</p>}
 
     {active&&activePosition&&<div className="fixed inset-0 z-[90] flex items-end justify-end bg-slate-950/70 backdrop-blur-sm lg:items-stretch"
-      onMouseDown={event=>{if(event.target===event.currentTarget&&!lock.current){setActive(null);setReview(null);}}}>
+      onMouseDown={event=>{if(event.target===event.currentTarget&&!lock.current)leaveReview();}}>
       <aside ref={dialogRef} role="dialog" aria-modal="true" aria-label={en?'SELL order review':'SELL 卖单审核'}
         className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl border border-indigo-500/30 bg-[#0c1327] shadow-2xl shadow-black/60 lg:h-full lg:max-h-none lg:w-[560px] lg:rounded-l-2xl lg:rounded-tr-none">
         <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-700/70 px-5 py-4">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-widest text-indigo-300">SELL · GTD 7D · POST-ONLY</p>
             <h4 className="mt-1 text-lg font-semibold text-slate-100">{en?'Review order':'审核卖单'}
-              {selected.includes(active)&&<span className="ml-2 text-xs font-normal text-slate-400">
-                {selected.indexOf(active)+1} / {selected.length}</span>}
+              {batchMode&&batchIds.current?.includes(active)&&<span className="ml-2 text-xs font-normal text-slate-400">
+                {batchIds.current.indexOf(active)+1} / {batchIds.current.length}</span>}
             </h4>
           </div>
-          <button ref={closeButton} type="button" disabled={busy} onClick={()=>{setActive(null);setReview(null);}}
+          <button ref={closeButton} type="button" disabled={busy} onClick={leaveReview}
             className="rounded-lg border border-slate-600 p-2 text-slate-300 hover:bg-slate-800 disabled:opacity-40"
             aria-label={en?'Close review':'关闭审核'}>✕</button>
         </header>
@@ -460,6 +484,167 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
               <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3"><p className="text-xs text-slate-400">{en?'Open SELL shares':'已有 SELL'}</p>
                 <p className="mt-1 text-xl font-semibold text-amber-200">{showShares(observedSellShares(orders,active))}</p></div>
             </div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
+              <span>{en?'Quick quantity':'快捷数量（模拟可用份额）'}</span>
+              <div className="flex gap-1">{([25,50,100] as const).map(percent=><button type="button" key={percent} disabled={busy}
+                onClick={()=>updateDraft(active,{quantity:sellQuantityForPercent(indicativeUnreservedShares(activePosition.size,active,orders),percent)})}
+                className="rounded border border-slate-600 px-2 py-1 disabled:opacity-40">{percent}%</button>)}</div>
+            </div>
+            {summary&&<div className="mt-3 rounded-lg border border-cyan-500/30 p-3 text-xs text-slate-300">
+              <p className="font-semibold text-cyan-200">{en?'APR and proceeds at SELL limit':'SELL 限价收益摘要'}</p>
+              <p>{en?'Current Mark APR':'当前 Mark APR'}：{activePosition.markApr===null?'—':(activePosition.markApr*100).toFixed(2)+'%'} · {en?'Target':'目标'}：{activeApr}%</p>
+              <p>{en?'APR at limit':'限价实际 APR'}：{summary.limitAprPercent===null?'—':summary.limitAprPercent.toFixed(2)+'%'}</p>
+              <p>{en?'Gross proceeds':'限价卖出总额'}：{summary.grossProceeds===null?'—':'
+            <p className="font-semibold text-slate-100">{en?'Account and settlement confirmations':'账户与结算日期确认'}</p>
+            <label className="mt-2 flex cursor-pointer items-start gap-2 text-slate-300">
+              <input type="checkbox" checked={coverage} disabled={busy} onChange={e=>setCoverage(e.target.checked)} className="mt-0.5 accent-cyan-400"/>
+              <span>{en?'I matched all open orders on Polymarket for this Safe.':'已对照官网核对本 Safe 全部未成交挂单。'}</span>
+            </label>
+            <label className="mt-2 flex cursor-pointer items-start gap-2 text-slate-300">
+              <input type="checkbox" checked={activeSettled} disabled={busy||!activePosition.endDate}
+                onChange={e=>setSettlementDates(old=>({...old,[active]:e.target.checked?(activePosition.endDate??''):''}))}
+                className="mt-0.5 accent-cyan-400"/>
+              <span>{en?'I checked this market settlement estimate: ':'已确认本市场的预计结算日：'}{activePosition.endDate||'—'}.
+                {en?' Changes may affect APR pricing.':' 结算变化可能影响 APR。'}</span>
+            </label>
+            <p className="mt-2 text-slate-500">{en?'Confirmation immediately triggers a fresh non-trading precheck.':'确认选项变化后会自动重新执行只读预检查。'}</p>
+          </div>
+
+          {busy&&<div role="status" className="rounded-lg border border-indigo-500/40 bg-indigo-950/25 p-3 text-sm text-indigo-200">
+            {en?'Checking data or requesting wallet signature…':'正在核对最新数据或等待钱包签名…'}
+          </div>}
+          {review&&<div className="space-y-3">
+            {review.result.status==='blocked'&&<div role="alert" className="rounded-lg border border-amber-500/40 bg-amber-950/20 p-3 text-xs text-amber-200">
+              <p className="font-semibold">{en?'Order blocked':'暂不可下单'}</p>
+              <p className="mt-1 break-words">{review.result.reasons.map(r=>r==='onchain_clob_balance_mismatch'?'CLOB 与链上持仓不一致，禁止交易':r==='onchain_balance_unverified'?'链上持仓无法核实，禁止交易':r).join(' · ')}</p>
+            </div>}
+            {review.result.status==='review'&&<p className="text-sm font-semibold text-emerald-300">{en?'Quote calculated; check all safety conditions.':'已生成审核价格，请检查各项下单条件。'}</p>}
+            <div className="space-y-2 rounded-xl border border-slate-700 p-3 text-xs text-slate-300">
+              <h5 className="font-semibold text-slate-100">{en?'Fresh preflight checks':'实时下单前检查'}</h5>
+              <p>{en?'Market accepting orders':'市场接单状态'}：
+                <span className={review.checks.marketStatus==='accepting'?'text-emerald-300':'text-amber-300'}>
+                  {review.checks.marketStatus==='accepting'?(en?'Accepting':'接单中'):(en?'Paused / unknown':'暂停 / 待核实')}</span>
+              </p>
+              <p>{en?'Safe ERC-1155 authorization':'Safe ERC-1155 授权'}：
+                <span className={review.checks.authorizationVerified?'text-emerald-300':'text-amber-300'}>
+                  {review.checks.authorizationStatus==='approved'?(en?'Verified':'已核实'):review.checks.authorizationStatus==='missing'?(en?'Missing':'未授权'):(en?'Unknown / mismatch':'待核实 / 数据不一致')}
+                </span>
+              </p>
+              <p className="break-all">{en?'Exchange':'交易合约'}：{review.checks.operator??'—'}</p>
+              <p>{en?'Bid / ask':'买一 / 卖一'}：{review.checks.bestBid??'—'} / {review.checks.bestAsk??'—'} · Tick {review.checks.tick??'—'}</p>
+              <p>{en?'Minimum shares':'最小份额'}：{review.checks.minimumOrderShares??'—'}</p>
+              <p>{en?'Onchain CTF balance':'链上 CTF 持仓'}：{review.checks.tokenBalanceStatus==='verified'?'已与 CLOB 余额核对一致':review.checks.tokenBalanceStatus==='mismatch'?'不一致，禁止交易':'未核实，禁止交易'}</p>
+              <p>{en?'Available comparison':'快照差额'}：{showShares(Number(review.comparison.remainder)/1e6)}</p>
+              {review.result.status==='review'&&<p>{en?'Expires':'订单到期'}：{new Date(review.result.expirationSec*1000).toLocaleString()}</p>}
+            </div>
+          </div>}
+          {!review&&!busy&&queue[active]?.status==='open'&&<div className="rounded-xl border border-emerald-500/40 bg-emerald-950/20 p-3 text-sm text-emerald-200">
+            {en?'SELL verified in CLOB open orders.':'SELL 已在 CLOB 未成交挂单中核实。'}
+          </div>}
+          {message&&<p role="status" className="break-all rounded-lg border border-amber-600/30 bg-amber-950/20 p-3 text-xs text-amber-200">{message}</p>}
+          {pending&&<p role="alert" className="rounded-lg border border-rose-500/40 bg-rose-950/20 p-3 text-xs text-rose-200">
+            {en?'Submission hold: reconcile official order history before placing more orders.':'提交保护中：请先在官网核对订单历史，禁止重复提交。'}
+          </p>}
+        </div>
+
+        <footer className="shrink-0 space-y-2 border-t border-slate-700 bg-slate-950/60 px-5 py-4">
+          {review&&<p className="text-xs text-slate-400">{en?'Review expires in':'审核剩余'} {seconds}s · {en?'Checked again after signing':'签名后重新校验全部条件'}</p>}
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={busy} onClick={leaveReview}
+              className="rounded-lg border border-slate-600 px-4 py-2.5 text-sm text-slate-200 disabled:opacity-50">{en?'Back to list':'返回列表'}</button>
+            <button type="button" disabled={busy||pending||uncertain} onClick={()=>void prepareFor(active)}
+              className="rounded-lg border border-indigo-500/50 px-4 py-2.5 text-sm font-medium text-indigo-200 disabled:opacity-40">
+              {en?'Recheck':'重新核验'}</button>
+            <button type="button" disabled={!signReady} onClick={()=>void execute()}
+              className="min-w-[165px] flex-1 rounded-lg bg-indigo-500 px-4 py-2.5 text-sm font-bold text-white hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-35">
+              {en?'Sign and submit SELL':'钱包签名并提交 SELL'}
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-500">{en?'No automatic signatures, orders, cancellations or replacements.':'不自动签名、下单、撤单或替换已有挂单。'}</p>
+        </footer>
+      </aside>
+    </div>}
+  </section>;
+}
++summary.grossProceeds.toFixed(4)}</p>
+              <p>{en?'P/L vs avg cost (before fees)':'对比成本收益（未扣费用）'}：{summary.profitVsAvgCost===null?'—':'
+            <p className="font-semibold text-slate-100">{en?'Account and settlement confirmations':'账户与结算日期确认'}</p>
+            <label className="mt-2 flex cursor-pointer items-start gap-2 text-slate-300">
+              <input type="checkbox" checked={coverage} disabled={busy} onChange={e=>setCoverage(e.target.checked)} className="mt-0.5 accent-cyan-400"/>
+              <span>{en?'I matched all open orders on Polymarket for this Safe.':'已对照官网核对本 Safe 全部未成交挂单。'}</span>
+            </label>
+            <label className="mt-2 flex cursor-pointer items-start gap-2 text-slate-300">
+              <input type="checkbox" checked={activeSettled} disabled={busy||!activePosition.endDate}
+                onChange={e=>setSettlementDates(old=>({...old,[active]:e.target.checked?(activePosition.endDate??''):''}))}
+                className="mt-0.5 accent-cyan-400"/>
+              <span>{en?'I checked this market settlement estimate: ':'已确认本市场的预计结算日：'}{activePosition.endDate||'—'}.
+                {en?' Changes may affect APR pricing.':' 结算变化可能影响 APR。'}</span>
+            </label>
+            <p className="mt-2 text-slate-500">{en?'Confirmation immediately triggers a fresh non-trading precheck.':'确认选项变化后会自动重新执行只读预检查。'}</p>
+          </div>
+
+          {busy&&<div role="status" className="rounded-lg border border-indigo-500/40 bg-indigo-950/25 p-3 text-sm text-indigo-200">
+            {en?'Checking data or requesting wallet signature…':'正在核对最新数据或等待钱包签名…'}
+          </div>}
+          {review&&<div className="space-y-3">
+            {review.result.status==='blocked'&&<div role="alert" className="rounded-lg border border-amber-500/40 bg-amber-950/20 p-3 text-xs text-amber-200">
+              <p className="font-semibold">{en?'Order blocked':'暂不可下单'}</p>
+              <p className="mt-1 break-words">{review.result.reasons.map(r=>r==='onchain_clob_balance_mismatch'?'CLOB 与链上持仓不一致，禁止交易':r==='onchain_balance_unverified'?'链上持仓无法核实，禁止交易':r).join(' · ')}</p>
+            </div>}
+            {review.result.status==='review'&&<p className="text-sm font-semibold text-emerald-300">{en?'Quote calculated; check all safety conditions.':'已生成审核价格，请检查各项下单条件。'}</p>}
+            <div className="space-y-2 rounded-xl border border-slate-700 p-3 text-xs text-slate-300">
+              <h5 className="font-semibold text-slate-100">{en?'Fresh preflight checks':'实时下单前检查'}</h5>
+              <p>{en?'Market accepting orders':'市场接单状态'}：
+                <span className={review.checks.marketStatus==='accepting'?'text-emerald-300':'text-amber-300'}>
+                  {review.checks.marketStatus==='accepting'?(en?'Accepting':'接单中'):(en?'Paused / unknown':'暂停 / 待核实')}</span>
+              </p>
+              <p>{en?'Safe ERC-1155 authorization':'Safe ERC-1155 授权'}：
+                <span className={review.checks.authorizationVerified?'text-emerald-300':'text-amber-300'}>
+                  {review.checks.authorizationStatus==='approved'?(en?'Verified':'已核实'):review.checks.authorizationStatus==='missing'?(en?'Missing':'未授权'):(en?'Unknown / mismatch':'待核实 / 数据不一致')}
+                </span>
+              </p>
+              <p className="break-all">{en?'Exchange':'交易合约'}：{review.checks.operator??'—'}</p>
+              <p>{en?'Bid / ask':'买一 / 卖一'}：{review.checks.bestBid??'—'} / {review.checks.bestAsk??'—'} · Tick {review.checks.tick??'—'}</p>
+              <p>{en?'Minimum shares':'最小份额'}：{review.checks.minimumOrderShares??'—'}</p>
+              <p>{en?'Onchain CTF balance':'链上 CTF 持仓'}：{review.checks.tokenBalanceStatus==='verified'?'已与 CLOB 余额核对一致':review.checks.tokenBalanceStatus==='mismatch'?'不一致，禁止交易':'未核实，禁止交易'}</p>
+              <p>{en?'Available comparison':'快照差额'}：{showShares(Number(review.comparison.remainder)/1e6)}</p>
+              {review.result.status==='review'&&<p>{en?'Expires':'订单到期'}：{new Date(review.result.expirationSec*1000).toLocaleString()}</p>}
+            </div>
+          </div>}
+          {!review&&!busy&&queue[active]?.status==='open'&&<div className="rounded-xl border border-emerald-500/40 bg-emerald-950/20 p-3 text-sm text-emerald-200">
+            {en?'SELL verified in CLOB open orders.':'SELL 已在 CLOB 未成交挂单中核实。'}
+          </div>}
+          {message&&<p role="status" className="break-all rounded-lg border border-amber-600/30 bg-amber-950/20 p-3 text-xs text-amber-200">{message}</p>}
+          {pending&&<p role="alert" className="rounded-lg border border-rose-500/40 bg-rose-950/20 p-3 text-xs text-rose-200">
+            {en?'Submission hold: reconcile official order history before placing more orders.':'提交保护中：请先在官网核对订单历史，禁止重复提交。'}
+          </p>}
+        </div>
+
+        <footer className="shrink-0 space-y-2 border-t border-slate-700 bg-slate-950/60 px-5 py-4">
+          {review&&<p className="text-xs text-slate-400">{en?'Review expires in':'审核剩余'} {seconds}s · {en?'Checked again after signing':'签名后重新校验全部条件'}</p>}
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={busy} onClick={leaveReview}
+              className="rounded-lg border border-slate-600 px-4 py-2.5 text-sm text-slate-200 disabled:opacity-50">{en?'Back to list':'返回列表'}</button>
+            <button type="button" disabled={busy||pending||uncertain} onClick={()=>void prepareFor(active)}
+              className="rounded-lg border border-indigo-500/50 px-4 py-2.5 text-sm font-medium text-indigo-200 disabled:opacity-40">
+              {en?'Recheck':'重新核验'}</button>
+            <button type="button" disabled={!signReady} onClick={()=>void execute()}
+              className="min-w-[165px] flex-1 rounded-lg bg-indigo-500 px-4 py-2.5 text-sm font-bold text-white hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-35">
+              {en?'Sign and submit SELL':'钱包签名并提交 SELL'}
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-500">{en?'No automatic signatures, orders, cancellations or replacements.':'不自动签名、下单、撤单或替换已有挂单。'}</p>
+        </footer>
+      </aside>
+    </div>}
+  </section>;
+}
++summary.profitVsAvgCost.toFixed(4)}</p>
+            </div>}
+            <details className="mt-3 rounded-lg border border-slate-700 p-3 text-xs text-slate-300">
+              <summary className="cursor-pointer">{en?'Existing SELL orders':'已有 SELL 明细'} ({orders.filter(o=>o.asset_id===active&&o.side==='SELL').length})</summary>
+              {orders.filter(o=>o.asset_id===active&&o.side==='SELL').map(o=><p key={o.id} className="mt-2 break-all border-t border-slate-800 pt-2">SELL {o.original_size} @ {o.price} · {en?'unfilled':'未成交'} {Math.max(0,Number(o.original_size)-Number(o.size_matched)).toFixed(6)} · {o.id}</p>)}
+            </details>
           </div>
 
           <div className="rounded-xl border border-slate-700/80 bg-slate-900/70 p-3 text-xs">
@@ -484,7 +669,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
           {review&&<div className="space-y-3">
             {review.result.status==='blocked'&&<div role="alert" className="rounded-lg border border-amber-500/40 bg-amber-950/20 p-3 text-xs text-amber-200">
               <p className="font-semibold">{en?'Order blocked':'暂不可下单'}</p>
-              <p className="mt-1 break-words">{review.result.reasons.join(' · ')}</p>
+              <p className="mt-1 break-words">{review.result.reasons.map(r=>r==='onchain_clob_balance_mismatch'?'CLOB 与链上持仓不一致，禁止交易':r==='onchain_balance_unverified'?'链上持仓无法核实，禁止交易':r).join(' · ')}</p>
             </div>}
             {review.result.status==='review'&&<p className="text-sm font-semibold text-emerald-300">{en?'Quote calculated; check all safety conditions.':'已生成审核价格，请检查各项下单条件。'}</p>}
             <div className="space-y-2 rounded-xl border border-slate-700 p-3 text-xs text-slate-300">
@@ -501,6 +686,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
               <p className="break-all">{en?'Exchange':'交易合约'}：{review.checks.operator??'—'}</p>
               <p>{en?'Bid / ask':'买一 / 卖一'}：{review.checks.bestBid??'—'} / {review.checks.bestAsk??'—'} · Tick {review.checks.tick??'—'}</p>
               <p>{en?'Minimum shares':'最小份额'}：{review.checks.minimumOrderShares??'—'}</p>
+              <p>{en?'Onchain CTF balance':'链上 CTF 持仓'}：{review.checks.tokenBalanceStatus==='verified'?'已与 CLOB 余额核对一致':review.checks.tokenBalanceStatus==='mismatch'?'不一致，禁止交易':'未核实，禁止交易'}</p>
               <p>{en?'Available comparison':'快照差额'}：{showShares(Number(review.comparison.remainder)/1e6)}</p>
               {review.result.status==='review'&&<p>{en?'Expires':'订单到期'}：{new Date(review.result.expirationSec*1000).toLocaleString()}</p>}
             </div>
@@ -515,9 +701,9 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
         </div>
 
         <footer className="shrink-0 space-y-2 border-t border-slate-700 bg-slate-950/60 px-5 py-4">
-          {review&&<p className="text-xs text-slate-400">{en?'Preflight is valid for 60 seconds. Final checks also run after signature.':'审核单有效期 60 秒；签名后仍会重新检查价格、份额和授权。'}</p>}
+          {review&&<p className="text-xs text-slate-400">{en?'Review expires in':'审核剩余'} {seconds}s · {en?'Checked again after signing':'签名后重新校验全部条件'}</p>}
           <div className="flex flex-wrap gap-2">
-            <button type="button" disabled={busy} onClick={()=>{setActive(null);setReview(null);}}
+            <button type="button" disabled={busy} onClick={leaveReview}
               className="rounded-lg border border-slate-600 px-4 py-2.5 text-sm text-slate-200 disabled:opacity-50">{en?'Back to list':'返回列表'}</button>
             <button type="button" disabled={busy||pending||uncertain} onClick={()=>void prepareFor(active)}
               className="rounded-lg border border-indigo-500/50 px-4 py-2.5 text-sm font-medium text-indigo-200 disabled:opacity-40">
