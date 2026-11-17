@@ -35,6 +35,24 @@ const erc1155ApprovalAbi = [{
   outputs: [{name:'',type:'bool'}]
 }] as const;
 const showShares = (n: number) => Number.isFinite(n) ? n.toLocaleString(undefined,{maximumFractionDigits:6}) : '—';
+function SellSubmissionBanner({receipt,language,onOpenOrders,onDismiss}:{
+ receipt:SellSubmitReceipt;language:'zh'|'en';onOpenOrders:()=>void;onDismiss:()=>void
+}){
+ const en=language==='en',live=receipt.outcome==='live';
+ return <section role={live?'status':'alert'} aria-live={live?'polite':'assertive'}
+  className={'rounded-xl border p-3 text-xs '+(live?'border-emerald-500/50 bg-emerald-950/35 text-emerald-100':'border-amber-500/50 bg-amber-950/30 text-amber-100')}>
+  <p className="text-sm font-bold">{live?(en?'SELL confirmed: LIVE order verified':'SELL 已挂单成功 · CLOB LIVE 已确认')
+   :(en?'CLOB responded, LIVE status still unverified':'CLOB 已响应 · LIVE 挂单尚未核实')}</p>
+  <p className="mt-1 break-words">{receipt.title}</p>
+  <p className="mt-1 font-mono">SELL {showShares(receipt.quantity)} @ {receipt.price}</p>
+  <p className="mt-1 break-all font-mono text-[11px] opacity-80">{en?'Order ID':'订单 ID'}：{receipt.orderId||'—'}</p>
+  {!live&&<p className="mt-2">{en?'Check official order history before trying again.':'请先核对官网订单历史，确认结果前不要重复提交。'}</p>}
+  <div className="mt-3 flex flex-wrap gap-3">
+    <button type="button" onClick={onOpenOrders} className="font-semibold underline underline-offset-2">{en?'View this market’s orders':'查看该市场挂单'}</button>
+    <button type="button" onClick={onDismiss} className="opacity-80 underline underline-offset-2">{en?'Dismiss':'关闭提示'}</button>
+  </div>
+ </section>;
+}
 
 export function ManualSellReview({address,funder,credentials,positions,orders,language,onOrdersRefresh,onOpenOrders,ordersReady,targetAprInputs,selectedAssets,proposedQuantities,onQuantityChange,reviewRequest}: Props) {
   const en = language === 'en';
@@ -338,7 +356,9 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
         {en?'I verified the result in official order history':'我已在官网核对订单结果，解除限制'}
       </button>
     </div>}
-    {message&&!active&&<p role="status" className="mt-3 break-all text-xs text-amber-200">{message}</p>}
+    {lastSubmission&&!active&&<div className="mx-4 my-3 sm:mx-6"><SellSubmissionBanner receipt={lastSubmission} language={language}
+      onOpenOrders={()=>onOpenOrders(lastSubmission.asset)} onDismiss={()=>setLastSubmission(null)}/></div>}
+    {message&&!active&&<p role="status" className="mx-4 my-3 break-all text-xs text-amber-200 sm:mx-6">{message}</p>}
 
     {active&&activePosition&&<div className="fixed inset-0 z-[90] flex items-end justify-end bg-slate-950/70 backdrop-blur-sm lg:items-stretch"
       onMouseDown={event=>{if(event.target===event.currentTarget&&!lock.current)leaveReview();}}>
@@ -412,13 +432,11 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
             <p className="mt-2 text-slate-500">{en?'Confirmation immediately triggers a fresh non-trading precheck.':'确认选项变化后会自动重新执行只读预检查。'}</p>
           </div>
 
-          {busy&&<div role="status" className="rounded-lg border border-indigo-500/40 bg-indigo-950/25 p-3 text-sm text-indigo-200">
-            {en?'Checking data or requesting wallet signature…':'正在核对最新数据或等待钱包签名…'}
-          </div>}
+
           {review&&<div className="space-y-3">
             {review.result.status==='blocked'&&<div role="alert" className="rounded-lg border border-amber-500/40 bg-amber-950/20 p-3 text-xs text-amber-200">
               <p className="font-semibold">{en?'Order blocked':'暂不可下单'}</p>
-              <p className="mt-1 break-words">{review.result.reasons.map(r=>r==='onchain_clob_balance_mismatch'?'CLOB 与链上持仓不一致，禁止交易':r==='onchain_balance_unverified'?'链上持仓无法核实，禁止交易':r).join(' · ')}</p>
+              <p className="mt-1 break-words">{review.result.reasons.map(r=>r==='onchain_clob_balance_mismatch'?'CLOB 与链上持仓不一致，禁止交易':r==='onchain_balance_unverified'?'链上持仓无法核实，禁止交易':sellBlockReasonText(r,language)).join(' · ')}</p>
             </div>}
             {review.result.status==='review'&&<p className="text-sm font-semibold text-emerald-300">{en?'Quote calculated; check all safety conditions.':'已生成审核价格，请检查各项下单条件。'}</p>}
             <div className="space-y-2 rounded-xl border border-slate-700 p-3 text-xs text-slate-300">
@@ -440,26 +458,45 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
               {review.result.status==='review'&&<p>{en?'Expires':'订单到期'}：{new Date(review.result.expirationSec*1000).toLocaleString()}</p>}
             </div>
           </div>}
-          {!review&&!busy&&queue[active]?.status==='open'&&<div className="rounded-xl border border-emerald-500/40 bg-emerald-950/20 p-3 text-sm text-emerald-200">
-            {en?'SELL verified in CLOB open orders.':'SELL 已在 CLOB 未成交挂单中核实。'}
-          </div>}
-          {message&&<p role="status" className="break-all rounded-lg border border-amber-600/30 bg-amber-950/20 p-3 text-xs text-amber-200">{message}</p>}
+
+
           {pending&&<p role="alert" className="rounded-lg border border-rose-500/40 bg-rose-950/20 p-3 text-xs text-rose-200">
             {en?'Submission hold: reconcile official order history before placing more orders.':'提交保护中：请先在官网核对订单历史，禁止重复提交。'}
           </p>}
         </div>
 
-        <footer className="shrink-0 space-y-2 border-t border-slate-700 bg-slate-950/60 px-5 py-4">
+        <footer className="max-h-[50dvh] shrink-0 space-y-3 overflow-y-auto border-t border-slate-700 bg-slate-950/80 px-5 py-4">
+          {busy&&<div role="status" aria-live="polite" aria-busy="true" className="flex items-start gap-3 rounded-lg border border-indigo-400/50 bg-indigo-950/35 p-3 text-sm text-indigo-100">
+            <span aria-hidden="true" className="mt-0.5 inline-block h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-indigo-300 border-t-transparent"/>
+            {submitStage?(()=>{
+              const progress=sellSubmitProgress(submitStage,language);
+              return <div><p className="font-semibold">{progress.step} / {progress.total} · {progress.title}</p>
+                <p className="mt-1 text-xs text-indigo-200/80">{progress.hint}</p></div>;
+            })():<div><p className="font-semibold">{en?'Loading live SELL preflight…':'正在加载实时卖单审核…'}</p>
+              <p className="mt-1 text-xs text-indigo-200/80">{en?'Read-only; wallet signature has not started.':'正在只读核对，尚未请求交易签名。'}</p></div>}
+          </div>}
+          {lastSubmission?.asset===active&&!busy&&<SellSubmissionBanner receipt={lastSubmission} language={language}
+            onOpenOrders={()=>{leaveReview();onOpenOrders(lastSubmission.asset);}} onDismiss={()=>setLastSubmission(null)}/>}
+          {message&&<p role="status" className="break-all rounded-lg border border-amber-600/30 bg-amber-950/20 p-3 text-xs text-amber-200">{message}</p>}
           {review&&<p className="text-xs text-slate-400">{en?'Review expires in':'审核剩余'} {seconds}s · {en?'Checked again after signing':'签名后重新校验全部条件'}</p>}
           <div className="flex flex-wrap gap-2">
             <button type="button" disabled={busy} onClick={leaveReview}
               className="rounded-lg border border-slate-600 px-4 py-2.5 text-sm text-slate-200 disabled:opacity-50">{en?'Back to list':'返回列表'}</button>
-            <button type="button" disabled={busy||!ordersReady||pending||uncertain} onClick={()=>void prepareFor(active)}
-              className="rounded-lg border border-indigo-500/50 px-4 py-2.5 text-sm font-medium text-indigo-200 disabled:opacity-40">
-              {en?'Recheck':'重新核验'}</button>
+            {lastSubmission?.asset===active&&lastSubmission.outcome==='live'&&!review?
+              <button type="button" onClick={()=>{leaveReview();onOpenOrders(active);}}
+                className="rounded-lg border border-emerald-500/50 px-4 py-2.5 text-sm font-medium text-emerald-200">
+                {en?'View confirmed SELL':'查看已挂订单'}</button>:
+              <button type="button" disabled={busy||!ordersReady||pending||uncertain} onClick={()=>void prepareFor(active)}
+                className="rounded-lg border border-indigo-500/50 px-4 py-2.5 text-sm font-medium text-indigo-200 disabled:opacity-40">
+                {en?'Recheck':'重新核验'}</button>}
             <button type="button" disabled={!signReady} onClick={()=>void execute()}
               className="min-w-[165px] flex-1 rounded-lg bg-indigo-500 px-4 py-2.5 text-sm font-bold text-white hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-35">
-              {en?'Sign and submit SELL':'钱包签名并提交 SELL'}
+              {submitStage?<span className="inline-flex items-center justify-center gap-2">
+                <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"/>
+                {sellSubmitProgress(submitStage,language).title}
+              </span>:lastSubmission?.asset===active&&!review?
+                (lastSubmission.outcome==='live'?(en?'SELL confirmed':'SELL 已挂单'):(en?'Awaiting verification':'待核对订单')):
+                (en?'Sign and submit SELL':'钱包签名并提交 SELL')}
             </button>
           </div>
           <p className="text-[11px] text-slate-500">{en?'No automatic signatures, orders, cancellations or replacements.':'不自动签名、下单、撤单或替换已有挂单。'}</p>
