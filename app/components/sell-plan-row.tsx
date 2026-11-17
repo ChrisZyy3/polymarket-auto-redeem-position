@@ -7,6 +7,7 @@ import { buildMarkAutoSellPlan } from "@/lib/auto-sell-plan";
 import { observedSellShares } from "@/lib/order-review-status";
 import { indicativeUnreservedShares } from "@/lib/manual-sell-queue";
 import { formatMarketPercentForTick } from "@/lib/price-format";
+import { normalizeSdkSellShares } from "@/lib/sdk-sell-quantity";
 
 export function getSellWorkspaceNumbers(position:EnrichedPosition,quote:PositionQuote|null,aprInput:string,quantityInput:string|undefined,orders:ClobOrder[]|null,ordersReady:boolean){
   // The no-wallet mode is DRY RUN only. Never claim that portfolio holdings
@@ -16,11 +17,15 @@ export function getSellWorkspaceNumbers(position:EnrichedPosition,quote:Position
   const quantity=quantityInput??String(indicative??position.size);
   const targetApr=Number(aprInput);
   const validApr=aprInput.trim().length>0&&Number.isFinite(targetApr)&&targetApr>0&&targetApr<=10000;
-  const validQuantity=quantity.trim().length>0&&Number.isFinite(Number(quantity))&&Number(quantity)>0;
+  const normalized=quantity.trim()?normalizeSdkSellShares(Number(quantity)):null;
+  const validQuantity=quantity.trim().length>0&&normalized!==null;
+  const noUnreserved=ordersReady&&indicative!==null&&indicative<0.01;
+  const canReview=ordersReady&&indicative!==null&&indicative>=0.01&&validApr&&validQuantity
+    &&normalized!==null&&normalized<=indicative+1e-8;
   const plan=quote&&validApr&&validQuantity?buildMarkAutoSellPlan({
     quote,targetAprPercent:targetApr,quantity:Number(quantity),avgPrice:position.avgPrice,redeemable:position.redeemable
   }):null;
-  return {openSell,indicative,quantity,plan,validApr,validQuantity};
+  return {openSell,indicative,quantity,plan,validApr,validQuantity,canReview,noUnreserved};
 }
 
 type Props={
@@ -32,7 +37,7 @@ type Props={
 const fmtShares=(v:number)=>v.toLocaleString(undefined,{maximumFractionDigits:6});
 export function SellPlanRow({position,language,aprInput,quantityInput,quote,orders,ordersReady,selected,onAprChange,onQuantityChange,onSelect,onReview,onOpenOrders,onRefreshQuote}:Props){
  const en=language==="en";
- const {openSell,indicative,quantity,plan,validApr,validQuantity}=getSellWorkspaceNumbers(position,quote,aprInput,quantityInput,orders,ordersReady);
+ const {openSell,indicative,quantity,plan,validApr,validQuantity,canReview,noUnreserved}=getSellWorkspaceNumbers(position,quote,aprInput,quantityInput,orders,ordersReady);
  const price=plan?.proposedLimitPrice;
  const priceText=price!=null?formatMarketPercentForTick(price,quote?.tickSize??null):"—";
  const existingCount=ordersReady?(orders??[]).filter(o=>o.asset_id===position.asset&&o.side==="SELL").length:0;
@@ -70,16 +75,22 @@ export function SellPlanRow({position,language,aprInput,quantityInput,quote,orde
        value={quantity} onChange={e=>onQuantityChange(e.target.value)} disabled={position.redeemable}
        className={"w-28 rounded-lg border bg-slate-950/80 px-2 py-2 text-sm outline-none focus:border-cyan-400 "+(validQuantity?"border-slate-700":"border-amber-400")}/>
      <p className="mt-1 text-[10px] text-slate-500">{indicative!==null?(en?"Indicative max ":"模拟剩余 ")+fmtShares(indicative):(en?"DRY RUN shares":"DRY RUN 数量")}</p>
+     {ordersReady&&!canReview&&<p className="mt-1 text-[10px] text-amber-300">{
+       noUnreserved?(en?"No unreserved SELL shares":"剩余可卖份额已被占用"):
+       indicative===null?(en?"Share balance needs verification":"份额余额待核对"):
+       validQuantity&&indicative!==null&&Number(quantity)>indicative?(en?"Exceeds unreserved shares":"超过模拟可用份额"):
+       !validQuantity?(en?"Minimum 0.01 share":"SELL 至少 0.01 份"):(en?"Check APR / quantity":"核对 APR 与份额")
+     }</p>}
    </td>
    <td className="whitespace-nowrap px-2 py-3 text-xs">
      {position.redeemable?<span className="text-emerald-300">{en?"Redeemable":"可赎回"}</span>:
       !ordersReady?<span className="text-amber-300">{en?"DRY RUN":"仅模拟"}</span>:
-      <span className={openSell!==null&&openSell>0?"text-amber-300":"text-slate-300"}>{openSell!==null&&openSell>0?(en?"Existing SELL order":"已有 SELL 挂单"):(en?"Ready to review":"可进入审核")}</span>}
+      <span className={openSell!==null&&openSell>0?"text-amber-300":"text-slate-300"}>{noUnreserved&&openSell!==null&&openSell>0?(en?"Already fully listed":"已全部挂单"):indicative===null?(en?"Verify balance":"余额待核对"):openSell!==null&&openSell>0?(en?"Existing SELL order":"已有 SELL 挂单"):(en?"Ready to review":"可进入审核")}</span>}
    </td>
    <td className="px-3 py-3">
-     <button type="button" disabled={!ordersReady||position.redeemable||!validApr||!validQuantity}
+     <button type="button" disabled={!canReview||position.redeemable}
        onClick={onReview} className="rounded-lg border border-indigo-500/50 px-3 py-2 text-xs font-semibold text-indigo-200 hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-35">
-       {openSell!==null&&openSell>0?(en?"Review add SELL":"追加审核"):(en?"Review SELL":"审核 SELL")}
+       {noUnreserved&&openSell!==null&&openSell>0?(en?"Already listed":"已全部挂单"):openSell!==null&&openSell>0?(en?"Review add SELL":"追加审核"):(en?"Review SELL":"审核 SELL")}
      </button>
    </td>
  </tr>;
