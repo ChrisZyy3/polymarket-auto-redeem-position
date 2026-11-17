@@ -42,7 +42,9 @@ export function SellPlanRow({position,language,aprInput,quantityInput,quote,orde
        className="accent-indigo-400" onChange={e=>onSelect(e.target.checked)}/>
    </td>
    <td className="max-w-[290px] min-w-[200px] px-3 py-3">
-     <p className="line-clamp-2 font-semibold text-slate-100" title={position.title}>{position.title}</p>
+     {position.eventSlug||position.slug?<a href={"https://polymarket.com/event/"+encodeURIComponent(position.eventSlug||position.slug||"")}
+       target="_blank" rel="noreferrer" className="line-clamp-2 font-semibold text-slate-100 hover:text-cyan-300" title={position.title}>{position.title}</a>:
+       <p className="line-clamp-2 font-semibold text-slate-100" title={position.title}>{position.title}</p>}
      <p className="mt-0.5 text-xs text-indigo-300">{position.outcome}</p>
    </td>
    <td className="whitespace-nowrap px-2 py-3 tabular-nums">{position.markApr==null?"—":(position.markApr*100).toFixed(2)+"%"}</td>

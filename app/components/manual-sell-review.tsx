@@ -299,7 +299,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
     if(reviewRequest.mode==='single'&&reviewRequest.asset)startSingle(reviewRequest.asset);
     else if(reviewRequest.mode==='batch')startBatch();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[reviewRequest?.serial,ordersReady]);
+  },[reviewRequest?.serial,ordersReady,busy]);
 
   const previewReady=!!review && review.result.status==='review' && !!active && review.position.asset===active && reviewSignature===configKey(active);
   const signReady=previewReady&&!busy&&!pending&&!uncertain&&ordersReady&&!!wallet&&coverage&&!!active

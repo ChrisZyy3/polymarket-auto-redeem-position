@@ -1241,13 +1241,13 @@ export default function Home() {
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs">
-             <div role="tablist" aria-label={isEnglish?"Position table mode":"仓位表模式"} className="flex rounded-lg border border-slate-700 bg-slate-950/80 p-1">
-               <button type="button" role="tab" aria-selected={tradeMode==='yield'} onClick={()=>{setTradeMode('yield');setPositionsExpanded(true);}}
+             <div role="group" aria-label={isEnglish?"Position table mode":"仓位表模式"} className="flex rounded-lg border border-slate-700 bg-slate-950/80 p-1">
+               <button type="button" aria-pressed={tradeMode==='yield'} onClick={()=>{setTradeMode('yield');setPositionsExpanded(true);}}
                  className={tradeMode==='yield'?"rounded-md bg-cyan-500/20 px-3 py-2 font-semibold text-cyan-200":"rounded-md px-3 py-2 text-slate-400 hover:text-slate-100"}>{isEnglish?"Holdings & yield":"持仓收益"}</button>
-               <button type="button" role="tab" aria-selected={tradeMode==='sell'} onClick={()=>{setTradeMode('sell');setPositionsExpanded(true);}}
+               <button type="button" aria-pressed={tradeMode==='sell'} onClick={()=>{setTradeMode('sell');setPositionsExpanded(true);}}
                  className={tradeMode==='sell'?"rounded-md bg-indigo-500/20 px-3 py-2 font-semibold text-indigo-200":"rounded-md px-3 py-2 text-slate-400 hover:text-slate-100"}>{isEnglish?"SELL planning":"卖出规划"}</button>
              </div>
-            <button type="button" disabled={!isConnected||!profileAddress} onClick={()=>openOrderCenter()}
+            <button type="button" disabled={!isConnected||!profileAddress||profileAddress.toLowerCase()!==address.trim().toLowerCase()} onClick={()=>openOrderCenter()}
               title={!isConnected?(isEnglish?"Connect wallet first":"请先连接钱包"):undefined}
               className="rounded-lg border border-slate-600 px-3 py-2 font-semibold text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-35">
               {isEnglish?"Order center":"订单中心"} · {clobSnapshot.orders?.length??"—"}
