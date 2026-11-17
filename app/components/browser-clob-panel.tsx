@@ -98,6 +98,7 @@ export function BrowserClobPanel({profileAddress,queryAddress,positions,language
       ordersReady={ordersReady&&!busy} targetAprInputs={targetAprInputs}
       selectedAssets={selectedAssets} proposedQuantities={proposedQuantities}
       onQuantityChange={onQuantityChange} reviewRequest={reviewRequest}
+      onOpenOrders={asset=>{setOrderCenterAsset(asset);setOrderCenterOpen(true);}}
       onOrdersRefresh={next=>{
         balanceVersion.current++;setBalanceBusy(false);setOrders(next);setOrdersReady(true);
         onSnapshotChange({orders:next,ready:true});
