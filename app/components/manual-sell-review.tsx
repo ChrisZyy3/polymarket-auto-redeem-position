@@ -1,19 +1,18 @@
 "use client";
 import { useEffect, useRef, useState } from 'react';
-import { useWalletClient } from 'wagmi';
+import { useWalletClient, usePublicClient } from 'wagmi';
 import { fetchBrowserOpenOrders, type ClobCredentials, type ClobOrder } from '@/lib/browser-clob';
 import { buildMarkAutoSellPlan } from '@/lib/auto-sell-plan';
 import type { PositionQuote } from '@/lib/position-quote';
 import { observedSellShares } from '@/lib/order-review-status';
 import { indicativeUnreservedShares, nextReviewAsset, pendingAttemptKey, isCurrentPendingAttempt, sameSellIntent, type QueueRecord } from '@/lib/manual-sell-queue';
 import { loadSellReview } from '@/lib/sell-snapshot';
-import { encodeFunctionData,decodeFunctionResult } from 'viem';
 import { sellQueueStatusLabel } from '@/lib/sell-queue-status';
 import type { EnrichedPosition } from '@/lib/types';
 
 type Snapshot=Awaited<ReturnType<typeof loadSellReview>>;
 export function ManualSellReview({address,funder,credentials,positions,orders,language}:{address:string;funder:string;credentials:ClobCredentials;positions:EnrichedPosition[];orders:ClobOrder[];language:'zh'|'en'}) {
- const en=language==='en', {data:wallet}=useWalletClient();
+ const en=language==='en', {data:wallet}=useWalletClient(),publicClient=usePublicClient({chainId:137});
  const [asset,setAsset]=useState(''),[apr,setApr]=useState('12'),[quantity,setQuantity]=useState(''),[coverage,setCoverage]=useState(false),[settlement,setSettlement]=useState(false),[review,setReview]=useState<Snapshot|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
  const [selected,setSelected]=useState<string[]>([]), [uncertain,setUncertain]=useState(false);
  const [queue,setQueue]=useState<Record<string,QueueRecord>>({});
@@ -36,11 +35,9 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
  function setRowQty(id:string,value:string){reset();setQtyByAsset(old=>({...old,[id]:value}));if(asset===id)setQuantity(value);}
  const erc1155ApprovalAbi=[{type:'function',name:'isApprovedForAll',stateMutability:'view',inputs:[{name:'account',type:'address'},{name:'operator',type:'address'}],outputs:[{name:'',type:'bool'}]}] as const;
  async function readOnchainApproval(token:string,operator:string,account:string):Promise<boolean>{
-  if(!wallet||wallet.chain?.id!==137||wallet.account.address.toLowerCase()!==address.toLowerCase())throw Error('wallet_changed');
+  if(!wallet||!publicClient||wallet.chain?.id!==137||wallet.account.address.toLowerCase()!==address.toLowerCase())throw Error('wallet_changed');
   if(!/^0x[0-9a-f]{40}$/i.test(token)||!/^0x[0-9a-f]{40}$/i.test(operator)||!/^0x[0-9a-f]{40}$/i.test(account))throw Error('invalid_address');
-  const data=encodeFunctionData({abi:erc1155ApprovalAbi,functionName:'isApprovedForAll',args:[account as `0x${string}`,operator as `0x${string}`]});
-  const raw=await wallet.request({method:'eth_call',params:[{to:token as `0x${string}`,data},'latest']});
-  return decodeFunctionResult({abi:erc1155ApprovalAbi,functionName:'isApprovedForAll',data:raw})===true;
+  return await publicClient.readContract({address:token as `0x${string}`,abi:erc1155ApprovalAbi,functionName:'isApprovedForAll',args:[account as `0x${string}`,operator as `0x${string}`]});
  }
  function input(){return {credentials,signer:address,funder,asset,apr:Number(apr),quantity:Number(quantity),coverageConfirmed:coverage,settlementConfirmed:settlement,readOnchainApproval:wallet?readOnchainApproval:undefined};}
  async function prepare(){if(lock.current)return;lock.current=true;const g=++generation.current;setBusy(true);setReview(null);setMessage('');try{const snapshot=await loadSellReview(input());if(g===generation.current){setReview(snapshot);status(asset,snapshot.result.status==='review'?'reviewing':'blocked',snapshot.result.status==='blocked'?snapshot.result.reasons.join(', '):undefined);}}catch{if(g===generation.current){status(asset,'blocked','snapshot_fetch_failed');setMessage(en?'Unable to refresh all data; no order prepared.':'刷新数据失败，未生成订单。');}}finally{lock.current=false;if(g===generation.current)setBusy(false);}}
