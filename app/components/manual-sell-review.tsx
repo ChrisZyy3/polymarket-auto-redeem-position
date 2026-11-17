@@ -14,6 +14,7 @@ import {
 } from '@/lib/manual-sell-queue';
 import { loadSellReview } from '@/lib/sell-snapshot';
 import { sellQueueStatusLabel } from '@/lib/sell-queue-status';
+import { settlementConfirmedForDate, nextAfterVerifiedSell } from '@/lib/sell-workbench-flow';
 import type { EnrichedPosition } from '@/lib/types';
 
 type Snapshot = Awaited<ReturnType<typeof loadSellReview>>;
@@ -53,13 +54,14 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
   const generation=useRef(0), lock=useRef(false);
   const previousConfirm=useRef('');
   const closeButton=useRef<HTMLButtonElement|null>(null);
+  const dialogRef=useRef<HTMLElement|null>(null);
   const pendingKey = pendingAttemptKey(address,funder);
   const tradable = positions.filter(p=>!p.redeemable && p.size>0);
   const activePosition=tradable.find(p=>p.asset===active);
   const activeDraft=active ? drafts[active] : undefined;
   const activeApr=activeDraft?.apr ?? globalApr;
   const activeQuantity=activePosition ? (activeDraft?.quantity ?? String(indicativeUnreservedShares(activePosition.size,activePosition.asset,orders) ?? '')) : '';
-  const activeSettled=!!activePosition && settlementDates[activePosition.asset]===activePosition.endDate;
+  const activeSettled=!!activePosition && settlementConfirmedForDate(settlementDates[activePosition.asset],activePosition.endDate);
 
   useEffect(()=>{
     try {
@@ -93,13 +95,20 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
     const interval=window.setInterval(()=>setClock(Date.now()),5000);
     function onKey(event:KeyboardEvent){
       if(event.key==='Escape'&&!lock.current){setActive(null);setReview(null);}
+      if(event.key==='Tab'){
+        const elements=dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), a[href], select:not([disabled])');
+        if(!elements?.length)return;
+        const first=elements[0],last=elements[elements.length-1];
+        if(event.shiftKey && document.activeElement===first){event.preventDefault();last.focus();}
+        else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+      }
     }
     window.addEventListener('keydown',onKey);
     return ()=>{document.body.style.overflow=old;window.clearInterval(interval);window.removeEventListener('keydown',onKey);};
   },[active]);
 
   function positionFor(id:string){return tradable.find(p=>p.asset===id);}
-  function isSettled(id:string){const p=positionFor(id);return !!p&&settlementDates[id]===p.endDate;}
+  function isSettled(id:string){const p=positionFor(id);return !!p&&settlementConfirmedForDate(settlementDates[id],p.endDate);}
   function draftFor(id:string){
     const p=positionFor(id);
     return {
@@ -249,9 +258,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
                 onOrdersRefresh?.(latest);
                 setMessage((en?'Order verified in CLOB: ':'已精确回读 SELL：')+response.orderId);
                 if(selected.includes(id)){
-                  const updatedQueue={...queue,[id]:{status:'open' as const,updatedAt:Date.now(),orderId:response.orderId}};
-                  nextId=nextReviewAsset(selected,updatedQueue,id);
-                  if(nextId===id)nextId=null;
+                  nextId=nextAfterVerifiedSell(selected,queue,id,true);
                 }
               }else{
                 setMessage(en?'Accepted, but exact LIVE SELL readback was not verified. Reconcile before another order.':'订单已受理，但未能精确确认 LIVE SELL；核对订单历史后才能继续。');
@@ -359,10 +366,10 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
     <div className="mt-3 hidden overflow-x-auto lg:block">
       <table className="w-full min-w-[1050px] table-fixed text-left text-xs">
         <thead><tr className="border-b border-slate-700 text-slate-400">
-          <th className="w-10 py-3 pl-2">{en?'Pick':'选'}</th><th className="w-[29%] py-3">{en?'Market / outcome':'市场 / 方向'}</th>
-          <th className="w-[11%] py-3">{en?'APR %':'APR %'}</th><th className="w-[12%] py-3">{en?'Shares held':'持仓'}</th>
-          <th className="w-[12%] py-3">{en?'Open SELL':'已有 SELL'}</th><th className="w-[16%] py-3">{en?'Proposed shares':'拟卖份额'}</th>
-          <th className="w-[10%] py-3">{en?'Limit':'限价'}</th><th className="w-[13%] py-3">{en?'Review':'审核进度'}</th><th className="w-[9%] py-3 text-right pr-1">{en?'Action':'操作'}</th>
+          <th className="w-[4%] py-3 pl-2">{en?'Pick':'选'}</th><th className="w-[27%] py-3">{en?'Market / outcome':'市场 / 方向'}</th>
+          <th className="w-[8%] py-3">{en?'APR %':'APR %'}</th><th className="w-[8%] py-3">{en?'Shares held':'持仓'}</th>
+          <th className="w-[10%] py-3">{en?'Open SELL':'已有 SELL'}</th><th className="w-[15%] py-3">{en?'Proposed shares':'拟卖份额'}</th>
+          <th className="w-[10%] py-3">{en?'Limit':'限价'}</th><th className="w-[11%] py-3">{en?'Review':'审核进度'}</th><th className="w-[7%] py-3 text-right pr-1">{en?'Action':'操作'}</th>
         </tr></thead>
         <tbody>{tradable.map(p=>{
           const d=draftFields(p),record=queue[p.asset];
@@ -425,7 +432,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
 
     {active&&activePosition&&<div className="fixed inset-0 z-[90] flex items-end justify-end bg-slate-950/70 backdrop-blur-sm lg:items-stretch"
       onMouseDown={event=>{if(event.target===event.currentTarget&&!lock.current){setActive(null);setReview(null);}}}>
-      <aside role="dialog" aria-modal="true" aria-label={en?'SELL order review':'SELL 卖单审核'}
+      <aside ref={dialogRef} role="dialog" aria-modal="true" aria-label={en?'SELL order review':'SELL 卖单审核'}
         className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl border border-indigo-500/30 bg-[#0c1327] shadow-2xl shadow-black/60 lg:h-full lg:max-h-none lg:w-[560px] lg:rounded-l-2xl lg:rounded-tr-none">
         <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-700/70 px-5 py-4">
           <div>
@@ -462,7 +469,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
               <span>{en?'I matched all open orders on Polymarket for this Safe.':'已对照官网核对本 Safe 全部未成交挂单。'}</span>
             </label>
             <label className="mt-2 flex cursor-pointer items-start gap-2 text-slate-300">
-              <input type="checkbox" checked={activeSettled} disabled={busy}
+              <input type="checkbox" checked={activeSettled} disabled={busy||!activePosition.endDate}
                 onChange={e=>setSettlementDates(old=>({...old,[active]:e.target.checked?(activePosition.endDate??''):''}))}
                 className="mt-0.5 accent-cyan-400"/>
               <span>{en?'I checked this market settlement estimate: ':'已确认本市场的预计结算日：'}{activePosition.endDate||'—'}.
