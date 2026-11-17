@@ -13,6 +13,7 @@ import {
 import { loadSellReview } from '@/lib/sell-snapshot';
 import { settlementConfirmedForDate, nextAfterVerifiedSell, sellReviewConfigKey, sellQuantityForPercent, sellLimitSummary } from '@/lib/sell-workbench-flow';
 import type { EnrichedPosition } from '@/lib/types';
+import { sellSubmitProgress, shouldAutoRecheckSell, sellBlockReasonText, type SellSubmitReceipt, type SellSubmitStage } from '@/lib/sell-submit-feedback';
 
 type Snapshot = Awaited<ReturnType<typeof loadSellReview>>;
 export type SellReviewRequest={serial:number;mode:'single'|'batch';asset?:string}|null;
@@ -20,6 +21,7 @@ type Props = {
  address:string;funder:string;credentials:ClobCredentials;
  positions:EnrichedPosition[];orders:ClobOrder[];language:'zh'|'en';
  onOrdersRefresh?:(next:ClobOrder[])=>void;
+ onOpenOrders:(asset:string)=>void;
  ordersReady:boolean;
  targetAprInputs:Record<string,string>;
  selectedAssets:string[];
@@ -34,7 +36,7 @@ const erc1155ApprovalAbi = [{
 }] as const;
 const showShares = (n: number) => Number.isFinite(n) ? n.toLocaleString(undefined,{maximumFractionDigits:6}) : '—';
 
-export function ManualSellReview({address,funder,credentials,positions,orders,language,onOrdersRefresh,ordersReady,targetAprInputs,selectedAssets,proposedQuantities,onQuantityChange,reviewRequest}: Props) {
+export function ManualSellReview({address,funder,credentials,positions,orders,language,onOrdersRefresh,onOpenOrders,ordersReady,targetAprInputs,selectedAssets,proposedQuantities,onQuantityChange,reviewRequest}: Props) {
   const en = language === 'en';
   const {data:wallet} = useWalletClient();
   const publicClient = usePublicClient({chainId:137});
@@ -48,6 +50,8 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
   const [clock,setClock] = useState(Date.now());
   const [queue,setQueue] = useState<Record<string,QueueRecord>>({});
   const [message,setMessage] = useState('');
+  const [submitStage,setSubmitStage]=useState<SellSubmitStage|null>(null);
+  const [lastSubmission,setLastSubmission]=useState<SellSubmitReceipt|null>(null);
   const [uncertain,setUncertain] = useState(false);
   const [pending,setPending] = useState(false);
   const generation=useRef(0), lock=useRef(false);
@@ -85,6 +89,8 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
           status:Number(matched.size_matched)>0?'partially_filled':'open',
           orderId:matched.id,updatedAt:Date.now()
         }}));
+        setLastSubmission({asset:matched.asset_id,title:positions.find(p=>p.asset===matched.asset_id)?.title??matched.asset_id,
+          orderId:matched.id,price:Number(matched.price),quantity:Number(matched.original_size),at:Date.now(),outcome:'live'});
       }
     }catch {/* Uncertain submissions remain blocked when storage or order reconciliation fails. */}
   },[pendingKey,address,funder,orders]);
@@ -189,19 +195,22 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
 
   // Confirmations are deliberate user actions, but the fresh read starts automatically afterward.
   useEffect(()=>{
-    if(!active||busy||lock.current||!ordersReady||pending||uncertain)return;
+    if(!active)return;
     const key=configKey(active);
-    if(previousConfirm.current===key)return;
+    if(!shouldAutoRecheckSell({active:true,hasReview:review!==null,busy,locked:lock.current,
+      ordersReady,pending,uncertain,configChanged:previousConfirm.current!==key}))return;
+    // A completed POST intentionally clears review. Changes in available shares
+    // must never start an implicit second order review (invalid_quantity).
     void prepareFor(active);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[active,coverage,settlementDates,targetAprInputs,proposedQuantities,busy,ordersReady,pending,uncertain,activePosition?.endDate]);
+  },[active,review,coverage,settlementDates,targetAprInputs,proposedQuantities,busy,ordersReady,pending,uncertain,activePosition?.endDate]);
 
   async function execute(){
     if(lock.current||!active||!review||review.position.asset!==active||review.result.status!=='review'
       ||!wallet||!ordersReady||!coverage||!isSettled(active)||pending||uncertain||reviewSignature!==configKey(active)
       ||review.checks.marketStatus!=='accepting'||!review.checks.authorizationVerified||review.checks.tokenBalanceStatus!=='verified'||!review.checks.operator||Date.now()-review.asOf>60000)return;
     const id=active,config=draftFor(id);
-    lock.current=true;const g=generation.current;setBusy(true);setMessage('');
+    lock.current=true;const g=generation.current;setBusy(true);setMessage('');setSubmitStage('precheck');
     let posting=false,nextId:string|null=null;
     status(id,'signing');
     try{
@@ -212,10 +221,12 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
       if(g!==generation.current||fresh.result.status!=='review'||!sameSellIntent(fresh.result,review.result)
         ||fresh.position.endDate!==review.position.endDate||fresh.checks.marketStatus!=='accepting'
         ||!fresh.checks.authorizationVerified||fresh.checks.tokenBalanceStatus!=='verified'||fresh.checks.operator!==review.checks.operator||configKey(id)!==reviewSignature)throw Error('review_changed');
+      setSubmitStage('wallet');
       const client=await createSafeSellClient(wallet,funder,credentials,review.checks.operator);
       if(g!==generation.current)throw Error('wallet_changed');
       const signed=await client.sign(id,review.result.price,review.result.quantity,review.result.expirationSec);
       if(g!==generation.current)throw Error('wallet_changed');
+      setSubmitStage('postcheck');
       const final=await loadSellReview(request());
       if(g!==generation.current||final.result.status!=='review'||!sameSellIntent(final.result,review.result)
         ||final.position.endDate!==review.position.endDate||final.checks.marketStatus!=='accepting'
@@ -225,7 +236,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
       try{
         localStorage.setItem(pendingKey,JSON.stringify({address,funder,asset:id,quantity:review.result.quantity,price:review.result.price,at:Date.now()}));
       }catch{throw Error('pending_store_unavailable');}
-      posting=true;
+      posting=true;setSubmitStage('posting');
       const response=await client.post(signed);
       if(g===generation.current){
         setReview(null);
@@ -234,7 +245,10 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
           status(id,'uncertain','rejected_response_requires_reconciliation');
           setMessage(en?'Response rejected; verify order history before retrying.':'订单响应拒绝；请先核对官网订单历史再重试。');
         }else{
-          setUncertain(true);setPending(true);
+          setUncertain(true);setPending(true);setSubmitStage('readback');
+          const receiptBase={asset:id,title:review.position.title,orderId:response.orderId,
+            price:review.result.price,quantity:review.result.quantity,at:Date.now()};
+          setLastSubmission({...receiptBase,outcome:'needs_reconciliation'});
           status(id,'uncertain','accepted_pending_readback',response.orderId);
           try{
             const updated=persistedAcceptedOrder(localStorage.getItem(pendingKey),address,funder,response.orderId);
@@ -249,8 +263,9 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
               if(matched && clearPending()){
                 const filled=Number(matched.size_matched)>0;
                 status(id,filled?'partially_filled':'open',undefined,response.orderId);
+                setLastSubmission({...receiptBase,outcome:'live',at:Date.now()});
                 onOrdersRefresh?.(latest);
-                setMessage((en?'Order verified in CLOB: ':'已精确回读 SELL：')+response.orderId);
+                setMessage('');
                 if(batchIds.current?.includes(id)){
                   nextId=nextAfterVerifiedSell(batchIds.current,queue,id,true);
                   if(!nextId){batchIds.current=null;setBatchMode(false);}
@@ -278,6 +293,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
     }finally{
       lock.current=false;
       if(g===generation.current){
+        setSubmitStage(null);
         setBusy(false);
         if(nextId)void prepareFor(nextId); // auto review ONLY; no automatic wallet signature or POST
       }
