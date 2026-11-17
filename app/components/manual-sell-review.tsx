@@ -449,7 +449,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
               <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3"><p className="text-xs text-slate-400">{en?'Proposed shares':'拟卖份额'}</p>
                 <p className="mt-1 text-xl font-semibold text-slate-100">{showShares(Number(activeQuantity))}</p></div>
               <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3"><p className="text-xs text-slate-400">{en?'SELL limit':'建议 SELL 限价'}</p>
-                <p className="mt-1 text-xl font-semibold text-cyan-300">{previewReady?review.result.price:'—'}</p></div>
+                <p className="mt-1 text-xl font-semibold text-cyan-300">{review?.result.status==='review'?review.result.price:'—'}</p></div>
               <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3"><p className="text-xs text-slate-400">{en?'Open SELL shares':'已有 SELL'}</p>
                 <p className="mt-1 text-xl font-semibold text-amber-200">{showShares(observedSellShares(orders,active))}</p></div>
             </div>
@@ -463,7 +463,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
             </label>
             <label className="mt-2 flex cursor-pointer items-start gap-2 text-slate-300">
               <input type="checkbox" checked={activeSettled} disabled={busy}
-                onChange={e=>setSettlementDates(old=>({...old,[active]:e.target.checked?activePosition.endDate:''}))}
+                onChange={e=>setSettlementDates(old=>({...old,[active]:e.target.checked?(activePosition.endDate??''):''}))}
                 className="mt-0.5 accent-cyan-400"/>
               <span>{en?'I checked this market settlement estimate: ':'已确认本市场的预计结算日：'}{activePosition.endDate||'—'}.
                 {en?' Changes may affect APR pricing.':' 结算变化可能影响 APR。'}</span>
