@@ -86,6 +86,7 @@ interface QuoteState {
   thresholdAprPercent: number;
   quote?: PositionQuote;
   error?: string;
+  fetchedAt?: number;
 }
 
 type Language = "zh" | "en";
@@ -235,6 +236,7 @@ export default function Home() {
   const [quoteStates, setQuoteStates] = useState<Record<string, QuoteState>>({});
   const [targetAprInputs, setTargetAprInputs] = useState<Record<string, string>>({});
   const quoteRequestVersion = useRef(0);
+  const quoteByAssetVersion = useRef<Record<string,number>>({});
   const queryRequestVersion = useRef(0);
   const isEnglish = language === "en";
 
@@ -412,7 +414,9 @@ export default function Home() {
       (existing.status === "loading" || existing.status === "ready")
     ) return;
 
-    const requestVersion = ++quoteRequestVersion.current;
+    const requestVersion=quoteRequestVersion.current;
+    const assetVersion=(quoteByAssetVersion.current[key]??0)+1;
+    quoteByAssetVersion.current[key]=assetVersion;
 
     setQuoteStates((previous) => ({
       ...previous,
@@ -434,15 +438,15 @@ export default function Home() {
       }
 
       setQuoteStates((previous) => {
-        if (requestVersion !== quoteRequestVersion.current) return previous;
+        if (requestVersion !== quoteRequestVersion.current || assetVersion !== quoteByAssetVersion.current[key]) return previous;
         return {
           ...previous,
-          [key]: { status: "ready", thresholdAprPercent: thresholdApr, quote: payload.quote },
+          [key]: { status: "ready", thresholdAprPercent: thresholdApr, quote: payload.quote, fetchedAt: Date.now() },
         };
       });
     } catch (err) {
       setQuoteStates((previous) => {
-        if (requestVersion !== quoteRequestVersion.current) return previous;
+        if (requestVersion !== quoteRequestVersion.current || assetVersion !== quoteByAssetVersion.current[key]) return previous;
         return {
           ...previous,
           [key]: {
@@ -793,6 +797,14 @@ export default function Home() {
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
   });
+
+  // Share this existing TanStack table order and quote cache with SELL review.
+  const sharedSellQuotes=useMemo(()=>Object.fromEntries(positions.flatMap(p=>{
+    const state=quoteStates[getPositionKey(p)];
+    return state?.status==='ready'&&state.quote
+      ?[[p.asset,{quote:state.quote,fetchedAt:state.fetchedAt??0}] as const]:[];
+  })),[positions,quoteStates]);
+  const sortedSellAssets=table.getRowModel().rows.map(row=>row.original.asset);
 
   // Save new address queries in local memory and enforce history limit
   // 将新查询到的钱包地址存入历史缓存记录中，并按上限裁剪数量
@@ -1171,7 +1183,10 @@ export default function Home() {
 
       <PortfolioSellSummary key={data?.positions.map(p => `${p.proxyWallet}:${p.asset}`).join("|") ?? "empty"} positions={positions} language={language} />
 
-      <BrowserClobPanel profileAddress={profileAddress} queryAddress={address} positions={positions} language={language} />
+      <BrowserClobPanel profileAddress={profileAddress} queryAddress={address} positions={positions} language={language}
+        orderedAssets={sortedSellAssets} targetAprInputs={targetAprInputs}
+        onTargetAprChange={handleTargetAprChange} sharedQuotes={sharedSellQuotes}
+        onRefreshQuote={p=>loadPositionQuote(p,holdAprThreshold,true)}/>
 
       {/* Positions detailed tables container / 仓位细分数据列表 */}
       <div className="relative mt-8 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/45 shadow-[0_14px_36px_rgba(0,0,0,0.14)]">

@@ -18,11 +18,15 @@ import { settlementConfirmedForDate, nextAfterVerifiedSell, sellReviewConfigKey,
 import type { EnrichedPosition } from '@/lib/types';
 
 type Snapshot = Awaited<ReturnType<typeof loadSellReview>>;
-type Draft = { apr?: string; quantity?: string };
+type Draft = { quantity?: string };
 type Props = {
   address: string; funder: string; credentials: ClobCredentials;
   positions: EnrichedPosition[]; orders: ClobOrder[]; language: 'zh' | 'en';
   onOrdersRefresh?: (next: ClobOrder[]) => void;
+  ordersReady:boolean;orderedAssets:string[];targetAprInputs:Record<string,string>;
+  onTargetAprChange:(asset:string,value:string)=>void;
+  sharedQuotes:Record<string,{quote:PositionQuote;fetchedAt:number}>;
+  onRefreshQuote:(position:EnrichedPosition)=>Promise<void>;
 };
 const erc1155ApprovalAbi = [{
   type: 'function', name: 'isApprovedForAll', stateMutability: 'view',
@@ -31,12 +35,11 @@ const erc1155ApprovalAbi = [{
 }] as const;
 const showShares = (n: number) => Number.isFinite(n) ? n.toLocaleString(undefined,{maximumFractionDigits:6}) : '—';
 
-export function ManualSellReview({address,funder,credentials,positions,orders,language,onOrdersRefresh}: Props) {
+export function ManualSellReview({address,funder,credentials,positions,orders,language,onOrdersRefresh,ordersReady,orderedAssets,targetAprInputs,onTargetAprChange,sharedQuotes,onRefreshQuote}: Props) {
   const en = language === 'en';
   const {data:wallet} = useWalletClient();
   const publicClient = usePublicClient({chainId:137});
   const [selected,setSelected] = useState<string[]>([]);
-  const [globalApr,setGlobalApr] = useState('12');
   const [drafts,setDrafts] = useState<Record<string,Draft>>({});
   const [coverage,setCoverage] = useState(false);
   // Store the exact date confirmed for each market. If the date changes, it must be confirmed again.
@@ -46,7 +49,6 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
   const [busy,setBusy] = useState(false);
   const [quoteBusy,setQuoteBusy] = useState(false);
   const [clock,setClock] = useState(Date.now());
-  const [quotes,setQuotes] = useState<Record<string,PositionQuote|null>>({});
   const [queue,setQueue] = useState<Record<string,QueueRecord>>({});
   const [message,setMessage] = useState('');
   const [uncertain,setUncertain] = useState(false);
@@ -59,10 +61,11 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
   const closeButton=useRef<HTMLButtonElement|null>(null);
   const dialogRef=useRef<HTMLElement|null>(null);
   const pendingKey = pendingAttemptKey(address,funder);
-  const tradable = positions.filter(p=>!p.redeemable && p.size>0);
+  const rank=new Map(orderedAssets.map((asset,i)=>[asset,i]));
+  const tradable=positions.filter(p=>!p.redeemable&&p.size>0).sort((a,b)=>(rank.get(a.asset)??1e9)-(rank.get(b.asset)??1e9));
   const activePosition=tradable.find(p=>p.asset===active);
   const activeDraft=active ? drafts[active] : undefined;
-  const activeApr=activeDraft?.apr ?? globalApr;
+  const activeApr=active?targetAprInputs[active]??'12':'12';
   const activeQuantity=activePosition ? (activeDraft?.quantity ?? String(indicativeUnreservedShares(activePosition.size,activePosition.asset,orders) ?? '')) : '';
   const activeSettled=!!activePosition && settlementConfirmedForDate(settlementDates[activePosition.asset],activePosition.endDate);
 
@@ -115,13 +118,12 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
   function draftFor(id:string){
     const p=positionFor(id);
     return {
-      apr: drafts[id]?.apr ?? globalApr,
+      apr: targetAprInputs[id]??'12',
       quantity: drafts[id]?.quantity ?? String(p ? indicativeUnreservedShares(p.size,id,orders)??'' : '')
     };
   }
   function updateDraft(id:string,change:Draft){
     setDrafts(old=>({...old,[id]:{...old[id],...change}}));
-    setQuotes(old=>({...old,[id]:null}));
     if(id===active){generation.current++;setReview(null);setReviewSignature('');setMessage('');}
   }
   function status(id:string,state:QueueRecord['status'],reason?:string,orderId?:string){
@@ -165,7 +167,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
       settlementConfirmed:isSettled(id),endDate:pos?.endDate});
   }
   async function prepareFor(id:string){
-    if(lock.current||!positionFor(id)||uncertain||pending)return;
+    if(lock.current||!positionFor(id)||!ordersReady||uncertain||pending)return;
     const config=draftFor(id),key=configKey(id);
     previousConfirm.current=key;
     const g=++generation.current;
@@ -191,34 +193,26 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
 
   // Confirmations are deliberate user actions, but the fresh read starts automatically afterward.
   useEffect(()=>{
-    if(!active||busy||lock.current||pending||uncertain)return;
+    if(!active||busy||lock.current||!ordersReady||pending||uncertain)return;
     const key=configKey(active);
     if(previousConfirm.current===key)return;
     void prepareFor(active);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[active,coverage,settlementDates,globalApr,drafts,busy,pending,uncertain,activePosition?.endDate]);
+  },[active,coverage,settlementDates,targetAprInputs,drafts,busy,ordersReady,pending,uncertain,activePosition?.endDate]);
 
   async function refreshQuotes(){
     if(quoteBusy||busy||selected.length===0)return;
-    setQuoteBusy(true);setQuotes({});
+    setQuoteBusy(true);
     const chosen=[...selected];
     try{
-      for(const id of chosen){
-        const p=positionFor(id);if(!p)continue;
-        try{
-          const q=new URLSearchParams({tokenId:id,currentPrice:String(p.curPrice),thresholdApr:draftFor(id).apr});
-          if(p.endDate)q.set('endDate',p.endDate);
-          const r=await fetch('/api/position-quote?'+q.toString(),{cache:'no-store',signal:AbortSignal.timeout(15000)});
-          const body=await r.json();
-          setQuotes(old=>({...old,[id]:r.ok&&body.ok?body.quote:null}));
-        }catch{setQuotes(old=>({...old,[id]:null}));}
-      }
+      // Reuse the Dashboard's quote API, caching and per-asset request guard.
+      for(const id of chosen){const pos=positionFor(id);if(pos)try{await onRefreshQuote(pos);}catch{}}
     }finally{setQuoteBusy(false);}
   }
 
   async function execute(){
     if(lock.current||!active||!review||review.position.asset!==active||review.result.status!=='review'
-      ||!wallet||!coverage||!isSettled(active)||pending||uncertain||reviewSignature!==configKey(active)
+      ||!wallet||!ordersReady||!coverage||!isSettled(active)||pending||uncertain||reviewSignature!==configKey(active)
       ||review.checks.marketStatus!=='accepting'||!review.checks.authorizationVerified||review.checks.tokenBalanceStatus!=='verified'||!review.checks.operator||Date.now()-review.asOf>60000)return;
     const id=active,config=draftFor(id);
     lock.current=true;const g=generation.current;setBusy(true);setMessage('');
@@ -313,7 +307,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
     batchIds.current=null;setBatchMode(false);setActive(null);setReview(null);setReviewSignature('');
   }
   const previewReady=!!review && review.result.status==='review' && !!active && review.position.asset===active && reviewSignature===configKey(active);
-  const signReady=previewReady&&!busy&&!pending&&!uncertain&&!!wallet&&coverage&&!!active
+  const signReady=previewReady&&!busy&&!pending&&!uncertain&&ordersReady&&!!wallet&&coverage&&!!active
     &&isSettled(active)&&review.checks.marketStatus==='accepting'
     &&review.checks.authorizationVerified&&review.checks.tokenBalanceStatus==='verified'&&!!review.checks.operator&&clock-review.asOf<60000;
   const summary=review?.result.status==='review'&&activePosition
@@ -323,16 +317,16 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
   const draftFields=(p:EnrichedPosition,compact=false)=>{
     const id=p.asset,configuration=draftFor(id),remaining=indicativeUnreservedShares(p.size,id,orders);
     const heldSell=observedSellShares(orders,id);
-    const preview=quotes[id] ? buildMarkAutoSellPlan({
-      quote:quotes[id],targetAprPercent:Number(configuration.apr),
+    const cached=sharedQuotes[id],quote=cached&&Date.now()-cached.fetchedAt<5*60*1000?cached.quote:null;
+    const preview=quote ? buildMarkAutoSellPlan({
+      quote,targetAprPercent:Number(configuration.apr),
       quantity:Number(configuration.quantity),avgPrice:p.avgPrice
     }).proposedLimitPrice : null;
-    const completed=queue[id]?.status==='open'||queue[id]?.status==='partially_filled';
     return {
-      configuration,remaining,heldSell,preview,completed,
+      configuration,remaining,heldSell,preview,
       apr:<input aria-label={p.title+' APR'} className="w-20 rounded-lg border border-slate-600 bg-slate-950/70 px-2 py-1.5 text-sm text-slate-100 focus:border-cyan-400 focus:outline-none"
         type="number" min="0.1" max="10000" step="0.1" value={configuration.apr} disabled={busy}
-        onChange={e=>updateDraft(id,{apr:e.target.value})}/>,
+        onChange={e=>{onTargetAprChange(id,e.target.value);if(id===active){setReview(null);setReviewSignature('');previousConfirm.current='';}}}/>,
       shares:<div><input aria-label={p.title+' shares'} className={'rounded-lg border border-slate-600 bg-slate-950/70 px-2 py-1.5 text-sm text-slate-100 focus:border-cyan-400 focus:outline-none '+(compact?'w-28':'w-32')}
         type="number" min="0" step="any" max={remaining??undefined} value={configuration.quantity} disabled={busy}
         onChange={e=>updateDraft(id,{quantity:e.target.value})}/>
@@ -355,12 +349,13 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
       </div>
     </div>
 
+    {!ordersReady&&<p role="alert" className="mt-3 rounded-lg border border-amber-500/40 p-3 text-xs text-amber-300">{en?'Open orders are refreshing or unavailable; trading review blocked.':'挂单快照刷新中或读取失败；交易审核暂时禁用。'}</p>}
     <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-slate-700/70 bg-slate-950/40 px-3 py-3 text-sm">
       <label className="flex items-center gap-2 text-slate-300">
         <span className="whitespace-nowrap">{en?'Default APR':'默认目标 APR'}</span>
         <input aria-label={en?'Default APR':'默认目标 APR'} type="number" min="0.1" max="10000" step="0.1"
           className="w-20 rounded-lg border border-slate-600 bg-slate-950 px-2 py-1.5 text-slate-100"
-          value={globalApr} disabled={busy} onChange={e=>{setGlobalApr(e.target.value);setQuotes({});}}/>
+          value={12} disabled title={en?'Edit the per-market APR below':'请在下方逐仓设置目标 APR'}/>
         <span className="text-xs text-slate-500">%</span>
       </label>
       <div className="h-6 w-px bg-slate-700 max-sm:hidden"/>
@@ -381,7 +376,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
         className="rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-50">
         {quoteBusy?(en?'Loading quotes…':'刷新中…'):(en?'Preview selected prices':'预览所选报价')}</button>
       <span className="flex-1"/>
-      <button type="button" disabled={busy||uncertain||!selected.length} onClick={startBatch}
+      <button type="button" disabled={busy||!ordersReady||uncertain||pending||!selected.length} onClick={startBatch}
         className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow shadow-indigo-500/20 hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-40">
         {en?'Review selected one by one':'逐笔审核已选'} <span aria-hidden="true">→</span>
       </button>
@@ -404,13 +399,13 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
             <td className="py-3">{d.apr}</td><td className="py-3 tabular-nums">{showShares(p.size)}</td>
             <td className="py-3 tabular-nums">{d.heldSell>0?<span className="text-amber-300">{showShares(d.heldSell)}</span>:'—'}</td>
             <td className="py-3">{d.shares}</td>
-            <td className="py-3 tabular-nums">{d.preview===null?'—':d.preview.toFixed(3)}</td>
+            <td className="py-3 tabular-nums">{d.preview===null?'—':String(d.preview)}</td>
             <td className="py-3 text-amber-200">
               {sellQueueStatusLabel({selected:selected.includes(p.asset),record,activePreview:active===p.asset?review:null,language})}
               {record?.orderId&&<p title={record.orderId} className="max-w-[100px] truncate text-[10px] text-slate-400">{record.orderId}</p>}
               {record?.reason&&<p title={record.reason} className="max-w-[120px] truncate text-[10px] text-rose-300">{record.reason}</p>}
             </td>
-            <td className="py-3 pr-1 text-right"><button type="button" disabled={busy||uncertain||pending} onClick={()=>startSingle(p.asset)}
+            <td className="py-3 pr-1 text-right"><button type="button" disabled={busy||!ordersReady||uncertain||pending} onClick={()=>startSingle(p.asset)}
               className="rounded-lg border border-cyan-500/40 px-2.5 py-1.5 font-medium text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-40">
               {d.heldSell>0?(en?'Add review':'追加审核'):(en?'Review':'审核')}</button></td>
           </tr>;
@@ -426,7 +421,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
             checked={selected.includes(p.asset)} disabled={busy} onChange={e=>setSelected(old=>e.target.checked?[...new Set([...old,p.asset])]:old.filter(id=>id!==p.asset))}/>
           <div className="min-w-0 flex-1"><p className="text-sm font-semibold leading-5 text-slate-100">{p.title}</p>
             <p className="mt-1 text-xs text-indigo-300">{p.outcome}</p></div>
-          <button type="button" disabled={busy||uncertain||pending} onClick={()=>startSingle(p.asset)}
+          <button type="button" disabled={busy||!ordersReady||uncertain||pending} onClick={()=>startSingle(p.asset)}
             className="shrink-0 rounded-lg bg-indigo-500/20 px-3 py-2 text-xs font-semibold text-indigo-200 disabled:opacity-40">{en?'Review':'审核'}</button>
         </div>
         <div className="mt-3 grid grid-cols-2 gap-3">
@@ -552,7 +547,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
           <div className="flex flex-wrap gap-2">
             <button type="button" disabled={busy} onClick={leaveReview}
               className="rounded-lg border border-slate-600 px-4 py-2.5 text-sm text-slate-200 disabled:opacity-50">{en?'Back to list':'返回列表'}</button>
-            <button type="button" disabled={busy||pending||uncertain} onClick={()=>void prepareFor(active)}
+            <button type="button" disabled={busy||!ordersReady||pending||uncertain} onClick={()=>void prepareFor(active)}
               className="rounded-lg border border-indigo-500/50 px-4 py-2.5 text-sm font-medium text-indigo-200 disabled:opacity-40">
               {en?'Recheck':'重新核验'}</button>
             <button type="button" disabled={!signReady} onClick={()=>void execute()}
