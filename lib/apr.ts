@@ -107,3 +107,9 @@ export function needsAttention(result: AprResult, thresholdPercent: number): boo
 export function isLosing(result: AprResult, priceThreshold: number): boolean {
   return result.curPrice < priceThreshold;
 }
+
+/** Mark's simple remaining APR at a share price, as percent; no fees. */
+export function simpleRemainingAprPercent(price:number,days:number):number|null {
+ if(!Number.isFinite(price)||price<=0||price>=1||!Number.isFinite(days)||days<=0)return null;
+ return (1/price-1)*365/days*100;
+}

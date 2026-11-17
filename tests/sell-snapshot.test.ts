@@ -61,3 +61,28 @@ test('legacy CTF SELL needs matching CLOB allowance and Safe onchain approval',a
   assert.equal(unknown.checks.authorizationStatus,'unknown');
  }finally{globalThis.fetch=original;}
 });
+
+test('onchain ERC-1155 balance must agree with gross CLOB balance before SELL approval',async()=>{
+ const original=globalThis.fetch,asset='71144742975537017512904527392353107518472601816123355990566837993879064231255';
+ const conditionId='0x'+'b'.repeat(64),exchange='0xE111180000d2663C0091e4f400237545B87B996B';
+ globalThis.fetch=async request=>{
+  const u=String(request);
+  if(u.includes('/data/orders'))return Response.json({data:[],next_cursor:'LTE='});
+  if(u.includes('/balance-allowance'))return Response.json({balance:'100000000',allowances:{[exchange]:'100000000'}});
+  if(u.includes('/api/positions'))return Response.json({fetchedAt:new Date().toISOString(),positions:[{asset,proxyWallet:funder,conditionId,size:100,redeemable:false,endDate:'2099-01-01'}]});
+  if(u.includes('/markets/'))return Response.json({condition_id:conditionId,accepting_orders:true,closed:false,active:true,neg_risk:false,tokens:[{token_id:asset,outcome:'No'}]});
+  if(u.includes('/book?'))return Response.json({asset_id:asset,bids:[{price:'0.8',size:'1'}],asks:[{price:'0.9',size:'1'}],tick_size:'0.01',min_order_size:'1'});
+  throw Error('unexpected '+u);
+ };
+ const request={...input,asset,quantity:11,readOnchainApproval:async()=>true};
+ try{
+  const ok=await loadSellReview({...request,readOnchainBalance:async()=>100000000n});
+  assert.equal(ok.checks.tokenBalanceStatus,'verified');
+  assert.equal(ok.result.status,'review');
+  const mismatch=await loadSellReview({...request,readOnchainBalance:async()=>110000000n});
+  assert.equal(mismatch.checks.tokenBalanceStatus,'mismatch');
+  assert.equal(mismatch.result.status,'blocked');
+  const error=await loadSellReview({...request,readOnchainBalance:async()=>{throw Error('rpc unavailable')}});
+  assert.equal(error.result.status,'blocked');
+ }finally{globalThis.fetch=original;}
+});

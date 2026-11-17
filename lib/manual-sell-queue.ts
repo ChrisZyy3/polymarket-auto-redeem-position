@@ -110,3 +110,11 @@ export function persistedAcceptedOrder(raw:string|null,address:string,funder:str
  if(!attempt||!orderId)return null;
  return JSON.stringify({...attempt,orderId});
 }
+
+/** Open-order absence never establishes a fill/cancel; local state needs reconciling. */
+export function displayedSellQueueRecord(record:QueueRecord|undefined,asset:string,orders:ClobOrder[],snapshotReady:boolean):QueueRecord|undefined{
+ if(!record||!['open','partially_filled'].includes(record.status))return record;
+ const item=record.orderId&&orders.find(o=>o.id.toLowerCase()===record.orderId?.toLowerCase()&&o.asset_id===asset&&o.side==='SELL'&&o.status.toUpperCase()==='LIVE');
+ if(!snapshotReady||!item)return {...record,status:'uncertain',reason:snapshotReady?'order_missing_from_open_snapshot':'snapshot_not_verified'};
+ return {...record,status:Number(item.size_matched)>0?'partially_filled':'open',reason:undefined};
+}

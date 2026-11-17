@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { settlementConfirmedForDate, nextAfterVerifiedSell } from '../lib/sell-workbench-flow';
+import { settlementConfirmedForDate, nextAfterVerifiedSell, sellReviewConfigKey, sellQuantityForPercent, sellLimitSummary } from '../lib/sell-workbench-flow';
 import type { QueueRecord } from '../lib/manual-sell-queue';
 
 test('settlement confirmation belongs to the exact market date, never a missing or changed estimate',()=>{
@@ -26,4 +26,21 @@ test('batch skips all already submitted and ambiguous orders rather than replayi
  };
  assert.equal(nextAfterVerifiedSell(['a','b','c','d'],records,'a',true),null);
  assert.equal(nextAfterVerifiedSell(['a','b','c','d','e'],records,'a',true),'e');
+});
+
+test('review input fingerprint changes with APR, shares, coverage, or date',()=>{
+ const base={asset:'123',apr:'12',quantity:'11',coverage:true,settlementConfirmed:true,endDate:'2026-12-31'};
+ for(const diff of [{apr:'10'},{quantity:'12'},{coverage:false},{settlementConfirmed:false},{endDate:'2027-01-01'}])
+  assert.notEqual(sellReviewConfigKey(base),sellReviewConfigKey({...base,...diff}));
+});
+test('quick shares never exceed indicative gross available shares',()=>{
+ assert.equal(sellQuantityForPercent(11,25),'2.75');
+ assert.equal(sellQuantityForPercent(11,50),'5.5');
+ assert.equal(sellQuantityForPercent(11,100),'11');
+ assert.equal(sellQuantityForPercent(null,100),'');
+});
+test('limit APR and gross proceeds share 365-day dashboard convention',()=>{
+ const r=sellLimitSummary(.986,11,.9,'2026-12-31',new Date('2026-11-17T00:00:00Z'));
+ assert.equal(r.grossProceeds,10.846);
+ assert.ok(r.limitAprPercent!==null&&r.limitAprPercent>0);
 });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { indicativeUnreservedShares, nextReviewAsset, sameSellIntent, exchangeAllowanceSufficient, isCurrentPendingAttempt, matchingLiveSellOrder, matchingPendingOpenSell, persistedAcceptedOrder } from '../lib/manual-sell-queue';
+import { indicativeUnreservedShares, nextReviewAsset, sameSellIntent, exchangeAllowanceSufficient, isCurrentPendingAttempt, matchingLiveSellOrder, matchingPendingOpenSell, persistedAcceptedOrder, displayedSellQueueRecord } from '../lib/manual-sell-queue';
 import { verifiedOrderLifecycle } from '../lib/order-review-status';
 import type { ClobOrder } from '../lib/browser-clob';
 const order=(id:string, asset:string,original:string,matched:string):ClobOrder=>({id,asset_id:asset,maker_address:'0x'+'1'.repeat(40),side:'SELL',status:'LIVE',price:'0.9',original_size:original,size_matched:matched});
@@ -73,4 +73,12 @@ test('pending order id is written after accept, verified on reload, and scoped t
  assert.equal(matchingPendingOpenSell(acknowledged,address,'0x'+'4'.repeat(40),[live]),null);
  assert.equal(matchingPendingOpenSell(acknowledged,address,maker,[]),null);
  assert.equal(persistedAcceptedOrder(null,address,maker,id),null);
+});
+
+test('local open status becomes unknown if authenticated open-order read lacks its ID',()=>{
+ const record={status:'open' as const,orderId:'o1',updatedAt:1},asset='123';
+ const order:ClobOrder={id:'o1',asset_id:asset,maker_address:'0x'+'2'.repeat(40),side:'SELL',status:'LIVE',price:'.99',original_size:'11',size_matched:'2'};
+ assert.equal(displayedSellQueueRecord(record,asset,[order],true)?.status,'partially_filled');
+ assert.equal(displayedSellQueueRecord(record,asset,[],true)?.status,'uncertain');
+ assert.equal(displayedSellQueueRecord(record,asset,[order],false)?.status,'uncertain');
 });

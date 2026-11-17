@@ -13,7 +13,7 @@ export function sellQueueStatusLabel({selected,record,activePreview,language}:{s
  if(!selected)return en?'Not selected':'未选择';
  if(state==='blocked')return en?'Blocked':'审核未通过';
  if(state==='signing')return en?'Signing':'待钱包签名';
- if(activePreview?.result.status==='review')return activePreview.checks.authorizationVerified&&activePreview.checks.marketStatus==='accepting'?(en?'Ready to sign':'待签名'):(en?'Authorization check':'待授权核实');
+ if(activePreview?.result.status==='review')return activePreview.checks.authorizationVerified&&activePreview.checks.tokenBalanceStatus==='verified'&&activePreview.checks.marketStatus==='accepting'?(en?'Ready to sign':'待签名'):(en?'Authorization check':'待授权核实');
  if(state==='reviewing')return en?'Reviewing':'审核中';
  return en?'To review':'待审核';
 }
