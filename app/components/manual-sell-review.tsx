@@ -59,7 +59,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
     else {
      status(asset,'uncertain','Accepted, awaiting authoritative order reconciliation',response.orderId);
      setUncertain(true);setPending(true);
-     try{const latest=await fetchBrowserOpenOrders(credentials,address,funder);const found=latest.some(o=>o.id===response.orderId);if(g===generation.current){if(found)status(asset,'open',undefined,response.orderId);setMessage(found?(en?`Accepted and visible in open orders: ${response.orderId}`:`订单已受理，并在未成交挂单中查到：${response.orderId}`):(en?`Accepted: ${response.orderId}; not found in open orders. Check order status before retrying.`:`订单已受理：${response.orderId}；未在未成交挂单中查到，请核对状态后再操作。`));}
+     try{const latest=await fetchBrowserOpenOrders(credentials,address,funder);const found=latest.some(o=>o.id===response.orderId);if(g===generation.current){if(found)status(asset,'open',undefined,response.orderId);setMessage(found?(en?`Accepted and visible in open orders: ${response.orderId}`:`订单已受理，并在未成交挂单中查到：${response.orderId}`):(en?`Accepted: ${response.orderId}; not found in open orders. Check order status before retrying.`:`订单已受理：${response.orderId}；未在未成交挂单中查到，请核对状态后再操作。`));}}
      catch{if(g===generation.current)setMessage(en?`Accepted: ${response.orderId}; order refresh failed. Check status before retrying.`:`订单已受理：${response.orderId}；挂单回读失败，请先核对订单状态。`);}
     }
    }
