@@ -270,8 +270,10 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
         const reason=error instanceof Error?error.message:'unknown';
         if(posting){setPending(true);setUncertain(true);status(id,'uncertain',reason);}
         else status(id,'blocked',reason);
-        setMessage(posting?(en?'Submission uncertain; do not retry until reconciled.':'提交结果不确定，请先核对官网记录，切勿重试。')
-          :(en?'Signing or recheck failed; no submission. ':'签名或复核失败，未提交：')+reason);
+        const mismatch=reason.startsWith('signed_order_differs:');
+        const detail=mismatch?(en?'Signed fields did not match the reviewed order; not posted. Check fields: ':'签名字段与审核单不一致，订单尚未提交。请核对字段：')+reason.slice('signed_order_differs:'.length)
+          :(en?'Signing or recheck failed; no submission. ':'签名或复核失败，未提交：')+reason;
+        setMessage(posting?(en?'Submission uncertain; do not retry until reconciled.':'提交结果不确定，请先核对官网记录，切勿重试。'):detail);
       }
     }finally{
       lock.current=false;
@@ -346,12 +348,18 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
               <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3"><p className="text-xs text-slate-400">{en?'Target APR':'目标剩余 APR'}</p>
                 <p className="mt-1 text-xl font-semibold text-slate-100">{activeApr}%</p></div>
               <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3"><p className="text-xs text-slate-400">{en?'Proposed shares':'拟卖份额'}</p>
-                <p className="mt-1 text-xl font-semibold text-slate-100">{showShares(Number(activeQuantity))}</p></div>
+                <p className="mt-1 text-xl font-semibold text-slate-100">{review?.result.status==='review'?showShares(review.result.quantity):showShares(Number(activeQuantity))}</p></div>
               <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3"><p className="text-xs text-slate-400">{en?'SELL limit':'建议 SELL 限价'}</p>
                 <p className="mt-1 text-xl font-semibold text-cyan-300">{review?.result.status==='review'?review.result.price:'—'}</p></div>
               <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3"><p className="text-xs text-slate-400">{en?'Open SELL shares':'已有 SELL'}</p>
                 <p className="mt-1 text-xl font-semibold text-amber-200">{showShares(observedSellShares(orders,active))}</p></div>
             </div>
+            {review?.result.status==='review'&&review.result.quantity!==Number(activeQuantity)&&
+              <p role="status" className="mt-3 rounded-lg border border-amber-500/40 bg-amber-950/20 p-3 text-xs leading-5 text-amber-200">
+                {en?'Polymarket SDK accepts 0.01-share steps: requested ':'Polymarket SDK 按 0.01 份向下取整：原拟卖 '}
+                {showShares(Number(activeQuantity))} → {showShares(review.result.quantity)}
+                {en?'. The small remainder stays in your holdings; only the displayed rounded amount will be signed.':'。剩余碎份保留在持仓中；仅签名当前展示的实际订单份额。'}
+              </p>}
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
               <span>{en?'Quick quantity':'快捷数量（模拟可用份额）'}</span>
               <div className="flex gap-1">{([25,50,100] as const).map(percent=><button type="button" key={percent} disabled={busy}
