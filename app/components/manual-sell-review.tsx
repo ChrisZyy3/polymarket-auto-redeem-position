@@ -13,7 +13,7 @@ import {
 import { loadSellReview } from '@/lib/sell-snapshot';
 import { settlementConfirmedForDate, nextAfterVerifiedSell, sellReviewConfigKey, sellQuantityForPercent, sellLimitSummary } from '@/lib/sell-workbench-flow';
 import type { EnrichedPosition } from '@/lib/types';
-import { sellSubmitProgress, shouldAutoRecheckSell, shouldShowSellReceipt, sellBlockReasonText, type SellSubmitReceipt, type SellSubmitStage } from '@/lib/sell-submit-feedback';
+import { sellSubmitProgress, shouldAutoRecheckSell, sellBlockReasonText, type SellSubmitReceipt, type SellSubmitStage } from '@/lib/sell-submit-feedback';
 
 type Snapshot = Awaited<ReturnType<typeof loadSellReview>>;
 export type SellReviewRequest={serial:number;mode:'single'|'batch';asset?:string}|null;
@@ -475,7 +475,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
             })():<div><p className="font-semibold">{en?'Loading live SELL preflight…':'正在加载实时卖单审核…'}</p>
               <p className="mt-1 text-xs text-indigo-200/80">{en?'Read-only; wallet signature has not started.':'正在只读核对，尚未请求交易签名。'}</p></div>}
           </div>}
-          {shouldShowSellReceipt(lastSubmission,busy)&&<SellSubmissionBanner receipt={lastSubmission} language={language}
+          {lastSubmission&&!busy&&<SellSubmissionBanner receipt={lastSubmission} language={language}
             onOpenOrders={()=>{leaveReview();onOpenOrders(lastSubmission.asset);}} onDismiss={()=>setLastSubmission(null)}/>}
           {message&&<p role="status" className="break-all rounded-lg border border-amber-600/30 bg-amber-950/20 p-3 text-xs text-amber-200">{message}</p>}
           {review&&<p className="text-xs text-slate-400">{en?'Review expires in':'审核剩余'} {seconds}s · {en?'Checked again after signing':'签名后重新校验全部条件'}</p>}
