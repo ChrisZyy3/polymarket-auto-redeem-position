@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from 'react';
 import { useWalletClient } from 'wagmi';
-import type { ClobCredentials } from '@/lib/browser-clob';
+import { fetchBrowserOpenOrders, type ClobCredentials } from '@/lib/browser-clob';
 import { loadSellReview } from '@/lib/sell-snapshot';
 import type { EnrichedPosition } from '@/lib/types';
 
@@ -30,7 +30,14 @@ export function ManualSellReview({address,funder,credentials,positions,language}
    if(g!==generation.current||final.result.status!=='review'||final.result.price!==review.result.price||final.result.quantity!==review.result.quantity||final.position.endDate!==review.position.endDate||Date.now()-review.asOf>60000)throw Error('review_changed');
    posting=true;
    const response=await client.post(signed);
-   if(g===generation.current){setReview(null);setMessage(response.ok?(en?`Accepted: ${response.orderId}. Refresh open orders to confirm.`:`订单已受理：${response.orderId}。请刷新挂单并核对。`):(en?'Order rejected; check open orders before retrying.':'订单被拒绝，请先核对挂单再重试。'));}
+   if(g===generation.current){
+    setReview(null);
+    if(!response.ok)setMessage(en?'Order rejected; check open orders before retrying.':'订单被拒绝，请先核对挂单再重试。');
+    else {
+     try{const latest=await fetchBrowserOpenOrders(credentials,address,funder);const found=latest.some(o=>o.id===response.orderId);if(g===generation.current)setMessage(found?(en?`Accepted and visible in open orders: ${response.orderId}`:`订单已受理，并在未成交挂单中查到：${response.orderId}`):(en?`Accepted: ${response.orderId}; not found in open orders. Check order status before retrying.`:`订单已受理：${response.orderId}；未在未成交挂单中查到，请核对状态后再操作。`));}
+     catch{if(g===generation.current)setMessage(en?`Accepted: ${response.orderId}; order refresh failed. Check status before retrying.`:`订单已受理：${response.orderId}；挂单回读失败，请先核对订单状态。`);}
+    }
+   }
   }catch(e){if(g===generation.current){setReview(null);setMessage(posting?(en?'Submission outcome unknown; check open orders before any retry.':'提交结果不确定，请先核对挂单，切勿直接重试。'):(en?'Signing or validation failed; no order was submitted.':'签名或复核未通过，未提交订单。'));}}
   finally{lock.current=false;if(g===generation.current)setBusy(false);}
  }
