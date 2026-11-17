@@ -1181,7 +1181,11 @@ export default function Home() {
 
       <PortfolioHistoryChart snapshots={portfolioHistory?.snapshots ?? []} language={language} />
 
-      <PortfolioSellSummary key={data?.positions.map(p => `${p.proxyWallet}:${p.asset}`).join("|") ?? "empty"} positions={positions} language={language} />
+      <PortfolioSellSummary
+        key={data?.positions.map(p=>[p.proxyWallet,p.asset].join(":")).join("|")??"empty"}
+        positions={positions} language={language} quotesByAsset={sharedSellQuotes}
+        onRefreshQuote={position=>loadPositionQuote(position,holdAprThreshold,true)}
+      />
 
       <BrowserClobPanel profileAddress={profileAddress} queryAddress={address} positions={positions} language={language}
         orderedAssets={sortedSellAssets} targetAprInputs={targetAprInputs}
