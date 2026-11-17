@@ -21,3 +21,18 @@ test('fresh review uses live outstanding orders and balances; failures block',as
   bookAsset='124';await assert.rejects(()=>loadSellReview(input),/invalid_snapshot/);
  }finally{globalThis.fetch=original;}
 });
+
+test('market fetch failures preserve an unverified status and block live signing',async()=>{
+ const original=globalThis.fetch;
+ globalThis.fetch=async (request)=>{
+  const u=String(request);
+  if(u.includes('/data/orders'))return Response.json({data:[],next_cursor:'LTE='});
+  if(u.includes('/balance-allowance'))return Response.json({balance:'50000000',allowances:{}});
+  if(u.includes('/api/positions'))return Response.json({fetchedAt:new Date().toISOString(),positions:[{asset:'123',proxyWallet:funder,conditionId:'0x'+'a'.repeat(64),size:50,redeemable:false,endDate:'2099-01-01'}]});
+  if(u.includes('/markets/'))throw Error('network_interrupted');
+  if(u.includes('/book?'))return Response.json({asset_id:'123',bids:[{price:'0.8',size:'1'}],asks:[{price:'0.9',size:'1'}],tick_size:'0.01',min_order_size:'1'});
+  throw Error('unexpected');
+ };
+ try{const review=await loadSellReview({...input,quantity:5});assert.equal(review.checks.marketStatus,'unknown');assert.equal(review.checks.authorizationVerified,false);}
+ finally{globalThis.fetch=original;}
+});
