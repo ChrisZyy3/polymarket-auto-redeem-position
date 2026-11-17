@@ -36,3 +36,28 @@ test('market fetch failures preserve an unverified status and block live signing
  try{const review=await loadSellReview({...input,quantity:5});assert.equal(review.checks.marketStatus,'unknown');assert.equal(review.checks.authorizationVerified,false);}
  finally{globalThis.fetch=original;}
 });
+
+test('legacy CTF SELL needs matching CLOB allowance and Safe onchain approval',async()=>{
+ const original=globalThis.fetch;
+ const longAsset='71144742975537017512904527392353107518472601816123355990566837993879064231255';
+ const conditionId='0x'+'b'.repeat(64),operator='0xE111180000d2663C0091e4f400237545B87B996B';
+ globalThis.fetch=async request=>{
+  const u=String(request);
+  if(u.includes('/data/orders'))return Response.json({data:[],next_cursor:'LTE='});
+  if(u.includes('/balance-allowance'))return Response.json({balance:'100000000',allowances:{[operator]:'100000000'}});
+  if(u.includes('/api/positions'))return Response.json({fetchedAt:new Date().toISOString(),positions:[{asset:longAsset,proxyWallet:funder,conditionId,size:100,redeemable:false,endDate:'2099-01-01'}]});
+  if(u.includes('/markets/'))return Response.json({condition_id:conditionId,accepting_orders:true,closed:false,active:true,neg_risk:false,tokens:[{token_id:longAsset,outcome:'No'}]});
+  if(u.includes('/book?'))return Response.json({asset_id:longAsset,bids:[{price:'0.8',size:'1'}],asks:[{price:'0.9',size:'1'}],tick_size:'0.01',min_order_size:'1'});
+  throw Error('unexpected '+u);
+ };
+ const req={...input,asset:longAsset,quantity:11};
+ try{
+  const ok=await loadSellReview({...req,readOnchainApproval:async(token,op,safe)=>{assert.equal(op,operator);assert.equal(safe,funder);return true;}});
+  assert.equal(ok.checks.authorizationVerified,true);
+  assert.equal(ok.checks.authorizationStatus,'approved');
+  const missing=await loadSellReview({...req,readOnchainApproval:async()=>false});
+  assert.equal(missing.checks.authorizationStatus,'missing');
+  const unknown=await loadSellReview({...req,readOnchainApproval:async()=>{throw Error('RPC disconnected')}});
+  assert.equal(unknown.checks.authorizationStatus,'unknown');
+ }finally{globalThis.fetch=original;}
+});

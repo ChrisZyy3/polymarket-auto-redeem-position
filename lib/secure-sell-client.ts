@@ -3,12 +3,13 @@ import { signerFrom } from '@polymarket/client/viem';
 import type { WalletClient } from 'viem';
 import { validateSignedSell } from './validate-signed-sell';
 import type { ClobCredentials } from './browser-clob';
+import { isExpectedExchangeDomain } from './clob-sell-approval';
 
 /** Never create credentials or wallet, send chain transactions, or auto-approve allowances. */
-export async function createSafeSellClient(wallet:WalletClient, funder:string, credentials:ClobCredentials) {
+export async function createSafeSellClient(wallet:WalletClient, funder:string, credentials:ClobCredentials,expectedExchange:string) {
  const base=signerFrom(wallet);
  let permitOrderSignature=false, posted=false;
- const signer={...base,signTypedData:async (payload:Parameters<typeof base.signTypedData>[0])=>{if(!permitOrderSignature || payload.primaryType!=='Order')throw Error('unexpected_signature');return base.signTypedData(payload);},signMessage:async()=>{throw Error('unexpected_signature');},sendTransaction:async()=>{throw Error('transactions_disabled');}};
+ const signer={...base,signTypedData:async (payload:Parameters<typeof base.signTypedData>[0])=>{if(!permitOrderSignature || payload.primaryType!=='Order')throw Error('unexpected_signature');if(!isExpectedExchangeDomain(payload.domain?.verifyingContract,expectedExchange))throw Error('signing_exchange_changed');return base.signTypedData(payload);},signMessage:async()=>{throw Error('unexpected_signature');},sendTransaction:async()=>{throw Error('transactions_disabled');}};
  const restrictedFetch:typeof fetch=async (input,init)=>{
   const request=new Request(input,init), url=new URL(request.url);
   if(request.method!=='GET' && !(request.method==='POST' && url.origin==='https://clob.polymarket.com' && url.pathname==='/order')) throw Error('request_not_allowed');

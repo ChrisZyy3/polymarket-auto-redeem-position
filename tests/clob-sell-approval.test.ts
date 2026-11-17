@@ -18,3 +18,10 @@ test('requires onchain true and matching CLOB operator with sufficient raw share
  assert.equal(classifySellApproval({operator:CTF_NEG_RISK_EXCHANGE,allowances,requestedShares:21,onchain:true}),'unknown');
  assert.equal(classifySellApproval({operator:CTF_NEG_RISK_EXCHANGE,allowances,requestedShares:11,onchain:null}),'unknown');
 });
+
+test('signer EIP-712 exchange domain cannot drift from the approved operator',async()=>{
+ const {isExpectedExchangeDomain}=await import('../lib/clob-sell-approval');
+ assert.equal(isExpectedExchangeDomain(CTF_NEG_RISK_EXCHANGE,CTF_NEG_RISK_EXCHANGE),true);
+ assert.equal(isExpectedExchangeDomain(CTF_STANDARD_EXCHANGE,CTF_NEG_RISK_EXCHANGE),false);
+ assert.equal(isExpectedExchangeDomain(undefined,CTF_STANDARD_EXCHANGE),false);
+});

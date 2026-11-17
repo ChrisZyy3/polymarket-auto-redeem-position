@@ -41,3 +41,8 @@ export function classifySellApproval(input:{operator:string|undefined;allowances
  const required=BigInt(integer)*1000000n+BigInt(fraction.padEnd(6,'0'));
  return BigInt(record[1])>=required?'approved':'unknown'; // discrepancy may be stale CLOB indexing
 }
+
+/** EIP-712 verifyingContract must exactly match the checked operator. */
+export function isExpectedExchangeDomain(actual:unknown,expected:string):boolean{
+ return validAddress(actual)&&validAddress(expected)&&actual.toLowerCase()===expected.toLowerCase();
+}
