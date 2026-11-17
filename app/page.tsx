@@ -32,12 +32,13 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { MarketTitle } from "@/app/components/market-title";
-import { AutoSellPlannerPanel } from "@/app/components/auto-sell-planner-panel";
 import { useConnection } from "wagmi";
 import { BrowserClobPanel } from "@/app/components/browser-clob-panel";
+import { SellPlanRow } from "@/app/components/sell-plan-row";
+import type { ClobOrder } from "@/lib/browser-clob";
+import type { SellReviewRequest } from "@/app/components/manual-sell-review";
 import { WalletConnectPanel } from "@/app/components/wallet-connect-panel";
 import { CardToggle } from "@/app/components/card-toggle";
-import { PortfolioSellSummary } from "@/app/components/portfolio-sell-summary";
 import { PortfolioHistoryChart } from "@/app/components/portfolio-history-chart";
 import { calculateDailyPriceChange, type DailyPositionPoint } from "@/lib/position-change";
 import type { PortfolioHistoryMetrics, PortfolioSnapshot } from "@/lib/portfolio-history";
@@ -232,6 +233,13 @@ export default function Home() {
   const [holdAprThreshold, setHoldAprThreshold] = useState(DEFAULT_HOLD_APR_THRESHOLD);
   const [language, setLanguage] = useState<Language>("zh");
   const [positionsExpanded, setPositionsExpanded] = useState(true);
+  const [tradeMode,setTradeMode]=useState<'yield'|'sell'>('yield');
+  const [sellSelected,setSellSelected]=useState<string[]>([]);
+  const [sellQuantities,setSellQuantities]=useState<Record<string,string>>({});
+  const [clobSnapshot,setClobSnapshot]=useState<{orders:ClobOrder[]|null;ready:boolean}>({orders:null,ready:false});
+  const [reviewRequest,setReviewRequest]=useState<SellReviewRequest>(null);
+  const [orderCenterRequest,setOrderCenterRequest]=useState<{serial:number;asset?:string}|null>(null);
+  const workspaceSerial=useRef(0);
   const [expandedPositionKey, setExpandedPositionKey] = useState<string | null>(null);
   const [quoteStates, setQuoteStates] = useState<Record<string, QuoteState>>({});
   const [targetAprInputs, setTargetAprInputs] = useState<Record<string, string>>({});
@@ -239,6 +247,16 @@ export default function Home() {
   const quoteByAssetVersion = useRef<Record<string,number>>({});
   const queryRequestVersion = useRef(0);
   const isEnglish = language === "en";
+  useEffect(()=>{
+    setSellSelected([]);setSellQuantities({});
+    setClobSnapshot({orders:null,ready:false});setReviewRequest(null);setOrderCenterRequest(null);
+  },[address,profileAddress,signerAddress]);
+  function beginReview(mode:'single'|'batch',asset?:string){
+    setReviewRequest({serial:++workspaceSerial.current,mode,asset});
+  }
+  function openOrderCenter(asset?:string){
+    setOrderCenterRequest({serial:++workspaceSerial.current,asset});
+  }
 
   // Initialize state configurations from localstorage and URL params on mount
   // 组件挂载时从浏览器 LocalStorage 和 URL 参数中初始化用户参数
@@ -1181,17 +1199,6 @@ export default function Home() {
 
       <PortfolioHistoryChart snapshots={portfolioHistory?.snapshots ?? []} language={language} />
 
-      <PortfolioSellSummary
-        key={data?.positions.map(p=>[p.proxyWallet,p.asset].join(":")).join("|")??"empty"}
-        positions={positions} language={language} quotesByAsset={sharedSellQuotes}
-        onRefreshQuote={position=>loadPositionQuote(position,holdAprThreshold,true)}
-      />
-
-      <BrowserClobPanel profileAddress={profileAddress} queryAddress={address} positions={positions} language={language}
-        orderedAssets={sortedSellAssets} targetAprInputs={targetAprInputs}
-        onTargetAprChange={handleTargetAprChange} sharedQuotes={sharedSellQuotes}
-        onRefreshQuote={p=>loadPositionQuote(p,holdAprThreshold,true)}/>
-
       {/* Positions detailed tables container / 仓位细分数据列表 */}
       <div className="relative mt-8 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/45 shadow-[0_14px_36px_rgba(0,0,0,0.14)]">
         <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent"></div>
@@ -1200,12 +1207,12 @@ export default function Home() {
           <div className="min-w-0">
             <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-100">
               <Activity className="h-5 w-5 text-cyan-400" aria-hidden="true" />
-              {isEnglish ? "Positions & Yield" : "持仓收益与市场报价"}
+              {isEnglish ? "Positions & Trading" : "仓位与交易"}
             </h2>
             <p className="mt-1 text-xs leading-5 text-slate-400">
               {isEnglish
-                ? "Sort by yield or position value. Expand a market for live bid/ask APR."
-                : "可按收益或市值排序，展开市场查看实时买卖盘口 APR。"}
+                ? "One position table. Switch between performance and SELL planning; signing always requires a fresh review."
+                : "同一张仓位表可切换收益与卖出规划；真实下单必须逐笔重新审核。"}
             </p>
             {data && (
               <p className="mt-1 text-[11px] leading-5 text-slate-500">
@@ -1223,6 +1230,12 @@ export default function Home() {
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs">
+             <div role="tablist" aria-label={isEnglish?"Position table mode":"仓位表模式"} className="flex rounded-lg border border-slate-700 bg-slate-950/80 p-1">
+               <button type="button" role="tab" aria-selected={tradeMode==='yield'} onClick={()=>{setTradeMode('yield');setPositionsExpanded(true);}}
+                 className={tradeMode==='yield'?"rounded-md bg-cyan-500/20 px-3 py-2 font-semibold text-cyan-200":"rounded-md px-3 py-2 text-slate-400 hover:text-slate-100"}>{isEnglish?"Holdings & yield":"持仓收益"}</button>
+               <button type="button" role="tab" aria-selected={tradeMode==='sell'} onClick={()=>{setTradeMode('sell');setPositionsExpanded(true);}}
+                 className={tradeMode==='sell'?"rounded-md bg-indigo-500/20 px-3 py-2 font-semibold text-indigo-200":"rounded-md px-3 py-2 text-slate-400 hover:text-slate-100"}>{isEnglish?"SELL planning":"卖出规划"}</button>
+             </div>
             <span className="rounded-lg border border-slate-700/70 bg-slate-950/60 px-3 py-1.5 font-medium text-slate-300">
               {isEnglish ? `${positions.length} positions` : `${positions.length} 个仓位`}
             </span>
@@ -1231,10 +1244,30 @@ export default function Home() {
                 {isEnglish ? `${lowAprCount} below APR threshold` : `${lowAprCount} 个低 APR`}
               </span>
             )}
-            <CardToggle expanded={positionsExpanded} onToggle={() => setPositionsExpanded(value => !value)} controls="positions-table-content" label={isEnglish ? "positions and yield" : "持仓收益与市场报价"} language={language} />
+            <CardToggle expanded={positionsExpanded} onToggle={() => setPositionsExpanded(value => !value)} controls="positions-table-content" label={isEnglish ? "positions and trading" : "仓位与交易"} language={language} />
           </div>
         </div>
 
+
+        <BrowserClobPanel profileAddress={profileAddress} queryAddress={address} positions={positions} language={language}
+          activeMode={tradeMode} targetAprInputs={targetAprInputs}
+          selectedAssets={sellSelected} proposedQuantities={sellQuantities}
+          onQuantityChange={(asset,value)=>setSellQuantities(old=>({...old,[asset]:value}))}
+          reviewRequest={reviewRequest} orderCenterRequest={orderCenterRequest}
+          onSnapshotChange={setClobSnapshot}/>
+        {tradeMode==='sell'&&<div className="flex flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-950/30 px-4 py-3 text-xs sm:px-6">
+          <span className="mr-1 text-slate-300">{isEnglish?"Selected":"已选"} <strong>{sellSelected.length}</strong> / {positions.filter(p=>!p.redeemable&&p.size>0).length}</span>
+          <button type="button" onClick={()=>setSellSelected(positions.filter(p=>!p.redeemable&&p.size>0).map(p=>p.asset))}
+            className="rounded border border-slate-700 px-2 py-1.5 text-slate-300 hover:bg-slate-800">{isEnglish?"Select all":"全选"}</button>
+          <button type="button" disabled={!sellSelected.length} onClick={()=>setSellSelected([])}
+            className="rounded border border-slate-700 px-2 py-1.5 text-slate-300 disabled:opacity-40">{isEnglish?"Clear":"清空"}</button>
+          <span className="flex-1"/>
+          <button type="button" onClick={()=>openOrderCenter()}
+            className="rounded border border-slate-600 px-3 py-2 text-slate-200 hover:bg-slate-800">{isEnglish?"Order center":"订单中心"} · {clobSnapshot.orders?.length??"—"}</button>
+          <button type="button" onClick={()=>beginReview('batch')}
+            disabled={!clobSnapshot.ready||!sellSelected.length}
+            className="rounded bg-indigo-500 px-3 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-35">{isEnglish?"Review selected":"逐笔审核已选"}</button>
+        </div>}
         <div
           role="region"
           tabIndex={0}
@@ -1244,6 +1277,7 @@ export default function Home() {
           className="overflow-x-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/70"
         >
           <table className="w-full border-collapse text-left text-sm tabular-nums">
+            {tradeMode==='yield'?<>
             <thead>
               {table.getHeaderGroups().map((headerGroup) => (
                 <tr key={headerGroup.id} className="border-b border-slate-800 bg-slate-950/75 text-xs text-slate-300">
@@ -1318,6 +1352,29 @@ export default function Home() {
                 </tr>
               )}
             </tbody>
+           </>:<>
+            <thead><tr className="border-b border-slate-800 bg-slate-950/75 text-left text-xs text-slate-300">
+              {(isEnglish?["Pick","Market / outcome","Mark APR","Target APR","SELL limit","Holdings / open SELL","Proposed shares","Status","Action"]:
+                ["选","市场 / 方向","Mark APR","目标 APR","SELL 限价","持仓 / 已有 SELL","拟卖份额","状态","操作"])
+                .map(label=><th key={label} scope="col" className="whitespace-nowrap px-2 py-3 font-semibold">{label}</th>)}
+            </tr></thead>
+            <tbody>
+              {table.getRowModel().rows.map(row=>{
+                const p=row.original,cached=sharedSellQuotes[p.asset];
+                const quote=cached&&Date.now()-cached.fetchedAt<5*60*1000?cached.quote:null;
+                return <SellPlanRow key={p.asset} position={p} language={language}
+                  aprInput={targetAprInputs[p.asset]??String(AUTO_SELL_TARGET_MARK_APR_DEFAULT)}
+                  quantityInput={sellQuantities[p.asset]} quote={quote} orders={clobSnapshot.orders} ordersReady={clobSnapshot.ready}
+                  selected={sellSelected.includes(p.asset)}
+                  onAprChange={value=>handleTargetAprChange(p.asset,value)}
+                  onQuantityChange={value=>setSellQuantities(old=>({...old,[p.asset]:value}))}
+                  onSelect={checked=>setSellSelected(old=>checked?[...new Set([...old,p.asset])]:old.filter(id=>id!==p.asset))}
+                  onReview={()=>beginReview('single',p.asset)} onOpenOrders={()=>openOrderCenter(p.asset)}
+                  onRefreshQuote={()=>void loadPositionQuote(p,holdAprThreshold,true)}/>;
+              })}
+              {positions.length===0&&<tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-400">{emptyPositionsMessage}</td></tr>}
+            </tbody>
+           </>}
           </table>
         </div>
       </div>
@@ -1475,14 +1532,6 @@ function PositionQuotePanel({
             )}
           </div>
 
-          {targetAprPercent !== null && (
-            <AutoSellPlannerPanel
-              position={position}
-              quote={quote}
-              targetAprPercent={targetAprPercent}
-              language={language}
-            />
-          )}
 
           {quote.note && (
             <p className="mt-1.5 text-[11px] leading-5 text-amber-300/80">{quote.note}</p>
