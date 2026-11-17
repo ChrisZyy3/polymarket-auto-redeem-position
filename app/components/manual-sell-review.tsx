@@ -5,13 +5,13 @@ import { fetchBrowserOpenOrders, type ClobCredentials, type ClobOrder } from '@/
 import { buildMarkAutoSellPlan } from '@/lib/auto-sell-plan';
 import type { PositionQuote } from '@/lib/position-quote';
 import { observedSellShares } from '@/lib/order-review-status';
-import { indicativeUnreservedShares, nextReviewAsset, pendingAttemptKey, isCurrentPendingAttempt, sameSellIntent, type QueueRecord } from '@/lib/manual-sell-queue';
+import { indicativeUnreservedShares, nextReviewAsset, pendingAttemptKey, isCurrentPendingAttempt, sameSellIntent, matchingLiveSellOrder, matchingPendingOpenSell, persistedAcceptedOrder, type QueueRecord } from '@/lib/manual-sell-queue';
 import { loadSellReview } from '@/lib/sell-snapshot';
 import { sellQueueStatusLabel } from '@/lib/sell-queue-status';
 import type { EnrichedPosition } from '@/lib/types';
 
 type Snapshot=Awaited<ReturnType<typeof loadSellReview>>;
-export function ManualSellReview({address,funder,credentials,positions,orders,language}:{address:string;funder:string;credentials:ClobCredentials;positions:EnrichedPosition[];orders:ClobOrder[];language:'zh'|'en'}) {
+export function ManualSellReview({address,funder,credentials,positions,orders,language,onOrdersRefresh}:{address:string;funder:string;credentials:ClobCredentials;positions:EnrichedPosition[];orders:ClobOrder[];language:'zh'|'en';onOrdersRefresh?:(next:ClobOrder[])=>void}) {
  const en=language==='en', {data:wallet}=useWalletClient(),publicClient=usePublicClient({chainId:137});
  const [asset,setAsset]=useState(''),[apr,setApr]=useState('12'),[quantity,setQuantity]=useState(''),[coverage,setCoverage]=useState(false),[settlement,setSettlement]=useState(false),[review,setReview]=useState<Snapshot|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
  const [selected,setSelected]=useState<string[]>([]), [uncertain,setUncertain]=useState(false);
@@ -20,7 +20,26 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
  const [qtyByAsset,setQtyByAsset]=useState<Record<string,string>>({});
  const [pending,setPending]=useState(false);
  const pendingKey=pendingAttemptKey(address,funder);
- useEffect(()=>{try{const raw=localStorage.getItem(pendingKey);if(isCurrentPendingAttempt(raw,address,funder)){setUncertain(true);setPending(true);}}catch{}},[pendingKey,address,funder]);
+ useEffect(()=>{
+  try{
+   const raw=localStorage.getItem(pendingKey);
+   if(isCurrentPendingAttempt(raw,address,funder)){setUncertain(true);setPending(true);}
+   else {setUncertain(false);setPending(false);}
+  }catch{setUncertain(true);setPending(true);}
+ },[pendingKey,address,funder]);
+ useEffect(()=>{
+  // Only after the user explicitly re-reads a complete authenticated order
+  // snapshot. An old attempt without an orderId cannot be auto-reconciled.
+  try{
+   const raw=localStorage.getItem(pendingKey);
+   const matched=matchingPendingOpenSell(raw,address,funder,orders);
+   if(matched){
+    localStorage.removeItem(pendingKey);
+    setUncertain(false);setPending(false);
+    setQueue(old=>({...old,[matched.asset_id]:{status:Number(matched.size_matched)>0?'partially_filled':'open',orderId:matched.id,updatedAt:Date.now()}}));
+   }
+  }catch{/* fail closed on storage errors */}
+ },[pendingKey,address,funder,orders]);
  const [quotes,setQuotes]=useState<Record<string,PositionQuote|null>>({});
  async function refreshQuotes(){if(lock.current)return;lock.current=true;const g=++generation.current;setBusy(true);setQuotes({});try{for(const id of selected){const p=positions.find(x=>x.asset===id);if(!p)continue;try{const q=new URLSearchParams({tokenId:id,currentPrice:String(p.curPrice),thresholdApr:aprByAsset[id]??apr});if(p.endDate)q.set('endDate',p.endDate);const r=await fetch(`/api/position-quote?${q}`,{cache:'no-store',signal:AbortSignal.timeout(15000)});const body=await r.json();if(g===generation.current)setQuotes(old=>({...old,[id]:r.ok&&body.ok?body.quote:null}));}catch{if(g===generation.current)setQuotes(old=>({...old,[id]:null}));}if(g!==generation.current)break;}}finally{lock.current=false;if(g===generation.current)setBusy(false);}}
  const generation=useRef(0),lock=useRef(false);
@@ -29,7 +48,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
  function choosePosition(id:string){const p=positions.find(x=>x.asset===id);if(!p)return;edit(()=>{setAsset(id);setApr(aprByAsset[id]??apr);setQuantity(qtyByAsset[id]??String(indicativeUnreservedShares(p.size,id,orders)??''));setQueue(old=>({...old,[id]:{status:'reviewing',updatedAt:Date.now()}}));});}
  function status(id:string,state:QueueRecord['status'],reason?:string,orderId?:string){setQueue(old=>({...old,[id]:{status:state,reason,orderId,updatedAt:Date.now()}}));}
  function clearPending(){try{localStorage.removeItem(pendingKey);}catch{}setPending(false);setUncertain(false);}
- function verifiedPending(){clearPending();if(asset)status(asset,'queued');}
+ function verifiedPending(){clearPending();if(asset&&queue[asset]?.status!=='open'&&queue[asset]?.status!=='partially_filled')status(asset,'queued');}
  function selectAll(){setSelected(positions.filter(p=>!p.redeemable).map(p=>p.asset));}
  function setRowApr(id:string,value:string){reset();setAprByAsset(old=>({...old,[id]:value}));if(asset===id)setApr(value);}
  function setRowQty(id:string,value:string){reset();setQtyByAsset(old=>({...old,[id]:value}));if(asset===id)setQuantity(value);}
@@ -66,7 +85,22 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
     else {
      status(asset,'uncertain','Accepted, awaiting authoritative order reconciliation',response.orderId);
      setUncertain(true);setPending(true);
-     try{const latest=await fetchBrowserOpenOrders(credentials,address,funder);const found=latest.some(o=>o.id===response.orderId);if(g===generation.current){if(found)status(asset,'open',undefined,response.orderId);setMessage(found?(en?`Accepted and visible in open orders: ${response.orderId}`:`订单已受理，并在未成交挂单中查到：${response.orderId}`):(en?`Accepted: ${response.orderId}; not found in open orders. Check order status before retrying.`:`订单已受理：${response.orderId}；未在未成交挂单中查到，请核对状态后再操作。`));}}
+     // Once CLOB returns the order ID, save it before any network re-read.
+     try{
+      const updated=persistedAcceptedOrder(localStorage.getItem(pendingKey),address,funder,response.orderId);
+      if(updated)localStorage.setItem(pendingKey,updated);
+     }catch{/* Leave the original pending guard in place. */}
+     try{const latest=await fetchBrowserOpenOrders(credentials,address,funder);
+     const matched=matchingLiveSellOrder(latest,{orderId:response.orderId,asset,funder,price:review.result.price,quantity:review.result.quantity});
+     const found=matched!==null;
+     if(g===generation.current){
+      if(found){
+       // This is the same SELL, not merely another order on the same market.
+       clearPending();
+       status(asset,Number(matched.size_matched)>0?'partially_filled':'open',undefined,response.orderId);
+       onOrdersRefresh?.(latest);
+      }
+      setMessage(found?(en?`Accepted and visible in open orders: ${response.orderId}`:`订单已受理，并在未成交挂单中查到：${response.orderId}`):(en?`Accepted: ${response.orderId}; not found in open orders. Check order status before retrying.`:`订单已受理：${response.orderId}；未在未成交挂单中查到，请核对状态后再操作。`));}}
      catch{if(g===generation.current)setMessage(en?`Accepted: ${response.orderId}; order refresh failed. Check status before retrying.`:`订单已受理：${response.orderId}；挂单回读失败，请先核对订单状态。`);}
     }
    }
@@ -80,5 +114,5 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
  <div className="mt-3 space-y-2 text-xs text-slate-300"><label className="flex gap-2"><input disabled={busy} type="checkbox" checked={coverage} onChange={e=>edit(()=>setCoverage(e.target.checked))}/>{en?'I checked that the displayed open orders match all account orders.':'我已核对官网，当前读取的挂单覆盖此账户全部未成交订单。'}</label><label className="flex gap-2"><input disabled={busy} type="checkbox" checked={settlement} onChange={e=>edit(()=>setSettlement(e.target.checked))}/>{en?'I reviewed the estimated settlement date and accept the pricing assumption.':'我已核对该市场的预计结算日期，理解其可能变化并影响 APR 定价。'}</label></div>
  <button disabled={busy||uncertain||!asset||!coverage||!settlement} onClick={()=>void prepare()} className="mt-3 rounded border border-indigo-400/50 px-3 py-2 text-sm text-indigo-200 disabled:opacity-50">{busy?(en?'Working…':'处理中…'):(en?'Refresh and review':'刷新并生成审核单')}</button>
  {review&&(review.result.status==='blocked'?<p role="alert" className="mt-2 text-xs text-amber-300">{en?'Blocked':'暂不可下单'}: {review.result.reasons.join(', ')}</p>:<div className="mt-3 rounded-lg border border-amber-400/30 bg-slate-950/60 p-3 text-sm text-slate-200"><p className="font-semibold">{review.position.title} · {review.position.outcome}</p><p className="mt-1">SELL {review.result.quantity} @ {review.result.price} · GTD · Post-Only</p><p className="mt-1 text-xs text-slate-400">{en?'Gross proceeds at limit':'限价预计卖出总额'}: ${(review.result.quantity*review.result.price).toFixed(4)} · {en?'Expires':'订单到期'}: {new Date(review.result.expirationSec*1000).toLocaleString()}</p><p className="mt-1 text-xs text-slate-400">{en?'Estimated settlement':'预计结算日'}: {review.position.endDate} · {en?'Outstanding SELL':'已有 SELL'}: {Number(review.comparison.reserved)/1e6} · {en?'Snapshot remainder':'快照差额'}: {Number(review.comparison.remainder)/1e6}</p><p className="mt-1 text-xs text-slate-400">{en?'Bid / Ask':'买一 / 卖一'}: {review.checks.bestBid} / {review.checks.bestAsk} · Tick: {review.checks.tick} · {en?'Minimum shares':'最小份额'}: {review.checks.minimumOrderShares}</p><div className="mt-2 rounded border border-slate-700 p-2 text-xs"><p>{en?'Market accepts orders':'市场接单状态'}: <span className={review.checks.marketStatus==='accepting'?'text-emerald-300':'text-amber-300'}>{review.checks.marketStatus==='accepting'?(en?'Accepting (snapshot)':'接单中（快照）'):review.checks.marketStatus==='paused'?(en?'Paused / closed':'已暂停或关闭'):(en?'Unverified':'尚未核实')}</span></p><p className="mt-1">{en?'CTF SELL Exchange operator':'CTF SELL 交易合约'}: <span className="font-mono text-slate-200">{review.checks.operator??(en?'Unverified':'尚未确认')}</span></p><p className="mt-1">{en?'Safe ERC-1155 operator approval':'Safe ERC-1155 授权'}: <span className={review.checks.authorizationVerified?'text-emerald-300':'text-amber-300'}>{review.checks.authorizationStatus==='approved'?(en?'Confirmed (onchain + CLOB)':'已核实（链上 + CLOB）'):review.checks.authorizationStatus==='missing'?(en?'Not approved':'未授权'):(en?'Unknown / inconsistent':'待核实 / 数据不一致')}</span></p><p className="mt-1 text-amber-300">{en?'Signing is blocked until market and ERC-1155 operator approval pass; no automatic approval.':'市场和 ERC-1155 授权检查均通过后才能签名；不会自动授权。'}</p></div><p className="mt-1 text-xs text-amber-300">{en?'Review expires after 60 seconds. A signed order is submitted only after a second validation.':'审核单 60 秒后失效。点击后需在钱包签名；签名后复核通过才提交。'}</p><button disabled={busy||!wallet||uncertain||pending||review.checks.marketStatus!=='accepting'||!review.checks.authorizationVerified||!review.checks.operator||Date.now()-review.asOf>60000} onClick={()=>void execute()} className="mt-3 rounded bg-indigo-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{en?'Sign and submit SELL':'签名并提交 SELL'}</button></div>)}
- {uncertain&&<div className="mt-3 rounded border border-red-400/40 p-3 text-xs text-red-200"><p>{en?'Submission status is uncertain. Check the Polymarket order history and open orders before resuming.':'提交状态不确定。请先在 Polymarket 官网核对订单历史和未成交挂单，确认没有重复订单后再继续。'}</p><p className="mt-2 text-amber-200">{pending?(en?'A pending attempt survives page refresh for this wallet.':'此钱包存在跨页面刷新保留的待核查提交记录。'):''}</p><button type="button" onClick={verifiedPending} className="mt-2 underline">{en?'I checked official history and confirmed the outcome':'我已在官网核对订单历史并确认结果'}</button></div>}{message&&<p role="status" className="mt-3 break-all text-xs text-amber-200">{message}</p>}</section>;
+ {uncertain&&<div className="mt-3 rounded border border-red-400/40 p-3 text-xs text-red-200"><p>{en?'Submission status is uncertain. Check the Polymarket order history and open orders before resuming.':'提交状态不确定。请先在 Polymarket 官网核对订单历史和未成交挂单，确认没有重复订单后再继续。'}</p><p className="mt-2 text-amber-200">{pending?(en?'This wallet has a persisted submission guard. Only an exact authenticated SELL match clears it automatically.':'此钱包有尚未解除的提交保护记录。只有精确回读到对应 SELL 后才会自动解除；否则请在官网核实订单。'):''}</p><button type="button" onClick={verifiedPending} className="mt-2 underline">{en?'I checked official history and confirmed the outcome':'我已在官网核对该订单结果，解除提交限制'}</button></div>}{message&&<p role="status" className="mt-3 break-all text-xs text-amber-200">{message}</p>}</section>;
 }

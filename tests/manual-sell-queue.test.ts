@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { indicativeUnreservedShares, nextReviewAsset, sameSellIntent, exchangeAllowanceSufficient, isCurrentPendingAttempt } from '../lib/manual-sell-queue';
+import { indicativeUnreservedShares, nextReviewAsset, sameSellIntent, exchangeAllowanceSufficient, isCurrentPendingAttempt, matchingLiveSellOrder, matchingPendingOpenSell, persistedAcceptedOrder } from '../lib/manual-sell-queue';
 import { verifiedOrderLifecycle } from '../lib/order-review-status';
 import type { ClobOrder } from '../lib/browser-clob';
 const order=(id:string, asset:string,original:string,matched:string):ClobOrder=>({id,asset_id:asset,maker_address:'0x'+'1'.repeat(40),side:'SELL',status:'LIVE',price:'0.9',original_size:original,size_matched:matched});
@@ -43,4 +43,34 @@ test('missing orders and ambiguous network outcomes are unknown, never automatic
  assert.equal(verifiedOrderLifecycle({status:'EXPIRED'}),'expired');
  assert.equal(verifiedOrderLifecycle({status:'FILLED'}),'filled');
  assert.equal(verifiedOrderLifecycle({status:'MATCHED'}),'matched_pending');
+});
+
+
+test('accepted response only unlocks after a complete verified live SELL id and exact intent match',()=>{
+ const maker='0x'+'a'.repeat(40),asset='123456789',id='0x'+'b'.repeat(64);
+ const live:ClobOrder={id,asset_id:asset,maker_address:maker,side:'SELL',status:'LIVE',price:'0.986',original_size:'11',size_matched:'0'};
+ const intent={orderId:id,asset,funder:maker,price:0.986,quantity:11};
+ assert.equal(matchingLiveSellOrder([live],intent)?.id,id);
+ assert.equal(matchingLiveSellOrder([{...live,size_matched:'4'}],intent)?.id,id);
+ assert.equal(matchingLiveSellOrder([],intent),null);
+ assert.equal(matchingLiveSellOrder([{...live,asset_id:'different'}],intent),null);
+ assert.equal(matchingLiveSellOrder([{...live,side:'BUY'}],intent),null);
+ assert.equal(matchingLiveSellOrder([{...live,price:'0.985'}],intent),null);
+ assert.equal(matchingLiveSellOrder([{...live,original_size:'12'}],intent),null);
+ assert.equal(matchingLiveSellOrder([{...live,maker_address:'0x'+'c'.repeat(40)}],intent),null);
+ assert.equal(matchingLiveSellOrder([live,live],intent),null);
+ assert.equal(matchingLiveSellOrder([{...live,status:'CANCELED'}],intent),null);
+});
+test('pending order id is written after accept, verified on reload, and scoped to the same Safe',()=>{
+ const address='0x'+'1'.repeat(40),maker='0x'+'2'.repeat(40),id='0x'+'e'.repeat(64),asset='123456789';
+ const pending=JSON.stringify({address,funder:maker,asset,price:0.986,quantity:11,at:Date.now()});
+ const acknowledged=persistedAcceptedOrder(pending,address,maker,id);
+ assert.ok(acknowledged);
+ const live:ClobOrder={id,asset_id:asset,maker_address:maker,side:'SELL',status:'LIVE',price:'0.986',original_size:'11',size_matched:'0'};
+ assert.equal(matchingPendingOpenSell(acknowledged,address,maker,[live])?.id,id);
+ assert.equal(matchingPendingOpenSell(pending,address,maker,[live]),null);
+ assert.equal(matchingPendingOpenSell(acknowledged,'0x'+'3'.repeat(40),maker,[live]),null);
+ assert.equal(matchingPendingOpenSell(acknowledged,address,'0x'+'4'.repeat(40),[live]),null);
+ assert.equal(matchingPendingOpenSell(acknowledged,address,maker,[]),null);
+ assert.equal(persistedAcceptedOrder(null,address,maker,id),null);
 });

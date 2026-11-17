@@ -63,3 +63,50 @@ export function isCurrentPendingAttempt(raw:string|null,address:string,funder:st
     && typeof value.at==='number' && Number.isFinite(value.at);
  }catch{return false;}
 }
+
+
+/** Do not unlock a signed submission merely because POST returned a success response.
+ * A complete, maker-filtered CLOB open-order snapshot must contain the exact
+ * order ID and the expected SELL intent. Missing orders require manual history
+ * verification (they may have matched, been canceled or expired).
+ */
+export function matchingLiveSellOrder(orders:ClobOrder[],intent:{
+  orderId:string;asset:string;funder:string;price:number;quantity:number;
+}):ClobOrder|null{
+ if(!intent.orderId||!intent.asset||!/^0x[0-9a-f]{40}$/i.test(intent.funder))return null;
+ if(!Number.isFinite(intent.price)||intent.price<=0||intent.price>=1||!Number.isFinite(intent.quantity)||intent.quantity<=0)return null;
+ let expectedPrice:bigint,expectedSize:bigint;
+ try{expectedPrice=parseUnits(String(intent.price),6);expectedSize=parseUnits(String(intent.quantity),6);}catch{return null;}
+ const matches=orders.filter(o=>o.id.toLowerCase()===intent.orderId.toLowerCase());
+ if(matches.length!==1)return null;
+ const order=matches[0];
+ if(order.asset_id!==intent.asset||order.maker_address.toLowerCase()!==intent.funder.toLowerCase()
+   ||order.side!=='SELL'||order.status.toUpperCase()!=='LIVE')return null;
+ try {
+  const price=parseUnits(order.price,6),total=parseUnits(order.original_size,6),filled=parseUnits(order.size_matched,6);
+  return price===expectedPrice&&total===expectedSize&&filled>=0n&&filled<total?order:null;
+ } catch{return null;}
+}
+
+export function validatedPendingAttempt(raw:string|null,address:string,funder:string):PendingSellAttempt|null{
+ if(!isCurrentPendingAttempt(raw,address,funder))return null;
+ try{
+  const v=JSON.parse(raw!) as PendingSellAttempt;
+  if(!/^\d{1,100}$/.test(v.asset)||!Number.isFinite(v.price)||v.price<=0||v.price>=1||
+     !Number.isFinite(v.quantity)||v.quantity<=0||v.at<=0||
+     (v.orderId!==undefined&&(typeof v.orderId!=='string'||!v.orderId)))return null;
+  return v;
+ }catch{return null;}
+}
+
+export function matchingPendingOpenSell(raw:string|null,address:string,funder:string,orders:ClobOrder[]):ClobOrder|null{
+ const attempt=validatedPendingAttempt(raw,address,funder);
+ if(!attempt?.orderId)return null;
+ return matchingLiveSellOrder(orders,{orderId:attempt.orderId,asset:attempt.asset,funder,price:attempt.price,quantity:attempt.quantity});
+}
+
+export function persistedAcceptedOrder(raw:string|null,address:string,funder:string,orderId:string):string|null{
+ const attempt=validatedPendingAttempt(raw,address,funder);
+ if(!attempt||!orderId)return null;
+ return JSON.stringify({...attempt,orderId});
+}
