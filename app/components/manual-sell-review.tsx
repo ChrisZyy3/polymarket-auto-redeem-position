@@ -489,7 +489,17 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
               <p className="font-semibold text-cyan-200">{en?'APR and proceeds at SELL limit':'SELL 限价收益摘要'}</p>
               <p>{en?'Current Mark APR':'当前 Mark APR'}：{activePosition.markApr===null?'—':(activePosition.markApr*100).toFixed(2)+'%'} · {en?'Target':'目标'}：{activeApr}%</p>
               <p>{en?'APR at limit':'限价实际 APR'}：{summary.limitAprPercent===null?'—':summary.limitAprPercent.toFixed(2)+'%'}</p>
-              <p>{en?'Gross proceeds':'限价卖出总额'}：{summary.grossProceeds===null?'—':'
+              <p>{en?'Gross proceeds':'限价卖出总额'}：{summary.grossProceeds===null?'—':'$'+summary.grossProceeds.toFixed(4)}</p>
+              <p>{en?'P/L before fees':'对比成本收益（未扣费用）'}：{summary.profitVsAvgCost===null?'—':'$'+summary.profitVsAvgCost.toFixed(4)}</p>
+            </div>}
+            <details className="mt-3 rounded-lg border border-slate-700 p-3 text-xs text-slate-300">
+              <summary className="cursor-pointer">{en?'Existing SELL orders':'已有 SELL 明细'} ({orders.filter(o=>o.asset_id===active&&o.side==='SELL').length})</summary>
+              {orders.filter(o=>o.asset_id===active&&o.side==='SELL').map(o=><p key={o.id} className="mt-2 break-all border-t border-slate-800 pt-2">
+                SELL {o.original_size} @ {o.price} · {en?'Unfilled':'未成交'} {Math.max(0,Number(o.original_size)-Number(o.size_matched)).toFixed(6)} · {o.id}
+              </p>)}
+            </details>
+          </div>
+          <div className="rounded-xl border border-slate-700/80 bg-slate-900/70 p-3 text-xs">
             <p className="font-semibold text-slate-100">{en?'Account and settlement confirmations':'账户与结算日期确认'}</p>
             <label className="mt-2 flex cursor-pointer items-start gap-2 text-slate-300">
               <input type="checkbox" checked={coverage} disabled={busy} onChange={e=>setCoverage(e.target.checked)} className="mt-0.5 accent-cyan-400"/>
