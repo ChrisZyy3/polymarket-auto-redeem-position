@@ -6,7 +6,7 @@
 export function normalizeSdkSellShares(requested:number):number|null{
  if(!Number.isFinite(requested)||requested<=0)return null;
  const value=String(requested);
- if(!/^\\d+(?:\\.\\d{1,6})?$/.test(value))return null;
+ if(!/^\d+(?:\.\d{1,6})?$/.test(value))return null;
  const [whole,fraction='']=value.split('.');
  try{
   const cents=BigInt(whole)*100n+BigInt((fraction+'00').slice(0,2));
