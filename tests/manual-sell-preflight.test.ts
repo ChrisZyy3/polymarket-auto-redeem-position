@@ -6,3 +6,12 @@ const valid:SellPreflightInput={nowMs:now,signer:"0x"+"1".repeat(40),funder:"0x"
 test("review preparation retains bid-safe maker ask, net balance and seven-day GTD",()=>{const r=prepareManualSell(valid);assert.equal(r.status,"review");if(r.status==="review"){assert.equal(r.price,0.994);assert.equal(r.quantity,80);assert.equal(r.observedReservedShares,20);assert.equal(r.expirationSec,Math.floor(now/1000)+604860);assert.equal(r.postOnly,true);}});
 test("unverified scope, ambiguous settlement or stale data blocks preparation",()=>{for(const change of [{ordersCoverWallet:false},{ordersComplete:false},{settlementConfirmed:false},{bookAsOfMs:now-120001},{balanceAsOfMs:null},{safeMatches:false}])assert.equal(prepareManualSell({...valid,...change}).status,"blocked");});
 test("does not allow overselling or invalid orders or a crossed book",()=>{for(const change of [{requestedShares:81},{bestBid:0.995},{orders:[...valid.orders!,valid.orders![0]]},{orders:[{...valid.orders![0],matchedSize:31}]}])assert.equal(prepareManualSell({...valid,...change}).status,"blocked");});
+
+test('fractional CLOB balances are normalized before signature and displayed for review',()=>{
+ const r=prepareManualSell({...valid,requestedShares:79.997891});
+ assert.equal(r.status,'review');
+ if(r.status==='review')assert.equal(r.quantity,79.99);
+});
+test('sub-centish share requests cannot turn into zero-share signed orders',()=>{
+ assert.equal(prepareManualSell({...valid,requestedShares:0.009999,minimumOrderShares:0.001}).status,'blocked');
+});

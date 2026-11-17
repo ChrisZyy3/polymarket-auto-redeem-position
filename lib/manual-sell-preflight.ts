@@ -1,4 +1,5 @@
 import { ceilToTick } from "./poly-yield/yield";
+import { normalizeSdkSellShares } from "./sdk-sell-quantity";
 
 export type OpenSell = { id:string; assetId:string; side:"BUY"|"SELL"; originalSize:number; matchedSize:number };
 export type SellPreflightInput = {
@@ -28,7 +29,8 @@ export function prepareManualSell(i:SellPreflightInput):SellPreflight {
   if(!i.ordersComplete||!i.ordersCoverWallet||!Array.isArray(i.orders)||!fresh(i.ordersAsOfMs,i.nowMs,120000))reasons.push("orders_unverified_or_stale");
   if(i.availableShares===null||!Number.isFinite(i.availableShares)||i.availableShares<0||!fresh(i.balanceAsOfMs,i.nowMs,120000))reasons.push("balance_unverified_or_stale");
   if(!finitePositive(i.bestBid)||!finitePositive(i.bestAsk)||i.bestBid>=i.bestAsk||i.bestAsk>=1||!finitePositive(i.tick)||i.tick>=1||!i.tickVerified||!fresh(i.bookAsOfMs,i.nowMs,120000))reasons.push("book_unverified_or_stale");
-  if(!finitePositive(i.requestedShares)||!finitePositive(i.minimumOrderShares)||i.requestedShares<i.minimumOrderShares)reasons.push("invalid_quantity");
+  const orderShares=normalizeSdkSellShares(i.requestedShares);
+  if(orderShares===null||!finitePositive(i.minimumOrderShares)||orderShares<i.minimumOrderShares)reasons.push("invalid_quantity");
   let reserved=0;const ids=new Set<string>();
   if(Array.isArray(i.orders))for(const o of i.orders){
     if(!o.id||ids.has(o.id)||!o.assetId||!["BUY","SELL"].includes(o.side)||!Number.isFinite(o.originalSize)||!Number.isFinite(o.matchedSize)||o.originalSize<0||o.matchedSize<0||o.matchedSize>o.originalSize){reasons.push("invalid_order_snapshot");break;}
@@ -36,11 +38,11 @@ export function prepareManualSell(i:SellPreflightInput):SellPreflight {
   }
   if(!i.assetId||!Number.isFinite(reserved)||reserved>i.positionShares+1e-8)reasons.push("invalid_reservations");
   // availableShares is already net of reservations: never subtract twice.
-  if(Number.isFinite(i.requestedShares) && (i.requestedShares>i.positionShares-reserved+1e-8 || (i.availableShares!==null && i.requestedShares>i.availableShares+1e-8)))reasons.push("insufficient_available_shares");
+  if(orderShares!==null && (orderShares>i.positionShares-reserved+1e-8 || (i.availableShares!==null && orderShares>i.availableShares+1e-8)))reasons.push("insufficient_available_shares");
   if(reasons.length)return {status:"blocked",reasons:[...new Set(reasons)]};
   const days=(i.settlementMs!-i.nowMs)/86400000;
   const floor=1/(1+i.targetAprPercent/100*days/365);
   const price=ceilToTick(Math.max(floor,i.bestAsk!),i.tick!);
   if(!Number.isFinite(price)||price>=1||price>1-i.tick!+1e-10||price<=i.bestBid!)return {status:"blocked",reasons:["no_legal_post_only_price"]};
-  return {status:"review",price,quantity:i.requestedShares,observedReservedShares:reserved,effectiveGtdSeconds:604800,expirationSec:Math.floor(i.nowMs/1000)+604800+60,postOnly:true,orderType:"GTD",side:"SELL"};
+  return {status:"review",price,quantity:orderShares!,observedReservedShares:reserved,effectiveGtdSeconds:604800,expirationSec:Math.floor(i.nowMs/1000)+604800+60,postOnly:true,orderType:"GTD",side:"SELL"};
 }
