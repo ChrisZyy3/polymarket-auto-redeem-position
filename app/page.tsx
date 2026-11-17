@@ -235,6 +235,7 @@ export default function Home() {
   const [positionsExpanded, setPositionsExpanded] = useState(true);
   const [tradeMode,setTradeMode]=useState<'yield'|'sell'>('yield');
   const [sellSelected,setSellSelected]=useState<string[]>([]);
+  const [sellQuotesRefreshing,setSellQuotesRefreshing]=useState(false);
   const [sellQuantities,setSellQuantities]=useState<Record<string,string>>({});
   const [clobSnapshot,setClobSnapshot]=useState<{orders:ClobOrder[]|null;ready:boolean}>({orders:null,ready:false});
   const [reviewRequest,setReviewRequest]=useState<SellReviewRequest>(null);
@@ -256,6 +257,16 @@ export default function Home() {
   }
   function openOrderCenter(asset?:string){
     setOrderCenterRequest({serial:++workspaceSerial.current,asset});
+  }
+  async function refreshSellPlanningQuotes(){
+    if(sellQuotesRefreshing)return;
+    setSellQuotesRefreshing(true);
+    try{
+      // Reuse the existing quote API/cache. Serial reads avoid an unnecessary burst.
+      const assets=new Set(sellSelected);
+      const targets=positions.filter(p=>!p.redeemable&&(assets.size===0||assets.has(p.asset)));
+      for(const position of targets)await loadPositionQuote(position,holdAprThreshold,true);
+    }finally{setSellQuotesRefreshing(false);}
   }
 
   // Initialize state configurations from localstorage and URL params on mount
@@ -1267,6 +1278,10 @@ export default function Home() {
           <button type="button" disabled={!sellSelected.length} onClick={()=>setSellSelected([])}
             className="rounded border border-slate-700 px-2 py-1.5 text-slate-300 disabled:opacity-40">{isEnglish?"Clear":"清空"}</button>
           <span className="flex-1"/>
+          <button type="button" disabled={sellQuotesRefreshing} onClick={()=>void refreshSellPlanningQuotes()}
+            className="rounded border border-cyan-500/40 px-3 py-2 font-semibold text-cyan-200 disabled:opacity-40">
+            {sellQuotesRefreshing?(isEnglish?"Refreshing…":"刷新中…"):sellSelected.length>0?(isEnglish?"Refresh selected quotes":"刷新所选报价"):(isEnglish?"Refresh all quotes":"刷新全仓报价")}
+          </button>
           <button type="button" onClick={()=>beginReview('batch')}
             disabled={!clobSnapshot.ready||!sellSelected.length}
             className="rounded bg-indigo-500 px-3 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-35">{isEnglish?"Review selected":"逐笔审核已选"}</button>
