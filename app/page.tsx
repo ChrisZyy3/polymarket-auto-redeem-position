@@ -1453,25 +1453,11 @@ function PositionQuotePanel({
         </div>
       ) : quote ? (
         <>
-          <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-            <OrderBookAprCard
-              label={isEnglish ? "Best bid" : "买一"}
-              price={quote.bestBid}
-              apr={quote.bestBidApr}
-              tickSize={quote.tickSize}
-              accent="emerald"
-              description={isEnglish ? "Maker bid reference" : "Maker 买单收益参考"}
-              language={language}
-            />
-            <OrderBookAprCard
-              label={isEnglish ? "Best ask" : "卖一"}
-              price={quote.bestAsk}
-              apr={quote.bestAskApr}
-              tickSize={quote.tickSize}
-              accent="rose"
-              description={isEnglish ? "Immediate buy reference" : "即时买入收益参考"}
-              language={language}
-            />
+          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-slate-700 bg-slate-950/55 px-3 py-3 text-xs text-slate-300">
+            <span>{isEnglish?"Bid":"买一"} <strong className="font-mono text-emerald-300">{formatMarketPercentForTick(quote.bestBid,quote.tickSize)}</strong>
+              <span className="ml-1 text-slate-500">APR {formatPercent(quote.bestBidApr,2)}</span></span>
+            <span>{isEnglish?"Ask":"卖一"} <strong className="font-mono text-rose-300">{formatMarketPercentForTick(quote.bestAsk,quote.tickSize)}</strong>
+              <span className="ml-1 text-slate-500">APR {formatPercent(quote.bestAskApr,2)}</span></span>
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-slate-800 bg-slate-950/45 px-3 py-2 text-xs text-slate-400">
@@ -1484,6 +1470,8 @@ function PositionQuotePanel({
             </span>
           </div>
 
+          <details className="mt-3 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3">
+            <summary className="cursor-pointer text-xs font-semibold text-cyan-200">{isEnglish?"Advanced BUY-side APR and Maker analysis":"高级分析 · 买入侧 APR / Maker 挂价"}</summary>
           <div className="mt-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3">
             <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
               <div className="max-w-xl">
@@ -1532,6 +1520,8 @@ function PositionQuotePanel({
             )}
           </div>
 
+
+          </details>
 
           {quote.note && (
             <p className="mt-1.5 text-[11px] leading-5 text-amber-300/80">{quote.note}</p>
@@ -1614,53 +1604,6 @@ function TargetAprMetric({
       <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</div>
       <div className="mt-1 font-mono text-lg font-black text-cyan-300">{value}</div>
       {supportingValue ? <div className="mt-1 text-xs text-slate-400">{supportingValue}</div> : null}
-    </div>
-  );
-}
-
-function OrderBookAprCard({
-  label,
-  price,
-  apr,
-  tickSize,
-  accent,
-  description,
-  language,
-}: {
-  label: string;
-  price: number | null;
-  apr: number | null;
-  tickSize: number | null;
-  accent: "emerald" | "rose";
-  description: string;
-  language: Language;
-}) {
-  const isEnglish = language === "en";
-  const borderClass = accent === "emerald" ? "border-emerald-500/25" : "border-rose-500/25";
-  const accentClass = accent === "emerald" ? "text-emerald-300" : "text-rose-300";
-
-  return (
-    <div className={`rounded-lg border ${borderClass} bg-slate-950/55 px-3 py-2.5`}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className={`text-sm font-bold ${accentClass}`}>{label}</div>
-          <div className="mt-0.5 text-xs text-slate-400">{description}</div>
-        </div>
-        <div className="text-right">
-          <div className="font-mono text-lg font-black text-slate-100">{formatMarketPercentForTick(price, tickSize)}</div>
-          <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-            {isEnglish ? "Market probability" : "市场概率"}
-          </div>
-        </div>
-      </div>
-      <div className="mt-2 flex items-end justify-between gap-3 border-t border-slate-800 pt-2">
-        <div className="pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-          {isEnglish ? "Conditional APR" : "条件 APR"}
-        </div>
-        <div className={`font-mono text-xl font-black ${accentClass}`}>
-          {formatPercent(apr, 2)}
-        </div>
-      </div>
     </div>
   );
 }
