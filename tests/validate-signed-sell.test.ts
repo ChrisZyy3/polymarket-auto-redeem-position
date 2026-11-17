@@ -18,3 +18,13 @@ test('SDK postOnly must survive the signature workflow and price guard stays str
  assert.deepEqual(signedSellMismatchFields({...order,postOnly:undefined},expected),['post_only']);
  assert.deepEqual(signedSellMismatchFields({...order,takerAmount:'8899999'},expected),['price_below_review']);
 });
+
+test('canonical two-decimal SELL quantity matches SDK maker/taker amounts at tick 0.001',()=>{
+ const amount=2871.16;
+ const makerAmount='2871160000';
+ const takerAmount=(BigInt(makerAmount)*986000n/1000000n).toString();
+ const signed={...order,makerAmount,takerAmount};
+ const intent={...expected,size:amount,price:0.986};
+ assert.equal(validateSignedSell(signed,intent),true);
+ assert.deepEqual(signedSellMismatchFields(signed,intent),[]);
+});
