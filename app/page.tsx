@@ -664,7 +664,7 @@ export default function Home() {
                 : "当前合约价格相对于昨日北京时间的快照；不是滚动 24h 涨跌幅。")
           }>
             {hasRecentReference
-              ? (isEnglish ? `Since snapshot (${referenceDateLabel})` : `较最近快照（${referenceDateLabel}）`)
+              ? (isEnglish ? `since ${referenceDateLabel?.replace("/", "-")}` : `较${referenceDateLabel}`)
               : (isEnglish ? "D1 Change" : "较昨日")}
           </span>
         ),
