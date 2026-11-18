@@ -1,4 +1,5 @@
 import { ceilToTick } from "./poly-yield/yield";
+import { simpleRemainingAprPercent } from "./apr";
 import type { PositionQuote } from "./position-quote";
 
 export type AutoSellPlanStatus =
@@ -39,8 +40,7 @@ export function buildMarkAutoSellPlan(input: {
   const {quote,targetAprPercent,quantity,avgPrice,redeemable=false}=input;
   const days=quote?.daysToSettle ?? null;
   const mark=quote?.currentPrice ?? null;
-  const mkApr=days!==null && days>0 && mark!==null && mark>0 && mark<=1
-    ? ((1/mark-1)*365/days)*100 : null;
+  const mkApr=days!==null&&mark!==null?(mark===1&&days>0?0:simpleRemainingAprPercent(mark,days)):null;
   const base:MarkAutoSellPlan={
     mode:"dry-run",basis:"mark-apr",status:"theoretical_only",targetAprPercent,
     theoreticalTargetPrice:null,proposedLimitPrice:null,
@@ -74,7 +74,7 @@ export function buildMarkAutoSellPlan(input: {
   if(!Number.isFinite(limit)||limit<=0||limit>=1 || limit>1-tick+1e-10){
     return {...base,status:"unreachable_tick",reason:"target_above_highest_legal_price"};
   }
-  const apr=(1/limit-1)*365/days*100;
+  const apr=simpleRemainingAprPercent(limit,days);
   const crosses=base.bestBid===null?null:base.bestBid>=limit-1e-10;
   return {...base,status:crosses===true?"would_cross":"ready",
     proposedLimitPrice:limit,priceAtLimitAprPercent:apr,

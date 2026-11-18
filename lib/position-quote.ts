@@ -1,4 +1,4 @@
-import { daysUntilSettlement } from "./apr";
+import { daysUntilSettlement, simpleRemainingAprPercent } from "./apr";
 import { ceilToTick, floorToTick } from "./poly-yield/yield";
 import { isOrderBook, type BookLevel, type OrderBook } from "./poly-yield/types";
 
@@ -89,7 +89,8 @@ function priceForTargetApr(targetAprPercent: number, daysToSettle: number): numb
 
 function aprForPrice(price: number, daysToSettle: number): number | null {
   if (!isValidPrice(price) || !Number.isFinite(daysToSettle) || daysToSettle <= 0) return null;
-  return ((1 - price) / price) * (365 / daysToSettle);
+  const percent=simpleRemainingAprPercent(price,daysToSettle);
+  return percent===null?null:percent/100;
 }
 
 export function buildTargetAprPlan({

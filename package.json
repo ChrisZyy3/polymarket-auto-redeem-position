@@ -17,6 +17,7 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@polymarket/client": "^0.20.0",
     "@tanstack/react-query": "^5.107.1",
     "@tanstack/react-table": "^8.21.3",
     "@walletconnect/ethereum-provider": "^2.26.0",

@@ -116,7 +116,7 @@ export function PortfolioHistoryChart({
   }
 
   return (
-    <section className="mt-7 rounded-2xl border border-slate-800 bg-slate-900/40 px-4 py-4 sm:px-5 sm:py-5" aria-labelledby="portfolio-history-title">
+    <section className="ui-surface mt-5 px-4 py-4 sm:px-5 sm:py-5" aria-labelledby="portfolio-history-title">
       <div className={`${isExpanded ? "mb-5" : ""} flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between`}>
         <div>
           <h2 id="portfolio-history-title" className="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-100">
@@ -133,7 +133,7 @@ export function PortfolioHistoryChart({
         </div>
         <div className="flex flex-wrap items-center gap-2">
         {isExpanded && (
-          <div role="group" className="inline-flex min-h-10 self-start rounded-xl border border-slate-700 bg-slate-950/75 p-1" aria-label={isEnglish ? "Time range" : "曲线时间范围"}>
+          <div role="group" className="ui-segmented self-start" aria-label={isEnglish ? "Time range" : "曲线时间范围"}>
             {([30, 90, "all"] as const).map((value) => (
               <button
                 key={value}
@@ -159,7 +159,7 @@ export function PortfolioHistoryChart({
       </div>
 
       {isExpanded && (chart ? (
-        <div id="portfolio-history-content" className="rounded-xl border border-slate-800 bg-slate-950/55 p-3 sm:p-4">
+        <div id="portfolio-history-content" className="ui-inset p-3 sm:p-4">
           <div className="mb-3 flex h-10 items-center justify-between gap-4">
             <div className="flex items-center gap-2 text-xs text-slate-500">
               <CalendarDays className="h-4 w-4" />
@@ -278,7 +278,7 @@ export function PortfolioHistoryChart({
           </div>
         </div>
       ) : (
-        <div id="portfolio-history-content" className="flex min-h-48 items-center justify-center rounded-xl border border-dashed border-slate-700 bg-slate-950/30 px-6 text-center text-sm leading-6 text-slate-400">
+        <div id="portfolio-history-content" className="ui-inset flex min-h-48 items-center justify-center border-dashed px-6 text-center text-sm leading-6 text-slate-400">
           {isEnglish
             ? "No history yet. The chart starts after the first scheduled snapshot."
             : "暂无历史快照。定时任务首次成功执行后，资产曲线会从当天开始记录。"}

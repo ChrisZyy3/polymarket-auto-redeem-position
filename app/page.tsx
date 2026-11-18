@@ -32,11 +32,13 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { MarketTitle } from "@/app/components/market-title";
-import { AutoSellPlannerPanel } from "@/app/components/auto-sell-planner-panel";
 import { useConnection } from "wagmi";
+import { BrowserClobPanel } from "@/app/components/browser-clob-panel";
+import { SellPlanRow } from "@/app/components/sell-plan-row";
+import type { ClobOrder } from "@/lib/browser-clob";
+import type { SellReviewRequest } from "@/app/components/manual-sell-review";
 import { WalletConnectPanel } from "@/app/components/wallet-connect-panel";
 import { CardToggle } from "@/app/components/card-toggle";
-import { PortfolioSellSummary } from "@/app/components/portfolio-sell-summary";
 import { PortfolioHistoryChart } from "@/app/components/portfolio-history-chart";
 import { calculateDailyPriceChange, type DailyPositionPoint } from "@/lib/position-change";
 import type { PortfolioHistoryMetrics, PortfolioSnapshot } from "@/lib/portfolio-history";
@@ -85,6 +87,7 @@ interface QuoteState {
   thresholdAprPercent: number;
   quote?: PositionQuote;
   error?: string;
+  fetchedAt?: number;
 }
 
 type Language = "zh" | "en";
@@ -230,12 +233,41 @@ export default function Home() {
   const [holdAprThreshold, setHoldAprThreshold] = useState(DEFAULT_HOLD_APR_THRESHOLD);
   const [language, setLanguage] = useState<Language>("zh");
   const [positionsExpanded, setPositionsExpanded] = useState(true);
+  const [tradeMode,setTradeMode]=useState<'yield'|'sell'>('yield');
+  const [sellSelected,setSellSelected]=useState<string[]>([]);
+  const [sellQuotesRefreshing,setSellQuotesRefreshing]=useState(false);
+  const [sellQuantities,setSellQuantities]=useState<Record<string,string>>({});
+  const [clobSnapshot,setClobSnapshot]=useState<{orders:ClobOrder[]|null;ready:boolean}>({orders:null,ready:false});
+  const [reviewRequest,setReviewRequest]=useState<SellReviewRequest>(null);
+  const [orderCenterRequest,setOrderCenterRequest]=useState<{serial:number;asset?:string}|null>(null);
+  const workspaceSerial=useRef(0);
   const [expandedPositionKey, setExpandedPositionKey] = useState<string | null>(null);
   const [quoteStates, setQuoteStates] = useState<Record<string, QuoteState>>({});
   const [targetAprInputs, setTargetAprInputs] = useState<Record<string, string>>({});
   const quoteRequestVersion = useRef(0);
+  const quoteByAssetVersion = useRef<Record<string,number>>({});
   const queryRequestVersion = useRef(0);
   const isEnglish = language === "en";
+  useEffect(()=>{
+    setSellSelected([]);setSellQuantities({});
+    setClobSnapshot({orders:null,ready:false});setReviewRequest(null);setOrderCenterRequest(null);
+  },[address,profileAddress,signerAddress]);
+  function beginReview(mode:'single'|'batch',asset?:string){
+    setReviewRequest({serial:++workspaceSerial.current,mode,asset});
+  }
+  function openOrderCenter(asset?:string){
+    setOrderCenterRequest({serial:++workspaceSerial.current,asset});
+  }
+  async function refreshSellPlanningQuotes(){
+    if(sellQuotesRefreshing)return;
+    setSellQuotesRefreshing(true);
+    try{
+      // Reuse the existing quote API/cache. Serial reads avoid an unnecessary burst.
+      const assets=new Set(sellSelected);
+      const targets=positions.filter(p=>!p.redeemable&&(assets.size===0||assets.has(p.asset)));
+      for(const position of targets)await loadPositionQuote(position,holdAprThreshold,true);
+    }finally{setSellQuotesRefreshing(false);}
+  }
 
   // Initialize state configurations from localstorage and URL params on mount
   // 组件挂载时从浏览器 LocalStorage 和 URL 参数中初始化用户参数
@@ -411,7 +443,9 @@ export default function Home() {
       (existing.status === "loading" || existing.status === "ready")
     ) return;
 
-    const requestVersion = ++quoteRequestVersion.current;
+    const requestVersion=quoteRequestVersion.current;
+    const assetVersion=(quoteByAssetVersion.current[key]??0)+1;
+    quoteByAssetVersion.current[key]=assetVersion;
 
     setQuoteStates((previous) => ({
       ...previous,
@@ -433,15 +467,15 @@ export default function Home() {
       }
 
       setQuoteStates((previous) => {
-        if (requestVersion !== quoteRequestVersion.current) return previous;
+        if (requestVersion !== quoteRequestVersion.current || assetVersion !== quoteByAssetVersion.current[key]) return previous;
         return {
           ...previous,
-          [key]: { status: "ready", thresholdAprPercent: thresholdApr, quote: payload.quote },
+          [key]: { status: "ready", thresholdAprPercent: thresholdApr, quote: payload.quote, fetchedAt: Date.now() },
         };
       });
     } catch (err) {
       setQuoteStates((previous) => {
-        if (requestVersion !== quoteRequestVersion.current) return previous;
+        if (requestVersion !== quoteRequestVersion.current || assetVersion !== quoteByAssetVersion.current[key]) return previous;
         return {
           ...previous,
           [key]: {
@@ -793,6 +827,14 @@ export default function Home() {
     getSortedRowModel: getSortedRowModel(),
   });
 
+  // Share this existing TanStack table order and quote cache with SELL review.
+  const sharedSellQuotes=useMemo(()=>Object.fromEntries(positions.flatMap(p=>{
+    const state=quoteStates[getPositionKey(p)];
+    return state?.status==='ready'&&state.quote
+      ?[[p.asset,{quote:state.quote,fetchedAt:state.fetchedAt??0}] as const]:[];
+  })),[positions,quoteStates]);
+  const sortedSellAssets=table.getRowModel().rows.map(row=>row.original.asset);
+
   // Save new address queries in local memory and enforce history limit
   // 将新查询到的钱包地址存入历史缓存记录中，并按上限裁剪数量
   function pushHistory(addr: string) {
@@ -907,28 +949,28 @@ export default function Home() {
       : (isEnglish ? "Enter a wallet address and click Analyze." : "请输入钱包地址并点击查询分析，查看仓位数据。");
 
   return (
-    <main id="main-content" className="relative z-10 mx-auto w-full max-w-[1440px] px-4 pb-12 pt-6 sm:px-6 md:pt-8 xl:px-8">
+    <main id="main-content" className="ui-main relative z-10 mx-auto w-full max-w-[1440px] px-3 pb-16 pt-4 sm:px-6 sm:pt-6 xl:px-8">
       
       {/* 
         * Dashboard Header Brand & Description
         * 顶部系统主标题与装饰标徽
         */}
-      <div className="flex flex-col justify-between gap-4 border-b border-slate-800/80 pb-6 md:flex-row md:items-center">
+      <div className="ui-hero flex flex-col justify-between gap-5 px-5 py-6 sm:px-7 sm:py-7 md:flex-row md:items-center">
         <div>
-          <div className="mb-3 inline-flex items-center gap-2 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-cyan-300">
-            <Zap className="h-3.5 w-3.5" />
+          <div className="ui-eyebrow mb-3">
+            <span className="ui-brand-icon"><Zap className="h-4 w-4" aria-hidden="true"/></span>
             Polymarket Portfolio Analyzer
           </div>
-          <h1 className="max-w-3xl text-balance bg-gradient-to-r from-slate-50 via-slate-100 to-cyan-200 bg-clip-text text-2xl font-bold leading-tight tracking-tight text-transparent md:text-[2rem]">
+          <h1 className="max-w-3xl text-balance bg-gradient-to-r from-white via-slate-100 to-sky-200 bg-clip-text text-[1.7rem] font-bold leading-[1.2] tracking-[-0.035em] text-transparent sm:text-[2rem] md:text-[2.2rem]">
             {isEnglish ? "Portfolio & Returns Monitor" : "自动持仓监控与收益看板"}
           </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+          <p className="mt-3 max-w-2xl text-[13px] leading-6 text-slate-400 sm:text-sm">
             {isEnglish
               ? "Estimate annualized returns to settlement at current prices, and flag low-APR, losing, and redeemable positions."
               : "按当前价格计算到期年化，快速识别低 APR、亏损和可赎回仓位。"}
           </p>
         </div>
-        <div className="inline-flex items-center gap-1 self-start rounded-xl border border-slate-700/70 bg-slate-900/70 p-1 md:self-auto" aria-label={isEnglish ? "Language" : "语言"}>
+        <div className="ui-segmented self-start md:self-auto" aria-label={isEnglish ? "Language" : "语言"}>
           <Languages className="ml-2 h-4 w-4 text-cyan-400" aria-hidden="true" />
           <button
             type="button"
@@ -950,7 +992,7 @@ export default function Home() {
       </div>
 
       <WalletConnectPanel language={language} />
-      {isConnected && <div role="status" className="mt-2 rounded-xl border border-slate-800 bg-slate-900/55 px-4 py-3 text-xs leading-5 text-slate-300">
+      {isConnected && <div role="status" className="ui-surface-subtle mt-3 px-4 py-3 text-xs leading-5 text-slate-300">
         {profileStatus === "loading" ? (isEnglish ? "Looking up Polymarket profile…" : "正在查找 Polymarket 账户…") :
          profileStatus === "found" ? <span className="break-all">{isEnglish ? "Polymarket position address" : "Polymarket 持仓地址"}: <span className="font-mono text-cyan-200">{profileAddress}</span>{isEnglish ? " · Check against your Polymarket profile." : " · 请与 Polymarket 个人资料中的地址核对。"}</span> :
          profileStatus === "not_found" ? (isEnglish ? "No public profile found. Enter the position address manually." : "未找到公开资料，请手动输入 Polymarket 持仓地址。") :
@@ -962,10 +1004,10 @@ export default function Home() {
         * Search Bar & Configurations Container
         * 地址检索框与年化告警阈值调节面板
         */}
-      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-3">
         
         {/* Search Address Input Card / 钱包地址查询输入卡片 */}
-        <div className="relative rounded-2xl border border-slate-800 bg-slate-900/55 p-4 shadow-[0_10px_28px_rgba(0,0,0,0.12)] sm:p-5 lg:col-span-2">
+        <div className="ui-surface p-4 sm:p-5 lg:col-span-2">
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400/35 to-transparent"></div>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
@@ -996,7 +1038,7 @@ export default function Home() {
                 value={address}
                 onChange={(e) => { profileRequestVersion.current += 1; setProfileStatus(status => status === "loading" ? "idle" : status); setAddress(e.target.value); }}
                 placeholder={isEnglish ? "EVM wallet address, e.g. 0x1234…" : "输入 EVM 钱包地址，如 0x1234…"}
-                className="h-11 w-full rounded-xl border border-slate-700 bg-slate-950/75 py-2.5 pl-3.5 pr-11 font-mono text-sm text-slate-100 shadow-inner outline-none transition-[border-color,box-shadow] placeholder:font-sans placeholder:text-slate-500 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/25"
+                className="ui-input h-11 w-full py-2.5 pl-3.5 pr-11 font-mono text-sm placeholder:font-sans placeholder:text-slate-500"
               />
               {address && (
                 <button
@@ -1013,7 +1055,7 @@ export default function Home() {
             <button
               type="submit"
               disabled={loading}
-              className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-cyan-400 px-5 text-sm font-semibold text-slate-950 shadow-sm transition-[background-color,box-shadow] hover:bg-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 disabled:cursor-wait disabled:opacity-50"
+              className="ui-button-primary h-11 cursor-pointer px-6 text-sm disabled:cursor-wait"
             >
               {loading ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Search aria-hidden="true" className="h-4 w-4" />}
               {isEnglish ? "Analyze" : "查询分析"}
@@ -1053,7 +1095,7 @@ export default function Home() {
         </div>
 
         {/* Global Warnings Parameter Card / 报警参数面板卡片 */}
-        <div className="relative rounded-2xl border border-slate-800 bg-slate-900/55 p-4 shadow-[0_10px_28px_rgba(0,0,0,0.12)] sm:p-5">
+        <div className="ui-surface p-4 sm:p-5">
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-indigo-400/25 to-transparent"></div>
           <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100">
             <Percent className="h-4 w-4 text-indigo-300" aria-hidden="true" />
@@ -1076,7 +1118,7 @@ export default function Home() {
                 step="0.5"
                 value={holdAprThreshold}
                 onChange={handleThresholdChange}
-                className="h-11 w-full rounded-xl border border-slate-700 bg-slate-950/75 px-3.5 py-2.5 font-mono text-sm font-semibold text-slate-100 shadow-inner outline-none transition-[border-color,box-shadow] focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/25"
+                className="ui-input h-11 w-full px-3.5 py-2.5 font-mono text-sm font-semibold"
               />
               <span aria-hidden="true" className="pointer-events-none absolute right-4 top-3 text-sm font-bold text-indigo-300">%</span>
             </div>
@@ -1102,7 +1144,7 @@ export default function Home() {
         * 账户总体业绩卡片与统计分析结果：查询前保留完整页面骨架
         */}
       {/* Dashboard Summary Statistics Cards Grid / 指标概览区块 */}
-      <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
             <SummaryCard
               label={isEnglish ? "Total portfolio value" : "资产总价值"}
               value={data ? `$${formatNumber(data.summary.totalBalance)}` : "—"}
@@ -1133,7 +1175,7 @@ export default function Home() {
             />
       </div>
 
-     <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+     <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <HistoryMetric
           label={isEnglish ? "Change since first record" : "记录以来变化 / 年化"}
           value={data ? formatHistoryChange(
@@ -1168,22 +1210,20 @@ export default function Home() {
 
       <PortfolioHistoryChart snapshots={portfolioHistory?.snapshots ?? []} language={language} />
 
-      <PortfolioSellSummary key={data?.positions.map(p => `${p.proxyWallet}:${p.asset}`).join("|") ?? "empty"} positions={positions} language={language} />
-
       {/* Positions detailed tables container / 仓位细分数据列表 */}
-      <div className="relative mt-8 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/45 shadow-[0_14px_36px_rgba(0,0,0,0.14)]">
+      <div className="ui-surface relative mt-7 overflow-hidden">
         <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent"></div>
 
-        <div className="flex flex-col gap-3 border-b border-slate-800 bg-slate-900/65 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-5">
+        <div className="flex flex-col gap-4 border-b border-slate-700/35 bg-slate-900/30 px-4 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div className="min-w-0">
             <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-100">
               <Activity className="h-5 w-5 text-cyan-400" aria-hidden="true" />
-              {isEnglish ? "Positions & Yield" : "持仓收益与市场报价"}
+              {isEnglish ? "Positions & Trading" : "仓位与交易"}
             </h2>
             <p className="mt-1 text-xs leading-5 text-slate-400">
               {isEnglish
-                ? "Sort by yield or position value. Expand a market for live bid/ask APR."
-                : "可按收益或市值排序，展开市场查看实时买卖盘口 APR。"}
+                ? "One position table. Switch between performance and SELL planning; signing always requires a fresh review."
+                : "同一张仓位表可切换收益与卖出规划；真实下单必须逐笔重新审核。"}
             </p>
             {data && (
               <p className="mt-1 text-[11px] leading-5 text-slate-500">
@@ -1201,18 +1241,51 @@ export default function Home() {
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs">
-            <span className="rounded-lg border border-slate-700/70 bg-slate-950/60 px-3 py-1.5 font-medium text-slate-300">
+             <div role="group" aria-label={isEnglish?"Position table mode":"仓位表模式"} className="ui-segmented">
+               <button type="button" aria-pressed={tradeMode==='yield'} onClick={()=>{setTradeMode('yield');setPositionsExpanded(true);}}
+                 className={tradeMode==='yield'?"rounded-md bg-cyan-500/20 px-3 py-2 font-semibold text-cyan-200":"rounded-md px-3 py-2 text-slate-400 hover:text-slate-100"}>{isEnglish?"Holdings & yield":"持仓收益"}</button>
+               <button type="button" aria-pressed={tradeMode==='sell'} onClick={()=>{setTradeMode('sell');setPositionsExpanded(true);}}
+                 className={tradeMode==='sell'?"rounded-md bg-indigo-500/20 px-3 py-2 font-semibold text-indigo-200":"rounded-md px-3 py-2 text-slate-400 hover:text-slate-100"}>{isEnglish?"SELL planning":"卖出规划"}</button>
+             </div>
+            <button type="button" disabled={!isConnected||!profileAddress||profileAddress.toLowerCase()!==address.trim().toLowerCase()} onClick={()=>openOrderCenter()}
+              title={!isConnected?(isEnglish?"Connect wallet first":"请先连接钱包"):undefined}
+              className="ui-button-secondary px-3 py-2 text-xs disabled:cursor-not-allowed">
+              {isEnglish?"Order center":"订单中心"} · {clobSnapshot.orders?.length??"—"}
+            </button>
+            <span className="ui-pill">
               {isEnglish ? `${positions.length} positions` : `${positions.length} 个仓位`}
             </span>
             {lowAprCount > 0 && (
-              <span className="rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-1.5 font-medium text-rose-300">
+              <span className="ui-pill ui-pill-warn">
                 {isEnglish ? `${lowAprCount} below APR threshold` : `${lowAprCount} 个低 APR`}
               </span>
             )}
-            <CardToggle expanded={positionsExpanded} onToggle={() => setPositionsExpanded(value => !value)} controls="positions-table-content" label={isEnglish ? "positions and yield" : "持仓收益与市场报价"} language={language} />
+            <CardToggle expanded={positionsExpanded} onToggle={() => setPositionsExpanded(value => !value)} controls="positions-table-content" label={isEnglish ? "positions and trading" : "仓位与交易"} language={language} />
           </div>
         </div>
 
+
+        <BrowserClobPanel profileAddress={profileAddress} queryAddress={address} positions={positions} language={language}
+          activeMode={tradeMode} targetAprInputs={targetAprInputs}
+          selectedAssets={sellSelected} proposedQuantities={sellQuantities}
+          onQuantityChange={(asset,value)=>setSellQuantities(old=>({...old,[asset]:value}))}
+          reviewRequest={reviewRequest} orderCenterRequest={orderCenterRequest}
+          onSnapshotChange={setClobSnapshot}/>
+        {tradeMode==='sell'&&<div className="flex flex-wrap items-center gap-2 border-b border-slate-700/30 bg-slate-950/25 px-4 py-3 text-xs sm:px-6">
+          <span className="mr-1 text-slate-300">{isEnglish?"Selected":"已选"} <strong>{sellSelected.length}</strong> / {positions.filter(p=>!p.redeemable&&p.size>0).length}</span>
+          <button type="button" onClick={()=>setSellSelected(positions.filter(p=>!p.redeemable&&p.size>0).map(p=>p.asset))}
+            className="ui-button-quiet px-3 py-2 text-xs">{isEnglish?"Select all":"全选"}</button>
+          <button type="button" disabled={!sellSelected.length} onClick={()=>setSellSelected([])}
+            className="ui-button-quiet px-3 py-2 text-xs disabled:opacity-40">{isEnglish?"Clear":"清空"}</button>
+          <span className="flex-1"/>
+          <button type="button" disabled={sellQuotesRefreshing} onClick={()=>void refreshSellPlanningQuotes()}
+            className="ui-button-secondary px-3 py-2 text-xs disabled:opacity-40">
+            {sellQuotesRefreshing?(isEnglish?"Refreshing…":"刷新中…"):sellSelected.length>0?(isEnglish?"Refresh selected quotes":"刷新所选报价"):(isEnglish?"Refresh all quotes":"刷新全仓报价")}
+          </button>
+          <button type="button" onClick={()=>beginReview('batch')}
+            disabled={!clobSnapshot.ready||!sellSelected.length}
+            className="ui-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed">{isEnglish?"Review selected":"逐笔审核已选"}</button>
+        </div>}
         <div
           role="region"
           tabIndex={0}
@@ -1221,7 +1294,8 @@ export default function Home() {
           hidden={!positionsExpanded}
           className="overflow-x-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/70"
         >
-          <table className="w-full border-collapse text-left text-sm tabular-nums">
+          <table className="ui-table w-full border-collapse text-left text-sm tabular-nums">
+            {tradeMode==='yield'?<>
             <thead>
               {table.getHeaderGroups().map((headerGroup) => (
                 <tr key={headerGroup.id} className="border-b border-slate-800 bg-slate-950/75 text-xs text-slate-300">
@@ -1296,6 +1370,29 @@ export default function Home() {
                 </tr>
               )}
             </tbody>
+           </>:<>
+            <thead><tr className="border-b border-slate-800 bg-slate-950/75 text-left text-xs text-slate-300">
+              {(isEnglish?["Pick","Market / outcome","Mark APR","Target APR","SELL limit","Holdings / open SELL","Proposed shares","Status","Action"]:
+                ["选","市场 / 方向","Mark APR","目标 APR","SELL 限价","持仓 / 已有 SELL","拟卖份额","状态","操作"])
+                .map(label=><th key={label} scope="col" className="whitespace-nowrap px-2 py-3 font-semibold">{label}</th>)}
+            </tr></thead>
+            <tbody>
+              {table.getRowModel().rows.map(row=>{
+                const p=row.original,cached=sharedSellQuotes[p.asset];
+                const quote=cached&&Date.now()-cached.fetchedAt<5*60*1000?cached.quote:null;
+                return <SellPlanRow key={p.asset} position={p} language={language}
+                  aprInput={targetAprInputs[p.asset]??String(AUTO_SELL_TARGET_MARK_APR_DEFAULT)}
+                  quantityInput={sellQuantities[p.asset]} quote={quote} orders={clobSnapshot.orders} ordersReady={clobSnapshot.ready}
+                  selected={sellSelected.includes(p.asset)}
+                  onAprChange={value=>handleTargetAprChange(p.asset,value)}
+                  onQuantityChange={value=>setSellQuantities(old=>({...old,[p.asset]:value}))}
+                  onSelect={checked=>setSellSelected(old=>checked?[...new Set([...old,p.asset])]:old.filter(id=>id!==p.asset))}
+                  onReview={()=>beginReview('single',p.asset)} onOpenOrders={()=>openOrderCenter(p.asset)}
+                  onRefreshQuote={()=>void loadPositionQuote(p,holdAprThreshold,true)}/>;
+              })}
+              {positions.length===0&&<tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-400">{emptyPositionsMessage}</td></tr>}
+            </tbody>
+           </>}
           </table>
         </div>
       </div>
@@ -1335,7 +1432,7 @@ function PositionQuotePanel({
   const targetAprHelpId = `${targetAprInputId}-help`;
   const hasInvalidTargetApr = targetAprInput.trim() !== "" && targetAprPercent === null;
   return (
-    <div className="rounded-xl border border-cyan-500/20 bg-slate-900/70 p-3 shadow-inner">
+    <div className="ui-inset p-4 sm:p-5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1356,7 +1453,7 @@ function PositionQuotePanel({
           type="button"
           onClick={onRefresh}
           disabled={isLoading}
-          className="inline-flex shrink-0 items-center justify-center gap-1.5 self-start rounded-md border border-slate-700 bg-slate-950/70 px-2.5 py-1.5 text-xs font-semibold text-slate-300 transition-colors hover:border-cyan-500/50 hover:text-cyan-300 disabled:cursor-wait disabled:opacity-60"
+          className="ui-button-secondary shrink-0 self-start px-3 py-2 text-xs disabled:cursor-wait"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} aria-hidden="true" />
           {isEnglish ? "Refresh quote" : "刷新报价"}
@@ -1374,25 +1471,11 @@ function PositionQuotePanel({
         </div>
       ) : quote ? (
         <>
-          <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-            <OrderBookAprCard
-              label={isEnglish ? "Best bid" : "买一"}
-              price={quote.bestBid}
-              apr={quote.bestBidApr}
-              tickSize={quote.tickSize}
-              accent="emerald"
-              description={isEnglish ? "Maker bid reference" : "Maker 买单收益参考"}
-              language={language}
-            />
-            <OrderBookAprCard
-              label={isEnglish ? "Best ask" : "卖一"}
-              price={quote.bestAsk}
-              apr={quote.bestAskApr}
-              tickSize={quote.tickSize}
-              accent="rose"
-              description={isEnglish ? "Immediate buy reference" : "即时买入收益参考"}
-              language={language}
-            />
+          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-slate-700 bg-slate-950/55 px-3 py-3 text-xs text-slate-300">
+            <span>{isEnglish?"Bid":"买一"} <strong className="font-mono text-emerald-300">{formatMarketPercentForTick(quote.bestBid,quote.tickSize)}</strong>
+              <span className="ml-1 text-slate-500">APR {formatPercent(quote.bestBidApr,2)}</span></span>
+            <span>{isEnglish?"Ask":"卖一"} <strong className="font-mono text-rose-300">{formatMarketPercentForTick(quote.bestAsk,quote.tickSize)}</strong>
+              <span className="ml-1 text-slate-500">APR {formatPercent(quote.bestAskApr,2)}</span></span>
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-slate-800 bg-slate-950/45 px-3 py-2 text-xs text-slate-400">
@@ -1405,6 +1488,8 @@ function PositionQuotePanel({
             </span>
           </div>
 
+          <details className="mt-3 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3">
+            <summary className="cursor-pointer text-xs font-semibold text-cyan-200">{isEnglish?"Advanced BUY-side APR and Maker analysis":"高级分析 · 买入侧 APR / Maker 挂价"}</summary>
           <div className="mt-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3">
             <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
               <div className="max-w-xl">
@@ -1440,7 +1525,10 @@ function PositionQuotePanel({
                 {isEnglish ? "Enter a non-negative APR." : "请输入不小于 0 的 APR。"}
               </p>
             ) : targetAprPlan ? (
-              <TargetAprPlanPanel plan={targetAprPlan} tickSize={quote.tickSize} language={language} />
+              <details className="mt-3 rounded-lg border border-slate-700/60 bg-slate-950/40 px-3 py-2">
+                <summary className="cursor-pointer text-xs font-semibold text-slate-300">{isEnglish ? "Show buy-side APR analysis" : "查看买入侧 APR 分析"}</summary>
+                <TargetAprPlanPanel plan={targetAprPlan} tickSize={quote.tickSize} language={language} />
+              </details>
             ) : (
               <p className="mt-2 rounded-lg border border-dashed border-slate-700 px-3 py-2 text-xs text-slate-400">
                 {isEnglish
@@ -1450,14 +1538,8 @@ function PositionQuotePanel({
             )}
           </div>
 
-          {targetAprPercent !== null && (
-            <AutoSellPlannerPanel
-              position={position}
-              quote={quote}
-              targetAprPercent={targetAprPercent}
-              language={language}
-            />
-          )}
+
+          </details>
 
           {quote.note && (
             <p className="mt-1.5 text-[11px] leading-5 text-amber-300/80">{quote.note}</p>
@@ -1544,53 +1626,6 @@ function TargetAprMetric({
   );
 }
 
-function OrderBookAprCard({
-  label,
-  price,
-  apr,
-  tickSize,
-  accent,
-  description,
-  language,
-}: {
-  label: string;
-  price: number | null;
-  apr: number | null;
-  tickSize: number | null;
-  accent: "emerald" | "rose";
-  description: string;
-  language: Language;
-}) {
-  const isEnglish = language === "en";
-  const borderClass = accent === "emerald" ? "border-emerald-500/25" : "border-rose-500/25";
-  const accentClass = accent === "emerald" ? "text-emerald-300" : "text-rose-300";
-
-  return (
-    <div className={`rounded-lg border ${borderClass} bg-slate-950/55 px-3 py-2.5`}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className={`text-sm font-bold ${accentClass}`}>{label}</div>
-          <div className="mt-0.5 text-xs text-slate-400">{description}</div>
-        </div>
-        <div className="text-right">
-          <div className="font-mono text-lg font-black text-slate-100">{formatMarketPercentForTick(price, tickSize)}</div>
-          <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-            {isEnglish ? "Market probability" : "市场概率"}
-          </div>
-        </div>
-      </div>
-      <div className="mt-2 flex items-end justify-between gap-3 border-t border-slate-800 pt-2">
-        <div className="pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-          {isEnglish ? "Conditional APR" : "条件 APR"}
-        </div>
-        <div className={`font-mono text-xl font-black ${accentClass}`}>
-          {formatPercent(apr, 2)}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function formatSignedPercent(value: number | null | undefined, isEnglish: boolean): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return isEnglish ? "Collecting data" : "数据积累中";
   return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(2)}%`;
@@ -1639,7 +1674,7 @@ function HistoryMetric({
     mainValue === "等待查询" ||
     mainValue === "No data yet";
   return (
-    <div className="min-h-24 rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3.5">
+    <div className="ui-stat-card min-h-24 px-4 py-3.5">
       <div className="flex items-center justify-between gap-2 text-xs font-medium text-slate-400">
         {label}
         {icon}
@@ -1684,11 +1719,11 @@ function SummaryCard({
 
   return (
     <div
-      className={`group/card flex min-h-[116px] min-w-0 flex-col justify-between rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-[0_8px_24px_rgba(0,0,0,0.1)] transition-[background-color,border-color] hover:bg-slate-900/80 sm:p-5 ${accents[glowColor]}`}
+      className={`ui-stat-card group/card flex min-h-[123px] min-w-0 flex-col justify-between p-4 sm:p-5 ${accents[glowColor]}`}
     >
       <div className="flex items-center justify-between gap-2">
         <span className="min-w-0 text-xs font-medium leading-5 text-slate-400">{label}</span>
-        {icon && <div className="shrink-0 rounded-lg border border-slate-800 bg-slate-950/70 p-1.5">{icon}</div>}
+        {icon && <div className="ui-stat-icon shrink-0">{icon}</div>}
       </div>
       <div className="mt-3 flex min-w-0 items-end">
         <AutoFitValue value={value} />
