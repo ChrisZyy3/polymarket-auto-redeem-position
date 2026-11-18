@@ -40,13 +40,13 @@ export function OpenOrdersTable({orders,positions,language}:{orders:ClobOrder[];
    <span>{en?orders.length+' open orders in '+groups.length+' markets':orders.length+' 笔未成交订单 · '+groups.length+' 个市场'}</span>
    {orphanAssets.length>0&&<span>{en?'Unheld orders are matched using verified Gamma token IDs.':'未持仓的挂单通过 Gamma Token ID 精确匹配市场标题。'}</span>}
   </div>
-  {groups.map(g=><div key={g.key} className="overflow-hidden rounded-lg border border-slate-700/80">
-   <div className="flex items-center justify-between gap-2 bg-slate-800/50 px-3 py-2 text-sm font-semibold text-slate-100">
+  {groups.map(g=><div key={g.key} className="ui-inset overflow-hidden">
+   <div className="flex items-center justify-between gap-2 border-b border-slate-700/30 bg-slate-800/20 px-4 py-3 text-sm font-semibold text-slate-100">
     {g.slug?<a href={'https://polymarket.com/event/'+encodeURIComponent(g.slug)} target="_blank" rel="noreferrer" className="min-w-0 truncate hover:text-cyan-300">{g.title}</a>:<span className="min-w-0 truncate">{g.title==='Unidentified market'?(en?'Unidentified market':'市场暂未识别'):g.title}</span>}
     <span className="shrink-0 text-xs font-normal text-slate-400">{g.items.length} {en?'orders':'笔'}</span>
    </div>
-   <div className="overflow-x-auto"><table className="w-full min-w-[620px] text-left text-xs tabular-nums">
-    <thead className="bg-slate-900/50 text-slate-400"><tr><th className="px-3 py-2">{en?'Action / outcome':'方向 / 结果'}</th><th className="px-3 py-2">{en?'Limit price':'限价'}</th><th className="px-3 py-2">{en?'Filled / total':'已成交 / 总份额'}</th><th className="px-3 py-2">{en?'Remaining':'未成交'}</th><th className="px-3 py-2">{en?'Status':'状态'}</th></tr></thead>
+   <div className="overflow-x-auto"><table className="ui-table w-full min-w-[620px] text-left text-xs tabular-nums">
+    <thead className="bg-slate-950/30 text-slate-400"><tr><th className="px-3 py-2">{en?'Action / outcome':'方向 / 结果'}</th><th className="px-3 py-2">{en?'Limit price':'限价'}</th><th className="px-3 py-2">{en?'Filled / total':'已成交 / 总份额'}</th><th className="px-3 py-2">{en?'Remaining':'未成交'}</th><th className="px-3 py-2">{en?'Status':'状态'}</th></tr></thead>
     <tbody>{g.items.map(({order,outcome,tokenLabel})=>{const filled=Number(order.size_matched),total=Number(order.original_size),partial=openOrderStatus(order)==='partially_filled';
      return <tr key={order.id} className="border-t border-slate-800/90 text-slate-200">
       <td className="px-3 py-2"><span className={order.side==='SELL'?'font-semibold text-rose-300':'font-semibold text-cyan-300'}>{order.side}</span> <span className="ml-1 text-slate-300">{outcome||tokenLabel}</span>
