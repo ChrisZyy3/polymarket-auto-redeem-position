@@ -34,7 +34,7 @@ import {
 import { MarketTitle } from "@/app/components/market-title";
 import { useConnection } from "wagmi";
 import { BrowserClobPanel } from "@/app/components/browser-clob-panel";
-import { SellPlanRow } from "@/app/components/sell-plan-row";
+import { SellPlanRow, getSellWorkspaceNumbers } from "@/app/components/sell-plan-row";
 import type { ClobOrder } from "@/lib/browser-clob";
 import type { SellReviewRequest } from "@/app/components/manual-sell-review";
 import { WalletConnectPanel } from "@/app/components/wallet-connect-panel";
@@ -44,6 +44,10 @@ import { calculateDailyPriceChange, type DailyPositionPoint } from "@/lib/positi
 import type { PortfolioHistoryMetrics, PortfolioSnapshot } from "@/lib/portfolio-history";
 import { formatMarketPercentForTick } from "@/lib/price-format";
 import { buildTargetAprPlan, type PositionQuote } from "@/lib/position-quote";
+import {
+  BUY_TARGET_APR_STORAGE_KEY, DEFAULT_BUY_TARGET_APR, SELL_TARGET_APR_STORAGE_KEY,
+  resolveSellTargetAprInput, holdDecisionForPosition,
+} from "@/lib/position-apr-strategy";
 import type { EnrichedPosition } from "@/lib/types";
 
 // Structure definition for Dashboard statistics summary
@@ -102,10 +106,9 @@ const HISTORY_KEY = "polymarket-dashboard-address-history";
 const MAX_HISTORY = 8;
 
 const HOLD_APR_THRESHOLD_KEY = "polymarket-dashboard-hold-apr-threshold";
-const AUTO_SELL_TARGET_MARK_APR_DEFAULT = 12;
 const AUTO_SELL_POLL_MS = 5 * 60 * 1000;
 const DEFAULT_HOLD_APR_THRESHOLD = 10; // Default 10% APR alert threshold / 默认 8% 的 APR 预警阈值
-const TARGET_APR_BY_ASSET_KEY = "polymarket-dashboard-target-apr-by-asset-v1";
+const TARGET_APR_BY_ASSET_KEY = SELL_TARGET_APR_STORAGE_KEY;
 const DUST_POSITION_VALUE_USD = 1;
 
 function parseTargetAprInput(value: string): number | null {
@@ -246,6 +249,7 @@ export default function Home() {
   const [expandedPositionKey, setExpandedPositionKey] = useState<string | null>(null);
   const [quoteStates, setQuoteStates] = useState<Record<string, QuoteState>>({});
   const [targetAprInputs, setTargetAprInputs] = useState<Record<string, string>>({});
+  const [buyTargetAprInputs, setBuyTargetAprInputs] = useState<Record<string, string>>({});
   const quoteRequestVersion = useRef(0);
   const quoteByAssetVersion = useRef<Record<string,number>>({});
   const queryRequestVersion = useRef(0);
@@ -289,6 +293,17 @@ export default function Home() {
               : [],
           );
           setTargetAprInputs(Object.fromEntries(entries));
+        }
+      }
+      const storedBuyTargetApr = localStorage.getItem(BUY_TARGET_APR_STORAGE_KEY);
+      if (storedBuyTargetApr) {
+        const parsedBuy = JSON.parse(storedBuyTargetApr) as unknown;
+        if (typeof parsedBuy === "object" && parsedBuy !== null && !Array.isArray(parsedBuy)) {
+          const entries = Object.entries(parsedBuy).flatMap(([asset, value]) =>
+            typeof value === "number" && Number.isFinite(value) && value >= 0
+              ? [[asset, String(value)] as const] : [],
+          );
+          setBuyTargetAprInputs(Object.fromEntries(entries));
         }
       }
     } catch {
@@ -520,6 +535,39 @@ export default function Home() {
     }
   }
 
+  function resetSellTargetApr(asset: string) {
+    const nextInputs = { ...targetAprInputs };
+    delete nextInputs[asset];
+    setTargetAprInputs(nextInputs);
+    try {
+      localStorage.setItem(TARGET_APR_BY_ASSET_KEY, serializeTargetAprInputs(nextInputs));
+    } catch {
+      // Storage errors do not trigger transactions.
+    }
+  }
+
+  function handleBuyTargetAprChange(asset: string, value: string) {
+    if (value && !/^\d*(?:\.\d*)?$/.test(value)) return;
+    const nextInputs = { ...buyTargetAprInputs, [asset]: value };
+    setBuyTargetAprInputs(nextInputs);
+    try {
+      localStorage.setItem(BUY_TARGET_APR_STORAGE_KEY, serializeTargetAprInputs(nextInputs));
+    } catch {
+      // BUY analysis is entirely separate from SELL signing inputs.
+    }
+  }
+
+  function openSellWorkspaceFor(asset: string) {
+    setSellSelected([asset]);
+    setTradeMode('sell');
+    setPositionsExpanded(true);
+    setExpandedPositionKey(null);
+    window.requestAnimationFrame(() =>
+      document.getElementById("positions-table-content")?.scrollIntoView({behavior:"smooth",block:"nearest"})
+    );
+    // Do not automatically open preflight, sign or POST.
+  }
+
   function handleQuoteToggle(position: EnrichedPosition) {
     const key = getPositionKey(position);
     if (expandedPositionKey === key) {
@@ -552,8 +600,8 @@ export default function Home() {
           const quoteKey = getPositionKey(position);
           const quoteExpanded = expandedPositionKey === quoteKey;
           const quoteToggleLabel = quoteExpanded
-            ? (isEnglish ? "Hide live bid and ask APR" : "收起实时盘口 APR")
-            : (isEnglish ? "Show live bid and ask APR" : "展开实时盘口 APR");
+            ? (isEnglish ? "Hide position detail" : "收起仓位详情")
+            : (isEnglish ? "Show position detail" : "展开仓位详情");
           return (
             <div className="w-[260px] min-w-[260px] md:w-[380px] md:min-w-[380px] xl:w-[420px] xl:min-w-[420px]">
               <div className="flex items-start gap-2 md:block">
@@ -570,7 +618,7 @@ export default function Home() {
                     onClick={() => handleQuoteToggle(position)}
                     aria-expanded={quoteExpanded}
                     aria-label={quoteToggleLabel}
-                    title={isEnglish ? "Market APR" : "查看盘口 APR"}
+                    title={isEnglish ? "Position detail" : "仓位详情"}
                     className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-cyan-500/20 bg-cyan-500/5 text-cyan-400 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 md:hidden"
                   >
                     {quoteExpanded ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
@@ -586,7 +634,7 @@ export default function Home() {
                   className="mt-2 hidden items-center gap-1 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2 py-1 text-[10px] font-semibold text-cyan-400 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 md:inline-flex"
                 >
                   {quoteExpanded ? <ChevronUp className="h-3 w-3" aria-hidden="true" /> : <ChevronDown className="h-3 w-3" aria-hidden="true" />}
-                  {isEnglish ? "Market APR" : "查看盘口 APR"}
+                  {isEnglish ? "Position details" : "仓位详情"}
                 </button>
               ) : null}
             </div>
@@ -1123,8 +1171,8 @@ export default function Home() {
           <div className="flex flex-col gap-3">
             <label htmlFor="hold-apr-threshold" className="text-xs leading-5 text-slate-400">
               {isEnglish
-                ? "Highlights positions below this combined APR. Cloudflare alerts use a separate 10% threshold."
-                : "综合持有 APR 低于此值时高亮；Cloudflare 推送阈值独立设为 10%。"}
+                ? "Combined holding APR watch threshold and default SELL target Mark APR (different bases). Per-position SELL overrides stay unchanged. Cloudflare alerts use a separate 10% threshold."
+                : "用于综合持有 APR 预警；同时作为 SELL 目标 Mark APR 的默认数值（计算口径不同）。单仓覆盖值不会随全局变化；Cloudflare 推送仍独立设为 10%。"}
             </label>
             <div className="relative mt-1">
               <input
@@ -1289,7 +1337,7 @@ export default function Home() {
 
 
         <BrowserClobPanel profileAddress={profileAddress} queryAddress={address} positions={positions} language={language}
-          activeMode={tradeMode} targetAprInputs={targetAprInputs}
+          activeMode={tradeMode} targetAprInputs={targetAprInputs} defaultTargetAprPercent={holdAprThreshold}
           selectedAssets={sellSelected} proposedQuantities={sellQuantities}
           onQuantityChange={(asset,value)=>setSellQuantities(old=>({...old,[asset]:value}))}
           reviewRequest={reviewRequest} orderCenterRequest={orderCenterRequest}
@@ -1371,9 +1419,19 @@ export default function Home() {
                           <PositionQuotePanel
                             position={row.original}
                             quoteState={quoteStates[positionKey]}
-                            targetAprInput={targetAprInputs[row.original.asset] ?? String(AUTO_SELL_TARGET_MARK_APR_DEFAULT)}
+                            sellTargetAprInput={resolveSellTargetAprInput(row.original.asset,targetAprInputs,holdAprThreshold).value}
+                            sellTargetCustom={resolveSellTargetAprInput(row.original.asset,targetAprInputs,holdAprThreshold).source==='custom'}
+                            buyTargetAprInput={buyTargetAprInputs[row.original.asset] ?? String(DEFAULT_BUY_TARGET_APR)}
+                            globalAprThreshold={holdAprThreshold}
+                            orders={clobSnapshot.orders}
+                            ordersReady={clobSnapshot.ready}
+                            proposedQuantity={sellQuantities[row.original.asset]}
                             language={language}
-                            onTargetAprChange={(value) => handleTargetAprChange(row.original.asset, value)}
+                            onSellTargetAprChange={(value) => handleTargetAprChange(row.original.asset, value)}
+                            onSellTargetReset={() => resetSellTargetApr(row.original.asset)}
+                            onBuyTargetAprChange={(value) => handleBuyTargetAprChange(row.original.asset, value)}
+                            onPlanSell={() => openSellWorkspaceFor(row.original.asset)}
+                            onOpenOrders={() => openOrderCenter(row.original.asset)}
                             onRefresh={() => handleQuoteRefresh(row.original)}
                           />
                         </td>
@@ -1395,8 +1453,8 @@ export default function Home() {
             </tbody>
            </>:<>
             <thead><tr className="border-b border-slate-800 bg-slate-950/75 text-left text-xs text-slate-300">
-              {(isEnglish?["Pick","Market / outcome","Mark APR","Target APR","SELL limit","Holdings / open SELL","Proposed shares","Status","Action"]:
-                ["选","市场 / 方向","Mark APR","目标 APR","SELL 限价","持仓 / 已有 SELL","拟卖份额","状态","操作"])
+              {(isEnglish?["Pick","Market / outcome","APR strategy","SELL limit","Shares / orders","Status / action"]:
+                ["选","市场 / 方向","APR 策略","SELL 限价","份额 / 挂单","状态 / 操作"])
                 .map(label=><th key={label} scope="col" className="whitespace-nowrap px-2 py-3 font-semibold">{label}</th>)}
             </tr></thead>
             <tbody>
@@ -1404,16 +1462,19 @@ export default function Home() {
                 const p=row.original,cached=sharedSellQuotes[p.asset];
                 const quote=cached&&Date.now()-cached.fetchedAt<5*60*1000?cached.quote:null;
                 return <SellPlanRow key={p.asset} position={p} language={language}
-                  aprInput={targetAprInputs[p.asset]??String(AUTO_SELL_TARGET_MARK_APR_DEFAULT)}
+                  aprInput={resolveSellTargetAprInput(p.asset,targetAprInputs,holdAprThreshold).value}
+                  aprCustom={resolveSellTargetAprInput(p.asset,targetAprInputs,holdAprThreshold).source==='custom'}
+                  globalAprThreshold={holdAprThreshold}
                   quantityInput={sellQuantities[p.asset]} quote={quote} orders={clobSnapshot.orders} ordersReady={clobSnapshot.ready}
                   selected={sellSelected.includes(p.asset)}
                   onAprChange={value=>handleTargetAprChange(p.asset,value)}
+                  onAprReset={()=>resetSellTargetApr(p.asset)}
                   onQuantityChange={value=>setSellQuantities(old=>({...old,[p.asset]:value}))}
                   onSelect={checked=>setSellSelected(old=>checked?[...new Set([...old,p.asset])]:old.filter(id=>id!==p.asset))}
                   onReview={()=>beginReview('single',p.asset)} onOpenOrders={()=>openOrderCenter(p.asset)}
                   onRefreshQuote={()=>void loadPositionQuote(p,holdAprThreshold,true)}/>;
               })}
-              {positions.length===0&&<tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-400">{emptyPositionsMessage}</td></tr>}
+              {positions.length===0&&<tr><td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400">{emptyPositionsMessage}</td></tr>}
             </tbody>
            </>}
           </table>
@@ -1424,162 +1485,171 @@ export default function Home() {
 }
 
 function PositionQuotePanel({
-  position,
-  quoteState,
-  targetAprInput,
-  language,
-  onTargetAprChange,
-  onRefresh,
-}: {
-  position: EnrichedPosition;
-  quoteState?: QuoteState;
-  targetAprInput: string;
-  language: Language;
-  onTargetAprChange: (value: string) => void;
-  onRefresh: () => void;
-}) {
-  const isEnglish = language === "en";
-  const quote = quoteState?.quote;
-  const isLoading = quoteState?.status === "loading";
-  const targetAprPercent = parseTargetAprInput(targetAprInput);
-  const targetAprPlan = quote && targetAprPercent !== null
-    ? buildTargetAprPlan({
-        targetAprPercent,
-        daysToSettle: quote.daysToSettle,
-        bestBid: quote.bestBid,
-        bestAsk: quote.bestAsk,
-        tickSize: quote.tickSize,
-      })
-    : null;
-  const targetAprInputId = `target-apr-${position.asset}`;
-  const targetAprHelpId = `${targetAprInputId}-help`;
-  const hasInvalidTargetApr = targetAprInput.trim() !== "" && targetAprPercent === null;
-  return (
-    <div className="ui-inset p-4 sm:p-5">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h4 className="text-sm font-bold text-slate-100">
-              {isEnglish ? "Live order-book conditional APR" : "实时盘口条件 APR"}
-            </h4>
-            <span className="rounded-full border border-slate-700 bg-slate-950/70 px-2 py-0.5 text-[10px] font-semibold text-slate-400">
-              {position.outcome}
-            </span>
-          </div>
-          <p className="mt-0.5 text-xs leading-5 text-slate-400">
-            {isEnglish
-              ? "Gross annualized return if this outcome settles at $1. This panel never places orders."
-              : "假设该结果最终结算为 $1 的单利年化收益；这里只读取盘口，不执行下单。"}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={isLoading}
-          className="ui-button-secondary shrink-0 self-start px-3 py-2 text-xs disabled:cursor-wait"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} aria-hidden="true" />
-          {isEnglish ? "Refresh quote" : "刷新报价"}
-        </button>
+  position,quoteState,sellTargetAprInput,sellTargetCustom,buyTargetAprInput,globalAprThreshold,
+  orders,ordersReady,proposedQuantity,language,onSellTargetAprChange,onSellTargetReset,
+  onBuyTargetAprChange,onPlanSell,onOpenOrders,onRefresh
+}:{
+  position:EnrichedPosition;quoteState?:QuoteState;sellTargetAprInput:string;sellTargetCustom:boolean;
+  buyTargetAprInput:string;globalAprThreshold:number;orders:ClobOrder[]|null;ordersReady:boolean;
+  proposedQuantity:string|undefined;language:Language;onSellTargetAprChange:(v:string)=>void;
+  onSellTargetReset:()=>void;onBuyTargetAprChange:(v:string)=>void;
+  onPlanSell:()=>void;onOpenOrders:()=>void;onRefresh:()=>void;
+}){
+  const en=language==="en";
+  const [view,setView]=useState<"overview"|"buy">("overview");
+  const quote=quoteState?.quote,loading=quoteState?.status==="loading";
+  const decision=holdDecisionForPosition(position,globalAprThreshold);
+  const low=decision==="consider_exit";
+  const sell=getSellWorkspaceNumbers(position,quote??null,sellTargetAprInput,proposedQuantity,orders,ordersReady);
+  const plan=sell.plan;
+  const buyApr=parseTargetAprInput(buyTargetAprInput);
+  const buyPlan=quote&&buyApr!==null?buildTargetAprPlan({
+    targetAprPercent:buyApr,daysToSettle:quote.daysToSettle,bestBid:quote.bestBid,
+    bestAsk:quote.bestAsk,tickSize:quote.tickSize
+  }):null;
+  const price=(value:number|null|undefined)=>formatMarketPercentForTick(value??null,quote?.tickSize??null);
+  const orderCount=ordersReady?(orders??[]).filter(o=>o.asset_id===position.asset&&o.side==="SELL").length:null;
+  return <section aria-label={en?"Position details":"仓位详情"} className="ui-inset p-4 sm:p-5">
+    <header className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h4 className="text-sm font-bold text-slate-100">{en?"Position detail · APR & SELL":"仓位详情 · APR 与 SELL 工作台"}</h4>
+        <p className="mt-1 text-xs leading-5 text-slate-400">{en?
+          "One expanded card; all prices are estimates and signing still requires separate live review.":
+          "只需展开一次；全部价格仅供参考，下单仍须独立实时审核与签名。"}</p>
       </div>
-
-      {isLoading ? (
-        <div className="mt-3 flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-3 text-xs text-slate-400">
-          <Loader2 className="h-4 w-4 animate-spin text-cyan-400" aria-hidden="true" />
-          {isEnglish ? "Reading the live order book…" : "正在读取当前实时盘口…"}
-        </div>
-      ) : quoteState?.status === "error" ? (
-        <div className="mt-3 rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2.5 text-xs text-rose-300">
-          {quoteState.error}
-        </div>
-      ) : quote ? (
-        <>
-          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-slate-700 bg-slate-950/55 px-3 py-3 text-xs text-slate-300">
-            <span>{isEnglish?"Bid":"买一"} <strong className="font-mono text-emerald-300">{formatMarketPercentForTick(quote.bestBid,quote.tickSize)}</strong>
-              <span className="ml-1 text-slate-500">APR {formatPercent(quote.bestBidApr,2)}</span></span>
-            <span>{isEnglish?"Ask":"卖一"} <strong className="font-mono text-rose-300">{formatMarketPercentForTick(quote.bestAsk,quote.tickSize)}</strong>
-              <span className="ml-1 text-slate-500">APR {formatPercent(quote.bestAskApr,2)}</span></span>
-          </div>
-
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-slate-800 bg-slate-950/45 px-3 py-2 text-xs text-slate-400">
-            <span>{isEnglish ? "Time to settlement" : "距结算"}: <strong className="font-mono text-slate-200">{quote.daysToSettle === null ? "—" : `${quote.daysToSettle.toFixed(1)}d`}</strong></span>
-            <span>{isEnglish ? "Tick" : "最小价位"}: <strong className="font-mono text-slate-300">{formatMarketPercentForTick(quote.tickSize, quote.tickSize)}</strong></span>
-            <span className={quote.orderBookAvailable ? "text-emerald-400" : "text-amber-400"}>
-              {quote.orderBookAvailable
-                ? (isEnglish ? "Live book available" : "已读取实时盘口")
-                : (isEnglish ? "Theoretical price only" : "当前仅显示理论价格")}
-            </span>
-          </div>
-
-          <details className="mt-3 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3">
-            <summary className="cursor-pointer text-xs font-semibold text-cyan-200">{isEnglish?"Advanced BUY-side APR and Maker analysis":"高级分析 · 买入侧 APR / Maker 挂价"}</summary>
-          <div className="mt-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3">
-            <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-              <div className="max-w-xl">
-                <label htmlFor={targetAprInputId} className="text-sm font-bold text-slate-100">
-                  {isEnglish ? "Target APR for this outcome" : "该 Outcome 的目标 APR"}
-                </label>
-                <p id={targetAprHelpId} className="mt-0.5 text-xs leading-5 text-slate-400">
-                  {isEnglish
-                    ? "Saved in this browser for this token only. It is separate from the global Alert APR."
-                    : "仅针对当前 token 保存在此浏览器中，与全局 Alert APR 预警阈值相互独立。"}
-                </p>
-              </div>
-              <div className="relative w-full max-w-44 shrink-0">
-                <input
-                  id={targetAprInputId}
-                  type="number"
-                  min="0"
-                  step="0.1"
-                  inputMode="decimal"
-                  value={targetAprInput}
-                  onChange={(event) => onTargetAprChange(event.target.value)}
-                  aria-describedby={targetAprHelpId}
-                  aria-invalid={hasInvalidTargetApr}
-                  placeholder="12.0"
-                  className="h-10 w-full rounded-lg border border-slate-700 bg-slate-950/80 px-3 pr-9 font-mono text-base font-bold text-slate-100 outline-none transition-colors placeholder:text-slate-600 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20"
-                />
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-500">%</span>
-              </div>
-            </div>
-
-            {hasInvalidTargetApr ? (
-              <p className="mt-2 text-xs font-semibold text-rose-300" role="alert">
-                {isEnglish ? "Enter a non-negative APR." : "请输入不小于 0 的 APR。"}
-              </p>
-            ) : targetAprPlan ? (
-              <details className="mt-3 rounded-lg border border-slate-700/60 bg-slate-950/40 px-3 py-2">
-                <summary className="cursor-pointer text-xs font-semibold text-slate-300">{isEnglish ? "Show buy-side APR analysis" : "查看买入侧 APR 分析"}</summary>
-                <TargetAprPlanPanel plan={targetAprPlan} tickSize={quote.tickSize} language={language} />
-              </details>
-            ) : (
-              <p className="mt-2 rounded-lg border border-dashed border-slate-700 px-3 py-2 text-xs text-slate-400">
-                {isEnglish
-                  ? "Set a Target APR to calculate the target probability and maker bid."
-                  : "输入 Target APR 后，将计算目标概率与 Maker 建议挂价。"}
-              </p>
-            )}
-          </div>
-
-
-          </details>
-
-          {quote.note && (
-            <p className="mt-1.5 text-[11px] leading-5 text-amber-300/80">{quote.note}</p>
-          )}
-          <p className="mt-1.5 text-[11px] leading-5 text-slate-500">
-            {isEnglish
-              ? "APR excludes fees and is realized only if the outcome settles at $1."
-              : "APR 未计手续费，且仅在该结果最终结算为 $1 时成立。"}
-          </p>
-        </>
-      ) : (
-        <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-3 text-xs text-slate-500">
-          {isEnglish ? "Preparing quote…" : "正在准备报价…"}
-        </div>
-      )}
+      <button type="button" onClick={onRefresh} disabled={loading} className="ui-button-secondary px-3 py-2 text-xs disabled:cursor-wait">
+        <RefreshCw className={"h-3.5 w-3.5 "+(loading?"animate-spin motion-reduce:animate-none":"")} aria-hidden="true"/>
+        {en?"Refresh book":"刷新盘口"}
+      </button>
+    </header>
+    <div role="group" aria-label={en?"Position detail view":"仓位详情视图"} className="ui-segmented mt-4">
+      <button type="button" aria-pressed={view==="overview"} onClick={()=>setView("overview")} className="px-3 py-1.5 text-xs">
+        {en?"Hold & SELL":"持有与 SELL"}
+      </button>
+      <button type="button" aria-pressed={view==="buy"} onClick={()=>setView("buy")} className="px-3 py-1.5 text-xs">
+        {en?"BUY maker analysis":"BUY 侧分析"}
+      </button>
     </div>
-  );
+
+    {view==="overview"?<>
+      <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <div className="ui-stat-card px-3 py-3">
+          <p className="text-[11px] text-slate-400">{en?"Combined hold APR":"综合持有 APR"}</p>
+          <p className={"mt-1 font-mono text-xl font-bold "+(low?"text-amber-300":"text-emerald-300")}>{formatPercent(position.holdApr,2)}</p>
+          <p className="mt-1 text-[10px] text-slate-500">{en?"Watch threshold":"警报阈值"} {globalAprThreshold}%</p>
+        </div>
+        <div className="ui-stat-card px-3 py-3">
+          <p className="text-[11px] text-slate-400">Mark APR</p>
+          <p className="mt-1 font-mono text-xl font-bold text-slate-100">{formatPercent(position.markApr,2)}</p>
+          <p className="mt-1 text-[10px] text-slate-500">{en?"Excludes rewards":"不含持有奖励"}</p>
+        </div>
+        <div className="ui-stat-card px-3 py-3">
+          <p className="text-[11px] text-slate-400">{en?"Holding reward APR":"持有奖励 APR"}</p>
+          <p className="mt-1 font-mono text-xl font-bold text-slate-100">{position.holdingRewardEligible===true&&position.holdingRewardApr>0?
+            formatPercent(position.holdingRewardApr,2):position.holdingRewardEligible===false?"0.00%":"—"}</p>
+          <p className="mt-1 text-[10px] text-slate-500">{position.holdingRewardEligible===true?
+            (en?"Eligible · subject to change":"当前符合资格 · 奖励可变"):position.holdingRewardEligible===false?
+            (en?"Not eligible":"不符合资格"):(en?"Eligibility unverified":"奖励资格待核实")}</p>
+        </div>
+        <div className="ui-stat-card px-3 py-3">
+          <p className="text-[11px] text-slate-400">{en?"Time to settlement":"距预计结算"}</p>
+          <p className="mt-1 font-mono text-xl font-bold text-slate-100">
+            {Number.isFinite(position.daysToSettle)?Math.max(0,position.daysToSettle).toFixed(1)+"d":"—"}
+          </p>
+          <p className="mt-1 text-[10px] text-slate-500">{position.endDate??(en?"Date unverified":"日期待核实")}</p>
+        </div>
+      </div>
+      <p role="status" className={"mt-3 rounded-xl border px-3 py-2.5 text-xs leading-5 "+(low?
+        "border-amber-500/30 bg-amber-950/20 text-amber-200":decision==="continue_holding"?
+        "border-emerald-500/20 bg-emerald-950/10 text-emerald-200":
+        "border-slate-700/40 bg-slate-900/40 text-slate-400")}>
+        {decision==="consider_exit"?(en?"Combined hold APR is below the watch threshold: consider an exit, but no order is triggered.":
+          "综合持有 APR 已达到或低于阈值：建议评估是否退出，不会自动挂单。"):
+         decision==="continue_holding"?(en?"Combined hold APR is above your watch threshold.":"综合 APR 高于警报阈值，暂未触发退出评估。"):
+         (en?"Combined APR unavailable; no exit suggestion.":"综合 APR 暂不可用，不作退出判断。")}
+      </p>
+      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <div className="ui-inset p-4">
+          <h5 className="text-xs font-bold text-slate-100">{en?"Live order book":"实时盘口"}</h5>
+          {quote?<div className="mt-3 grid grid-cols-2 gap-3">
+            <div><p className="text-[11px] text-slate-500">{en?"Best bid":"买一"}</p>
+              <p className="mt-1 font-mono text-lg font-bold text-emerald-300">{price(quote.bestBid)}</p>
+              <p className="text-[11px] text-slate-400">APR {formatPercent(quote.bestBidApr,2)}</p></div>
+            <div><p className="text-[11px] text-slate-500">{en?"Best ask":"卖一"}</p>
+              <p className="mt-1 font-mono text-lg font-bold text-rose-300">{price(quote.bestAsk)}</p>
+              <p className="text-[11px] text-slate-400">APR {formatPercent(quote.bestAskApr,2)}</p></div>
+          </div>:<p className="mt-3 text-xs text-slate-400">{loading?(en?"Loading order book…":"正在读取盘口…"):
+            quoteState?.status==="error"?quoteState.error:(en?"Waiting for quote":"等待盘口报价")}</p>}
+          <p className="mt-3 text-[11px] text-slate-500">
+            {en?"Tick":"最小价位"} {quote?.tickSize??"—"} · {quote?.orderBookAvailable?(en?"Live book":"实时盘口"):(en?"Unverified":"盘口未核实")}
+          </p>
+          {quote?.note&&<p className="mt-2 text-[11px] text-amber-300">{quote.note}</p>}
+        </div>
+        <div className="ui-inset space-y-3 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <h5 className="text-xs font-bold text-slate-100">{en?"SELL planning · DRY RUN":"SELL 规划 · 模拟"}</h5>
+            <span className="ui-pill ui-pill-accent">{en?"Mark basis":"Mark 定价"}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor={"detail-sell-"+position.asset} className="text-xs text-slate-300">{en?"Target Mark APR":"目标 Mark APR"}</label>
+            <input id={"detail-sell-"+position.asset} type="number" min="0.1" max="10000" step="0.1" inputMode="decimal"
+              aria-label={en?"SELL target Mark APR":"SELL 目标 Mark APR"} value={sellTargetAprInput}
+              onChange={e=>onSellTargetAprChange(e.target.value)}
+              className={"ui-input w-24 px-2 py-1.5 font-mono text-sm "+(sell.validApr?"":"border-amber-400")}/>
+            <span className="text-xs text-slate-400">%</span>
+            {sellTargetCustom?<button type="button" onClick={onSellTargetReset} className="text-[11px] text-cyan-300 underline underline-offset-2">
+              {en?"Reset to global":"恢复全局"} {globalAprThreshold}%</button>:
+              <span className="text-[11px] text-slate-500">{en?"Following global":"跟随全局"} {globalAprThreshold}%</span>}
+          </div>
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div><p className="text-[11px] text-slate-500">{en?"Indicative SELL limit":"SELL 参考限价"}</p>
+              <p className="mt-1 font-mono text-2xl font-bold text-cyan-200">{price(plan?.proposedLimitPrice)}</p></div>
+            <p className="text-right text-[11px] text-slate-400">{en?"APR at limit":"限价 Mark APR"}{" "}
+              {plan?.priceAtLimitAprPercent===null||plan?.priceAtLimitAprPercent===undefined?"—":plan.priceAtLimitAprPercent.toFixed(2)+"%"}</p>
+          </div>
+          {plan?.status==="would_cross"&&<p className="text-[11px] text-amber-300">
+            {en?"Proposed price may cross the bid; Post-Only recheck required.":"建议价可能吃单；实际审核将复核 Post-Only。"}
+          </p>}
+          <p className="text-[11px] text-slate-500">
+            {en?"Held":"持有"} {position.size.toLocaleString(undefined,{maximumFractionDigits:6})}
+            {" · "}{en?"Open SELL":"已有 SELL"} {sell.openSell===null?"—":sell.openSell.toLocaleString(undefined,{maximumFractionDigits:6})}
+            {" · "}{en?"Proposed":"拟卖"} {sell.normalized===null?"—":sell.normalized.toLocaleString(undefined,{maximumFractionDigits:2})}
+          </p>
+          {orderCount!==null&&orderCount>0&&<button type="button" onClick={onOpenOrders}
+            className="text-[11px] text-amber-300 underline underline-offset-2">
+            {en?"View "+orderCount+" open SELL orders":"查看 "+orderCount+" 笔已有 SELL 挂单"}</button>}
+          <p className="text-[11px] leading-5 text-slate-500">{en?
+            "SELL limit is priced using Mark APR only; holding rewards are not guaranteed proceeds.":
+            "SELL 限价只按 Mark APR 计算；奖励仅供持有决策参考，不保证未来收入。"}</p>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <p className="max-w-xl text-[11px] leading-5 text-slate-500">{en?
+          "Prices and shares are simulations. A fresh CLOB, Safe and order review is always required.":
+          "以上均为模拟值。真实卖单仍须重新检查盘口、Safe、可卖份额和订单条件。"}</p>
+        <button type="button" onClick={onPlanSell} className="ui-button-trade-outline px-4 py-2 text-xs">
+          {en?"Open SELL planning →":"进入 SELL 规划 →"}</button>
+      </div>
+    </>:<div className="ui-inset mt-4 p-4">
+      <h5 className="text-sm font-semibold text-slate-100">{en?"Advanced BUY maker analysis · read only":"BUY 侧 Maker 高级分析 · 只读"}</h5>
+      <p className="mt-1 text-xs leading-5 text-slate-400">{en?
+        "BUY target APR is independent from SELL pricing; editing it never changes pending or LIVE SELL orders.":
+        "BUY 目标 APR 独立保存；调整不会修改 SELL 价格、审核单或已有挂单。"}</p>
+      <div className="mt-3 flex items-center gap-2">
+        <label htmlFor={"buy-target-"+position.asset} className="text-xs text-slate-300">{en?"BUY target APR":"BUY 目标 APR"}</label>
+        <input id={"buy-target-"+position.asset} type="number" min="0" max="10000" step="0.1" inputMode="decimal"
+          aria-label={en?"Independent BUY target APR":"独立 BUY 目标 APR"} value={buyTargetAprInput}
+          onChange={e=>onBuyTargetAprChange(e.target.value)} className="ui-input w-24 px-2 py-2 font-mono text-sm"/>
+        <span className="text-xs text-slate-400">%</span>
+      </div>
+      {quote&&buyPlan?<TargetAprPlanPanel plan={buyPlan} tickSize={quote.tickSize} language={language}/>:
+        <p className="mt-3 text-xs text-slate-400">{buyApr===null?(en?"Enter a valid BUY APR.":"请输入有效的 BUY APR。"):
+          (en?"Awaiting verified quote / settlement date.":"盘口或结算日期尚未核实。")}</p>}
+      <p className="mt-3 text-[11px] leading-5 text-slate-500">{en?
+        "No BUY orders are sent; returns assume resolution at $1 and exclude fees.":
+        "不会提交 BUY 订单。理论收益假设该 Outcome 以 $1 结算，且未计手续费。"}</p>
+    </div>}
+  </section>;
 }
 
 function TargetAprPlanPanel({
