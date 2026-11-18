@@ -949,28 +949,28 @@ export default function Home() {
       : (isEnglish ? "Enter a wallet address and click Analyze." : "请输入钱包地址并点击查询分析，查看仓位数据。");
 
   return (
-    <main id="main-content" className="relative z-10 mx-auto w-full max-w-[1440px] px-4 pb-12 pt-6 sm:px-6 md:pt-8 xl:px-8">
+    <main id="main-content" className="ui-main relative z-10 mx-auto w-full max-w-[1440px] px-3 pb-16 pt-4 sm:px-6 sm:pt-6 xl:px-8">
       
       {/* 
         * Dashboard Header Brand & Description
         * 顶部系统主标题与装饰标徽
         */}
-      <div className="flex flex-col justify-between gap-4 border-b border-slate-800/80 pb-6 md:flex-row md:items-center">
+      <div className="ui-hero flex flex-col justify-between gap-5 px-5 py-6 sm:px-7 sm:py-7 md:flex-row md:items-center">
         <div>
-          <div className="mb-3 inline-flex items-center gap-2 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-cyan-300">
-            <Zap className="h-3.5 w-3.5" />
+          <div className="ui-eyebrow mb-3">
+            <span className="ui-brand-icon"><Zap className="h-4 w-4" aria-hidden="true"/></span>
             Polymarket Portfolio Analyzer
           </div>
-          <h1 className="max-w-3xl text-balance bg-gradient-to-r from-slate-50 via-slate-100 to-cyan-200 bg-clip-text text-2xl font-bold leading-tight tracking-tight text-transparent md:text-[2rem]">
+          <h1 className="max-w-3xl text-balance bg-gradient-to-r from-white via-slate-100 to-sky-200 bg-clip-text text-[1.7rem] font-bold leading-[1.2] tracking-[-0.035em] text-transparent sm:text-[2rem] md:text-[2.2rem]">
             {isEnglish ? "Portfolio & Returns Monitor" : "自动持仓监控与收益看板"}
           </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+          <p className="mt-3 max-w-2xl text-[13px] leading-6 text-slate-400 sm:text-sm">
             {isEnglish
               ? "Estimate annualized returns to settlement at current prices, and flag low-APR, losing, and redeemable positions."
               : "按当前价格计算到期年化，快速识别低 APR、亏损和可赎回仓位。"}
           </p>
         </div>
-        <div className="inline-flex items-center gap-1 self-start rounded-xl border border-slate-700/70 bg-slate-900/70 p-1 md:self-auto" aria-label={isEnglish ? "Language" : "语言"}>
+        <div className="ui-segmented self-start md:self-auto" aria-label={isEnglish ? "Language" : "语言"}>
           <Languages className="ml-2 h-4 w-4 text-cyan-400" aria-hidden="true" />
           <button
             type="button"
@@ -992,7 +992,7 @@ export default function Home() {
       </div>
 
       <WalletConnectPanel language={language} />
-      {isConnected && <div role="status" className="mt-2 rounded-xl border border-slate-800 bg-slate-900/55 px-4 py-3 text-xs leading-5 text-slate-300">
+      {isConnected && <div role="status" className="ui-surface-subtle mt-3 px-4 py-3 text-xs leading-5 text-slate-300">
         {profileStatus === "loading" ? (isEnglish ? "Looking up Polymarket profile…" : "正在查找 Polymarket 账户…") :
          profileStatus === "found" ? <span className="break-all">{isEnglish ? "Polymarket position address" : "Polymarket 持仓地址"}: <span className="font-mono text-cyan-200">{profileAddress}</span>{isEnglish ? " · Check against your Polymarket profile." : " · 请与 Polymarket 个人资料中的地址核对。"}</span> :
          profileStatus === "not_found" ? (isEnglish ? "No public profile found. Enter the position address manually." : "未找到公开资料，请手动输入 Polymarket 持仓地址。") :
@@ -1004,10 +1004,10 @@ export default function Home() {
         * Search Bar & Configurations Container
         * 地址检索框与年化告警阈值调节面板
         */}
-      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-3">
         
         {/* Search Address Input Card / 钱包地址查询输入卡片 */}
-        <div className="relative rounded-2xl border border-slate-800 bg-slate-900/55 p-4 shadow-[0_10px_28px_rgba(0,0,0,0.12)] sm:p-5 lg:col-span-2">
+        <div className="ui-surface p-4 sm:p-5 lg:col-span-2">
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400/35 to-transparent"></div>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
@@ -1038,7 +1038,7 @@ export default function Home() {
                 value={address}
                 onChange={(e) => { profileRequestVersion.current += 1; setProfileStatus(status => status === "loading" ? "idle" : status); setAddress(e.target.value); }}
                 placeholder={isEnglish ? "EVM wallet address, e.g. 0x1234…" : "输入 EVM 钱包地址，如 0x1234…"}
-                className="h-11 w-full rounded-xl border border-slate-700 bg-slate-950/75 py-2.5 pl-3.5 pr-11 font-mono text-sm text-slate-100 shadow-inner outline-none transition-[border-color,box-shadow] placeholder:font-sans placeholder:text-slate-500 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/25"
+                className="ui-input h-11 w-full py-2.5 pl-3.5 pr-11 font-mono text-sm placeholder:font-sans placeholder:text-slate-500"
               />
               {address && (
                 <button
@@ -1055,7 +1055,7 @@ export default function Home() {
             <button
               type="submit"
               disabled={loading}
-              className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-cyan-400 px-5 text-sm font-semibold text-slate-950 shadow-sm transition-[background-color,box-shadow] hover:bg-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 disabled:cursor-wait disabled:opacity-50"
+              className="ui-button-primary h-11 cursor-pointer px-6 text-sm disabled:cursor-wait"
             >
               {loading ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Search aria-hidden="true" className="h-4 w-4" />}
               {isEnglish ? "Analyze" : "查询分析"}
@@ -1095,7 +1095,7 @@ export default function Home() {
         </div>
 
         {/* Global Warnings Parameter Card / 报警参数面板卡片 */}
-        <div className="relative rounded-2xl border border-slate-800 bg-slate-900/55 p-4 shadow-[0_10px_28px_rgba(0,0,0,0.12)] sm:p-5">
+        <div className="ui-surface p-4 sm:p-5">
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-indigo-400/25 to-transparent"></div>
           <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100">
             <Percent className="h-4 w-4 text-indigo-300" aria-hidden="true" />
@@ -1118,7 +1118,7 @@ export default function Home() {
                 step="0.5"
                 value={holdAprThreshold}
                 onChange={handleThresholdChange}
-                className="h-11 w-full rounded-xl border border-slate-700 bg-slate-950/75 px-3.5 py-2.5 font-mono text-sm font-semibold text-slate-100 shadow-inner outline-none transition-[border-color,box-shadow] focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/25"
+                className="ui-input h-11 w-full px-3.5 py-2.5 font-mono text-sm font-semibold"
               />
               <span aria-hidden="true" className="pointer-events-none absolute right-4 top-3 text-sm font-bold text-indigo-300">%</span>
             </div>
@@ -1144,7 +1144,7 @@ export default function Home() {
         * 账户总体业绩卡片与统计分析结果：查询前保留完整页面骨架
         */}
       {/* Dashboard Summary Statistics Cards Grid / 指标概览区块 */}
-      <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
             <SummaryCard
               label={isEnglish ? "Total portfolio value" : "资产总价值"}
               value={data ? `$${formatNumber(data.summary.totalBalance)}` : "—"}
@@ -1175,7 +1175,7 @@ export default function Home() {
             />
       </div>
 
-     <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+     <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <HistoryMetric
           label={isEnglish ? "Change since first record" : "记录以来变化 / 年化"}
           value={data ? formatHistoryChange(
@@ -1211,10 +1211,10 @@ export default function Home() {
       <PortfolioHistoryChart snapshots={portfolioHistory?.snapshots ?? []} language={language} />
 
       {/* Positions detailed tables container / 仓位细分数据列表 */}
-      <div className="relative mt-8 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/45 shadow-[0_14px_36px_rgba(0,0,0,0.14)]">
+      <div className="ui-surface relative mt-7 overflow-hidden">
         <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent"></div>
 
-        <div className="flex flex-col gap-3 border-b border-slate-800 bg-slate-900/65 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-5">
+        <div className="flex flex-col gap-4 border-b border-slate-700/35 bg-slate-900/30 px-4 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div className="min-w-0">
             <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-100">
               <Activity className="h-5 w-5 text-cyan-400" aria-hidden="true" />
@@ -1241,7 +1241,7 @@ export default function Home() {
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs">
-             <div role="group" aria-label={isEnglish?"Position table mode":"仓位表模式"} className="flex rounded-lg border border-slate-700 bg-slate-950/80 p-1">
+             <div role="group" aria-label={isEnglish?"Position table mode":"仓位表模式"} className="ui-segmented">
                <button type="button" aria-pressed={tradeMode==='yield'} onClick={()=>{setTradeMode('yield');setPositionsExpanded(true);}}
                  className={tradeMode==='yield'?"rounded-md bg-cyan-500/20 px-3 py-2 font-semibold text-cyan-200":"rounded-md px-3 py-2 text-slate-400 hover:text-slate-100"}>{isEnglish?"Holdings & yield":"持仓收益"}</button>
                <button type="button" aria-pressed={tradeMode==='sell'} onClick={()=>{setTradeMode('sell');setPositionsExpanded(true);}}
@@ -1249,14 +1249,14 @@ export default function Home() {
              </div>
             <button type="button" disabled={!isConnected||!profileAddress||profileAddress.toLowerCase()!==address.trim().toLowerCase()} onClick={()=>openOrderCenter()}
               title={!isConnected?(isEnglish?"Connect wallet first":"请先连接钱包"):undefined}
-              className="rounded-lg border border-slate-600 px-3 py-2 font-semibold text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-35">
+              className="ui-button-secondary px-3 py-2 text-xs disabled:cursor-not-allowed">
               {isEnglish?"Order center":"订单中心"} · {clobSnapshot.orders?.length??"—"}
             </button>
-            <span className="rounded-lg border border-slate-700/70 bg-slate-950/60 px-3 py-1.5 font-medium text-slate-300">
+            <span className="ui-pill">
               {isEnglish ? `${positions.length} positions` : `${positions.length} 个仓位`}
             </span>
             {lowAprCount > 0 && (
-              <span className="rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-1.5 font-medium text-rose-300">
+              <span className="ui-pill ui-pill-warn">
                 {isEnglish ? `${lowAprCount} below APR threshold` : `${lowAprCount} 个低 APR`}
               </span>
             )}
@@ -1271,20 +1271,20 @@ export default function Home() {
           onQuantityChange={(asset,value)=>setSellQuantities(old=>({...old,[asset]:value}))}
           reviewRequest={reviewRequest} orderCenterRequest={orderCenterRequest}
           onSnapshotChange={setClobSnapshot}/>
-        {tradeMode==='sell'&&<div className="flex flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-950/30 px-4 py-3 text-xs sm:px-6">
+        {tradeMode==='sell'&&<div className="flex flex-wrap items-center gap-2 border-b border-slate-700/30 bg-slate-950/25 px-4 py-3 text-xs sm:px-6">
           <span className="mr-1 text-slate-300">{isEnglish?"Selected":"已选"} <strong>{sellSelected.length}</strong> / {positions.filter(p=>!p.redeemable&&p.size>0).length}</span>
           <button type="button" onClick={()=>setSellSelected(positions.filter(p=>!p.redeemable&&p.size>0).map(p=>p.asset))}
-            className="rounded border border-slate-700 px-2 py-1.5 text-slate-300 hover:bg-slate-800">{isEnglish?"Select all":"全选"}</button>
+            className="ui-button-quiet px-3 py-2 text-xs">{isEnglish?"Select all":"全选"}</button>
           <button type="button" disabled={!sellSelected.length} onClick={()=>setSellSelected([])}
-            className="rounded border border-slate-700 px-2 py-1.5 text-slate-300 disabled:opacity-40">{isEnglish?"Clear":"清空"}</button>
+            className="ui-button-quiet px-3 py-2 text-xs disabled:opacity-40">{isEnglish?"Clear":"清空"}</button>
           <span className="flex-1"/>
           <button type="button" disabled={sellQuotesRefreshing} onClick={()=>void refreshSellPlanningQuotes()}
-            className="rounded border border-cyan-500/40 px-3 py-2 font-semibold text-cyan-200 disabled:opacity-40">
+            className="ui-button-secondary px-3 py-2 text-xs disabled:opacity-40">
             {sellQuotesRefreshing?(isEnglish?"Refreshing…":"刷新中…"):sellSelected.length>0?(isEnglish?"Refresh selected quotes":"刷新所选报价"):(isEnglish?"Refresh all quotes":"刷新全仓报价")}
           </button>
           <button type="button" onClick={()=>beginReview('batch')}
             disabled={!clobSnapshot.ready||!sellSelected.length}
-            className="rounded bg-indigo-500 px-3 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-35">{isEnglish?"Review selected":"逐笔审核已选"}</button>
+            className="ui-button-primary px-4 py-2 text-xs disabled:cursor-not-allowed">{isEnglish?"Review selected":"逐笔审核已选"}</button>
         </div>}
         <div
           role="region"
@@ -1294,7 +1294,7 @@ export default function Home() {
           hidden={!positionsExpanded}
           className="overflow-x-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/70"
         >
-          <table className="w-full border-collapse text-left text-sm tabular-nums">
+          <table className="ui-table w-full border-collapse text-left text-sm tabular-nums">
             {tradeMode==='yield'?<>
             <thead>
               {table.getHeaderGroups().map((headerGroup) => (
@@ -1432,7 +1432,7 @@ function PositionQuotePanel({
   const targetAprHelpId = `${targetAprInputId}-help`;
   const hasInvalidTargetApr = targetAprInput.trim() !== "" && targetAprPercent === null;
   return (
-    <div className="rounded-xl border border-cyan-500/20 bg-slate-900/70 p-3 shadow-inner">
+    <div className="ui-inset p-4 sm:p-5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1453,7 +1453,7 @@ function PositionQuotePanel({
           type="button"
           onClick={onRefresh}
           disabled={isLoading}
-          className="inline-flex shrink-0 items-center justify-center gap-1.5 self-start rounded-md border border-slate-700 bg-slate-950/70 px-2.5 py-1.5 text-xs font-semibold text-slate-300 transition-colors hover:border-cyan-500/50 hover:text-cyan-300 disabled:cursor-wait disabled:opacity-60"
+          className="ui-button-secondary shrink-0 self-start px-3 py-2 text-xs disabled:cursor-wait"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} aria-hidden="true" />
           {isEnglish ? "Refresh quote" : "刷新报价"}
@@ -1674,7 +1674,7 @@ function HistoryMetric({
     mainValue === "等待查询" ||
     mainValue === "No data yet";
   return (
-    <div className="min-h-24 rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3.5">
+    <div className="ui-stat-card min-h-24 px-4 py-3.5">
       <div className="flex items-center justify-between gap-2 text-xs font-medium text-slate-400">
         {label}
         {icon}
@@ -1719,11 +1719,11 @@ function SummaryCard({
 
   return (
     <div
-      className={`group/card flex min-h-[116px] min-w-0 flex-col justify-between rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-[0_8px_24px_rgba(0,0,0,0.1)] transition-[background-color,border-color] hover:bg-slate-900/80 sm:p-5 ${accents[glowColor]}`}
+      className={`ui-stat-card group/card flex min-h-[123px] min-w-0 flex-col justify-between p-4 sm:p-5 ${accents[glowColor]}`}
     >
       <div className="flex items-center justify-between gap-2">
         <span className="min-w-0 text-xs font-medium leading-5 text-slate-400">{label}</span>
-        {icon && <div className="shrink-0 rounded-lg border border-slate-800 bg-slate-950/70 p-1.5">{icon}</div>}
+        {icon && <div className="ui-stat-icon shrink-0">{icon}</div>}
       </div>
       <div className="mt-3 flex min-w-0 items-end">
         <AutoFitValue value={value} />
