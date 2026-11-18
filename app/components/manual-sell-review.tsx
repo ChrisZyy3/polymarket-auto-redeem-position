@@ -24,6 +24,7 @@ type Props = {
  onOpenOrders:(asset:string)=>void;
  ordersReady:boolean;
  targetAprInputs:Record<string,string>;
+ defaultTargetAprPercent:number;
  selectedAssets:string[];
  proposedQuantities:Record<string,string>;
  onQuantityChange:(asset:string,value:string)=>void;
@@ -54,7 +55,7 @@ function SellSubmissionBanner({receipt,language,onOpenOrders,onDismiss}:{
  </section>;
 }
 
-export function ManualSellReview({address,funder,credentials,positions,orders,language,onOrdersRefresh,onOpenOrders,ordersReady,targetAprInputs,selectedAssets,proposedQuantities,onQuantityChange,reviewRequest}: Props) {
+export function ManualSellReview({address,funder,credentials,positions,orders,language,onOrdersRefresh,onOpenOrders,ordersReady,targetAprInputs,defaultTargetAprPercent,selectedAssets,proposedQuantities,onQuantityChange,reviewRequest}: Props) {
   const en = language === 'en';
   const {data:wallet} = useWalletClient();
   const publicClient = usePublicClient({chainId:137});
@@ -83,7 +84,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
   const pendingKey = pendingAttemptKey(address,funder);
   const tradable=positions.filter(p=>!p.redeemable&&p.size>0);
   const activePosition=tradable.find(p=>p.asset===active);
-  const activeApr=active?targetAprInputs[active]??'12':'12';
+  const activeApr=active?targetAprInputs[active]??String(defaultTargetAprPercent):String(defaultTargetAprPercent);
   const activeQuantity=activePosition ? (proposedQuantities[activePosition.asset] ?? String(indicativeUnreservedShares(activePosition.size,activePosition.asset,orders) ?? '')) : '';
   const activeSettled=!!activePosition && settlementConfirmedForDate(settlementDates[activePosition.asset],activePosition.endDate);
 
@@ -138,7 +139,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
   function draftFor(id:string){
     const p=positionFor(id);
     return {
-      apr: targetAprInputs[id]??'12',
+      apr: targetAprInputs[id]??String(defaultTargetAprPercent),
       quantity: proposedQuantities[id] ?? String(p ? indicativeUnreservedShares(p.size,id,orders)??'' : '')
     };
   }
@@ -221,7 +222,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
     // must never start an implicit second order review (invalid_quantity).
     void prepareFor(active);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[active,review,coverage,settlementDates,targetAprInputs,proposedQuantities,busy,ordersReady,pending,uncertain,activePosition?.endDate]);
+  },[active,review,coverage,settlementDates,targetAprInputs,defaultTargetAprPercent,proposedQuantities,busy,ordersReady,pending,uncertain,activePosition?.endDate]);
 
   async function execute(){
     if(lock.current||!active||!review||review.position.asset!==active||review.result.status!=='review'
