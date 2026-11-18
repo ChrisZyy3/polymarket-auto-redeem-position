@@ -363,8 +363,8 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
     {active&&activePosition&&<div className="fixed inset-0 z-[90] flex items-end justify-end bg-slate-950/70 backdrop-blur-sm lg:items-stretch"
       onMouseDown={event=>{if(event.target===event.currentTarget&&!lock.current)leaveReview();}}>
       <aside ref={dialogRef} role="dialog" aria-modal="true" aria-label={en?'SELL order review':'SELL 卖单审核'}
-        className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl border border-indigo-500/30 bg-[#0c1327] shadow-2xl shadow-black/60 lg:h-full lg:max-h-none lg:w-[560px] lg:rounded-l-2xl lg:rounded-tr-none">
-        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-700/70 px-5 py-4">
+        className="ui-dialog flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl border lg:h-full lg:max-h-none lg:w-[560px] lg:rounded-l-2xl lg:rounded-tr-none">
+        <header className="ui-dialog-header flex shrink-0 items-start justify-between gap-3 border-b border-slate-700/30 px-5 py-5">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-widest text-indigo-300">SELL · GTD 7D · POST-ONLY</p>
             <h4 className="mt-1 text-lg font-semibold text-slate-100">{en?'Review order':'审核卖单'}
@@ -373,7 +373,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
             </h4>
           </div>
           <button ref={closeButton} type="button" disabled={busy} onClick={leaveReview}
-            className="rounded-lg border border-slate-600 p-2 text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+            className="ui-button-quiet h-9 w-9 p-2 disabled:opacity-40"
             aria-label={en?'Close review':'关闭审核'}>✕</button>
         </header>
 
@@ -381,13 +381,13 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
           <div>
             <p className="font-semibold leading-6 text-slate-100">{activePosition.title} <span className="text-indigo-300">· {activePosition.outcome}</span></p>
             <div className="mt-2 grid grid-cols-2 gap-2">
-              <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3"><p className="text-xs text-slate-400">{en?'Target APR':'目标剩余 APR'}</p>
+              <div className="ui-inset p-3"><p className="text-xs text-slate-400">{en?'Target APR':'目标剩余 APR'}</p>
                 <p className="mt-1 text-xl font-semibold text-slate-100">{activeApr}%</p></div>
-              <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3"><p className="text-xs text-slate-400">{en?'Proposed shares':'拟卖份额'}</p>
+              <div className="ui-inset p-3"><p className="text-xs text-slate-400">{en?'Proposed shares':'拟卖份额'}</p>
                 <p className="mt-1 text-xl font-semibold text-slate-100">{review?.result.status==='review'?showShares(review.result.quantity):showShares(Number(activeQuantity))}</p></div>
-              <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3"><p className="text-xs text-slate-400">{en?'SELL limit':'建议 SELL 限价'}</p>
+              <div className="ui-inset p-3"><p className="text-xs text-slate-400">{en?'SELL limit':'建议 SELL 限价'}</p>
                 <p className="mt-1 text-xl font-semibold text-cyan-300">{review?.result.status==='review'?review.result.price:'—'}</p></div>
-              <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3"><p className="text-xs text-slate-400">{en?'Open SELL shares':'已有 SELL'}</p>
+              <div className="ui-inset p-3"><p className="text-xs text-slate-400">{en?'Open SELL shares':'已有 SELL'}</p>
                 <p className="mt-1 text-xl font-semibold text-amber-200">{showShares(observedSellShares(orders,active))}</p></div>
             </div>
             {review?.result.status==='review'&&review.result.quantity!==Number(activeQuantity)&&
@@ -400,23 +400,23 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
               <span>{en?'Quick quantity':'快捷数量（模拟可用份额）'}</span>
               <div className="flex gap-1">{([25,50,100] as const).map(percent=><button type="button" key={percent} disabled={busy}
                 onClick={()=>updateDraft(active,{quantity:sellQuantityForPercent(indicativeUnreservedShares(activePosition.size,active,orders),percent)})}
-                className="rounded border border-slate-600 px-2 py-1 disabled:opacity-40">{percent}%</button>)}</div>
+                className="ui-button-quiet px-2.5 py-1 text-xs disabled:opacity-40">{percent}%</button>)}</div>
             </div>
-            {summary&&<div className="mt-3 rounded-lg border border-cyan-500/30 p-3 text-xs text-slate-300">
+            {summary&&<div className="ui-inset mt-3 space-y-1 p-3 text-xs text-slate-300">
               <p className="font-semibold text-cyan-200">{en?'APR and proceeds at SELL limit':'SELL 限价收益摘要'}</p>
               <p>{en?'Current Mark APR':'当前 Mark APR'}：{activePosition.markApr===null?'—':(activePosition.markApr*100).toFixed(2)+'%'} · {en?'Target':'目标'}：{activeApr}%</p>
               <p>{en?'APR at limit':'限价实际 APR'}：{summary.limitAprPercent===null?'—':summary.limitAprPercent.toFixed(2)+'%'}</p>
               <p>{en?'Gross proceeds':'限价卖出总额'}：{summary.grossProceeds===null?'—':'$'+summary.grossProceeds.toFixed(4)}</p>
               <p>{en?'P/L before fees':'对比成本收益（未扣费用）'}：{summary.profitVsAvgCost===null?'—':'$'+summary.profitVsAvgCost.toFixed(4)}</p>
             </div>}
-            <details className="mt-3 rounded-lg border border-slate-700 p-3 text-xs text-slate-300">
+            <details className="ui-inset mt-3 p-3 text-xs text-slate-300">
               <summary className="cursor-pointer">{en?'Existing SELL orders':'已有 SELL 明细'} ({orders.filter(o=>o.asset_id===active&&o.side==='SELL').length})</summary>
               {orders.filter(o=>o.asset_id===active&&o.side==='SELL').map(o=><p key={o.id} className="mt-2 break-all border-t border-slate-800 pt-2">
                 SELL {o.original_size} @ {o.price} · {en?'Unfilled':'未成交'} {Math.max(0,Number(o.original_size)-Number(o.size_matched)).toFixed(6)} · {o.id}
               </p>)}
             </details>
           </div>
-          <div className="rounded-xl border border-slate-700/80 bg-slate-900/70 p-3 text-xs">
+          <div className="ui-inset p-4 text-xs">
             <p className="font-semibold text-slate-100">{en?'Account and settlement confirmations':'账户与结算日期确认'}</p>
             <label className="mt-2 flex cursor-pointer items-start gap-2 text-slate-300">
               <input type="checkbox" checked={coverage} disabled={busy} onChange={e=>setCoverage(e.target.checked)} className="mt-0.5 accent-cyan-400"/>
@@ -439,7 +439,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
               <p className="mt-1 break-words">{review.result.reasons.map(r=>r==='onchain_clob_balance_mismatch'?'CLOB 与链上持仓不一致，禁止交易':r==='onchain_balance_unverified'?'链上持仓无法核实，禁止交易':sellBlockReasonText(r,language)).join(' · ')}</p>
             </div>}
             {review.result.status==='review'&&<p className="text-sm font-semibold text-emerald-300">{en?'Quote calculated; check all safety conditions.':'已生成审核价格，请检查各项下单条件。'}</p>}
-            <div className="space-y-2 rounded-xl border border-slate-700 p-3 text-xs text-slate-300">
+            <div className="ui-inset space-y-2 p-4 text-xs text-slate-300">
               <h5 className="font-semibold text-slate-100">{en?'Fresh preflight checks':'实时下单前检查'}</h5>
               <p>{en?'Market accepting orders':'市场接单状态'}：
                 <span className={review.checks.marketStatus==='accepting'?'text-emerald-300':'text-amber-300'}>
@@ -465,7 +465,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
           </p>}
         </div>
 
-        <footer className="max-h-[50dvh] shrink-0 space-y-3 overflow-y-auto border-t border-slate-700 bg-slate-950/80 px-5 py-4">
+        <footer className="max-h-[50dvh] shrink-0 space-y-3 overflow-y-auto border-t border-slate-700/35 bg-slate-950/50 px-5 py-4">
           {busy&&<div role="status" aria-live="polite" aria-busy="true" className="flex items-start gap-3 rounded-lg border border-indigo-400/50 bg-indigo-950/35 p-3 text-sm text-indigo-100">
             <span aria-hidden="true" className="mt-0.5 inline-block h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-indigo-300 border-t-transparent"/>
             {submitStage?(()=>{
@@ -475,22 +475,23 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
             })():<div><p className="font-semibold">{en?'Loading live SELL preflight…':'正在加载实时卖单审核…'}</p>
               <p className="mt-1 text-xs text-indigo-200/80">{en?'Read-only; wallet signature has not started.':'正在只读核对，尚未请求交易签名。'}</p></div>}
           </div>}
+          {busy&&<div className="ui-progress-rail" aria-hidden="true"><span/></div>}
           {lastSubmission&&!busy&&<SellSubmissionBanner receipt={lastSubmission} language={language}
             onOpenOrders={()=>{leaveReview();onOpenOrders(lastSubmission.asset);}} onDismiss={()=>setLastSubmission(null)}/>}
           {message&&<p role="status" className="break-all rounded-lg border border-amber-600/30 bg-amber-950/20 p-3 text-xs text-amber-200">{message}</p>}
           {review&&<p className="text-xs text-slate-400">{en?'Review expires in':'审核剩余'} {seconds}s · {en?'Checked again after signing':'签名后重新校验全部条件'}</p>}
           <div className="flex flex-wrap gap-2">
             <button type="button" disabled={busy} onClick={leaveReview}
-              className="rounded-lg border border-slate-600 px-4 py-2.5 text-sm text-slate-200 disabled:opacity-50">{en?'Back to list':'返回列表'}</button>
+              className="ui-button-quiet px-4 py-2.5 text-sm disabled:opacity-50">{en?'Back to list':'返回列表'}</button>
             {lastSubmission?.asset===active&&lastSubmission.outcome==='live'&&!review?
               <button type="button" onClick={()=>{leaveReview();onOpenOrders(active);}}
-                className="rounded-lg border border-emerald-500/50 px-4 py-2.5 text-sm font-medium text-emerald-200">
+                className="ui-button-secondary px-4 py-2.5 text-sm text-emerald-200">
                 {en?'View confirmed SELL':'查看已挂订单'}</button>:
               <button type="button" disabled={busy||!ordersReady||pending||uncertain} onClick={()=>void prepareFor(active)}
-                className="rounded-lg border border-indigo-500/50 px-4 py-2.5 text-sm font-medium text-indigo-200 disabled:opacity-40">
+                className="ui-button-secondary px-4 py-2.5 text-sm disabled:opacity-40">
                 {en?'Recheck':'重新核验'}</button>}
             <button type="button" disabled={!signReady} onClick={()=>void execute()}
-              className="min-w-[165px] flex-1 rounded-lg bg-indigo-500 px-4 py-2.5 text-sm font-bold text-white hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-35">
+              className="ui-button-trade min-w-[165px] flex-1 px-4 py-2.5 text-sm font-bold disabled:cursor-not-allowed">
               {submitStage?<span className="inline-flex items-center justify-center gap-2">
                 <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"/>
                 {sellSubmitProgress(submitStage,language).title}
