@@ -41,10 +41,10 @@ export function SellPlanRow({position,language,aprInput,quantityInput,quote,orde
  const price=plan?.proposedLimitPrice;
  const priceText=price!=null?formatMarketPercentForTick(price,quote?.tickSize??null):"—";
  const existingCount=ordersReady?(orders??[]).filter(o=>o.asset_id===position.asset&&o.side==="SELL").length:0;
- return <tr className="border-b border-slate-800/70 align-middle text-slate-200 hover:bg-slate-800/20">
+ return <tr className={selected ? "border-b border-slate-700/20 bg-cyan-900/10 align-middle text-slate-200" : "border-b border-slate-700/20 align-middle text-slate-200 hover:bg-slate-800/25"}>
    <td className="px-2 py-3">
      <input type="checkbox" aria-label={(en?"Select ":"勾选 ")+position.title} checked={selected} disabled={position.redeemable}
-       className="accent-indigo-400" onChange={e=>onSelect(e.target.checked)}/>
+       className="accent-cyan-300" onChange={e=>onSelect(e.target.checked)}/>
    </td>
    <td className="max-w-[290px] min-w-[200px] px-3 py-3">
      {position.eventSlug||position.slug?<a href={"https://polymarket.com/event/"+encodeURIComponent(position.eventSlug||position.slug||"")}
@@ -56,10 +56,10 @@ export function SellPlanRow({position,language,aprInput,quantityInput,quote,orde
    <td className="px-2 py-3">
      <input type="number" min="0.1" max="10000" step="0.1" aria-label={position.title+" Target APR"}
        value={aprInput} onChange={e=>onAprChange(e.target.value)}
-       className={"w-20 rounded-lg border bg-slate-950/80 px-2 py-2 text-sm outline-none focus:border-cyan-400 "+(validApr?"border-slate-700":"border-amber-400")}/>
+       className={"ui-input w-20 px-2 py-2 text-sm "+(validApr?"":"border-amber-400")}/>
    </td>
    <td className="whitespace-nowrap px-2 py-3">
-     {quote?<><p className="font-semibold text-cyan-300">{priceText}</p>
+     {quote?<><p className="font-bold text-cyan-200 tabular-nums">{priceText}</p>
        <p className="text-[11px] text-slate-500">{plan?.status==="would_cross"?(en?"Taker risk":"可能吃单"):en?"Simulation":"模拟参考"}</p></>
        :<button type="button" onClick={onRefreshQuote} className="text-xs text-cyan-300 underline underline-offset-2">{en?"Fetch quote":"刷新报价"}</button>}
    </td>
@@ -73,7 +73,7 @@ export function SellPlanRow({position,language,aprInput,quantityInput,quote,orde
    <td className="px-2 py-3">
      <input type="number" min="0" step="any" aria-label={position.title+" SELL shares"}
        value={quantity} onChange={e=>onQuantityChange(e.target.value)} disabled={position.redeemable}
-       className={"w-28 rounded-lg border bg-slate-950/80 px-2 py-2 text-sm outline-none focus:border-cyan-400 "+(validQuantity?"border-slate-700":"border-amber-400")}/>
+       className={"ui-input w-28 px-2 py-2 text-sm "+(validQuantity?"":"border-amber-400")}/>
      <p className="mt-1 text-[10px] text-slate-500">{indicative!==null?(en?"Indicative max ":"模拟剩余 ")+fmtShares(indicative):(en?"DRY RUN shares":"DRY RUN 数量")}</p>
      {ordersReady&&!canReview&&<p className="mt-1 text-[10px] text-amber-300">{
        noUnreserved?(en?"No unreserved SELL shares":"剩余可卖份额已被占用"):
@@ -89,7 +89,7 @@ export function SellPlanRow({position,language,aprInput,quantityInput,quote,orde
    </td>
    <td className="px-3 py-3">
      <button type="button" disabled={!canReview||position.redeemable}
-       onClick={onReview} className="rounded-lg border border-indigo-500/50 px-3 py-2 text-xs font-semibold text-indigo-200 hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-35">
+       onClick={onReview} className="ui-button-trade-outline px-3 py-2 text-xs disabled:cursor-not-allowed">
        {noUnreserved&&openSell!==null&&openSell>0?(en?"Already listed":"已全部挂单"):openSell!==null&&openSell>0?(en?"Review add SELL":"追加审核"):(en?"Review SELL":"审核 SELL")}
      </button>
    </td>
