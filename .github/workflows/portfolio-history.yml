@@ -38,6 +38,18 @@ jobs:
           POLYMARKET_USER_ADDRESSES: ${{ vars.POLYMARKET_USER_ADDRESSES || secrets.POLYMARKET_USER_ADDRESS }}
         run: npm run snapshot
 
+      - name: Verify Beijing-day snapshot exists
+        if: steps.capture.outcome == 'success'
+        run: |
+          set -euo pipefail
+          BEIJING_DAY="$(TZ=Asia/Shanghai date +%F)"
+          FILE="data/position-history/${BEIJING_DAY}.json"
+          if [ ! -s "$FILE" ]; then
+            echo "::error::Daily position history not generated: $FILE"
+            exit 1
+          fi
+          node -e 'const fs=require("fs");const file=process.argv[1];const date=process.argv[2];const data=JSON.parse(fs.readFileSync(file,"utf8"));if(data.date!==date || !Array.isArray(data.wallets) || data.wallets.length===0){console.error("Snapshot has no valid wallet coverage");process.exit(1)}' "$FILE" "$BEIJING_DAY"
+
       - name: Commit updated history
         # Keep successful wallet snapshots even if one wallet was rate-limited.
         if: always() && steps.capture.outcome != 'skipped'
@@ -60,3 +72,52 @@ jobs:
         run: |
           echo "::error::Daily portfolio capture failed for one or more wallets. Successfully captured wallets were committed when available."
           exit 1
+
+
+  notify:
+    name: Alert only on snapshot failures
+    needs: record
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Create or clear a single GitHub Issue alert
+        uses: actions/github-script@v7
+        env:
+          SNAPSHOT_JOB_RESULT: ${{ needs.record.result }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const title = "[Portfolio History] Daily snapshot capture failed";
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: "open", per_page: 100,
+            });
+            const current = issues.find(issue => !issue.pull_request && issue.title === title);
+            const result = process.env.SNAPSHOT_JOB_RESULT;
+            const url = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}/attempts/${context.runAttempt}`;
+            if (result === "failure") {
+              const message = `Daily portfolio snapshot failed: ${url}
+
+            The dashboard may temporarily show **Since most recent snapshot** rather than **D1**.
+            Check the workflow, credentials, rate limits and the newest data/position-history/YYYY-MM-DD.json.
+            Do not fabricate missing daily prices.`;
+              if (current) {
+                const comments = await github.paginate(github.rest.issues.listComments, {
+                  owner, repo, issue_number: current.number, per_page: 100,
+                });
+                if (!comments.some(comment => comment.body?.includes(url))) {
+                  await github.rest.issues.createComment({
+                    owner, repo, issue_number: current.number, body: message,
+                  });
+                }
+              } else {
+                await github.rest.issues.create({ owner, repo, title, body: message });
+              }
+            } else if (result === "success" && current) {
+              // Recovery is silent unless an earlier failure alert exists.
+              await github.rest.issues.update({
+                owner, repo, issue_number: current.number, state: "closed", state_reason: "completed",
+              });
+            }
