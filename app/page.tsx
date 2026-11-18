@@ -72,6 +72,8 @@ interface HistoryResponse {
 interface DailyPositionResponse {
   status: "ok" | "missing" | "unavailable";
   baselineDate: string;
+  expectedDate: string;
+  referenceKind: "yesterday" | "recent" | null;
   recordedAt: string | null;
   positions: DailyPositionPoint[];
 }
@@ -413,7 +415,10 @@ export default function Home() {
       : []),
     [dailyPositionHistory],
   );
-  const hasYesterdayPrices = dailyPositionHistory?.status === "ok";
+  const hasReferencePrices = dailyPositionHistory?.status === "ok";
+  const hasRecentReference = hasReferencePrices && dailyPositionHistory?.referenceKind === "recent";
+  const referenceDateLabel = hasRecentReference
+    ? dailyPositionHistory.baselineDate.slice(5).replace("-", "/") : null;
   const lowAprCount = useMemo(() => positions.filter(position =>
     position.holdApr !== null && Number.isFinite(position.holdApr) &&
     position.holdApr * 100 <= holdAprThreshold
@@ -643,41 +648,55 @@ export default function Home() {
         id: "dailyChange",
         accessorFn: position => {
           const change = calculateDailyPriceChange(
-            position.curPrice, previousTokenPrices.get(position.asset), hasYesterdayPrices,
+            position.curPrice, previousTokenPrices.get(position.asset), hasReferencePrices,
           );
           return change.kind === "ok" ? change.rate : undefined;
         },
         sortUndefined: "last",
         sortDescFirst: true,
         header: () => (
-          <span title={isEnglish
-            ? "Current token price versus yesterday's approximately 09:10 Beijing snapshot; not rolling 24h."
-            : "当前合约价格相对于昨日北京时间约 09:10 的快照；不是滚动 24h 涨跌幅。"
+          <span title={hasRecentReference
+            ? (isEnglish
+                ? `Change since most recent available snapshot on ${dailyPositionHistory?.baselineDate}; NOT yesterday or rolling 24h.`
+                : `相对于最近有效快照（${dailyPositionHistory?.baselineDate}）的变化；不是较昨日，也不是滚动 24 小时。`)
+            : (isEnglish
+                ? "Current token price versus yesterday's Beijing-time snapshot; not rolling 24h."
+                : "当前合约价格相对于昨日北京时间的快照；不是滚动 24h 涨跌幅。")
           }>
-            {isEnglish ? "D1 Change" : "较昨日"}
+            {hasRecentReference
+              ? (isEnglish ? `Since snapshot (${referenceDateLabel})` : `较最近快照（${referenceDateLabel}）`)
+              : (isEnglish ? "D1 Change" : "较昨日")}
           </span>
         ),
         cell: ({ row }) => {
           const change = calculateDailyPriceChange(
             row.original.curPrice,
             previousTokenPrices.get(row.original.asset),
-            hasYesterdayPrices,
+            hasReferencePrices,
           );
           if (change.kind === "new") {
-            return <span title={isEnglish ? "Token not held in yesterday's wallet snapshot" : "昨日快照中没有此 Token 仓位"}
+            return <span title={hasRecentReference
+              ? (isEnglish ? "Token not held in most recent valid snapshot" : "最近有效快照中没有此 Token 仓位")
+              : (isEnglish ? "Token not held in yesterday's wallet snapshot" : "昨日快照中没有此 Token 仓位")}
               className="inline-flex min-w-[88px] items-center text-xs font-semibold text-cyan-300">NEW</span>;
           }
           if (change.kind !== "ok" || change.rate === null || change.cents === null) {
-            return <span title={isEnglish ? "Yesterday's valid price is unavailable" : "昨日没有可比较的有效价格"}
+            return <span title={hasRecentReference
+              ? (isEnglish ? "No comparable price in the most recent snapshot" : "最近有效快照中没有可比较的有效价格")
+              : (isEnglish ? "Yesterday's valid price is unavailable" : "昨日没有可比较的有效价格")}
               className="inline-flex min-w-[88px] items-center font-mono text-sm text-slate-500">—</span>;
           }
           const color = change.rate > 0 ? "text-emerald-400" :
             change.rate < 0 ? "text-rose-400" : "text-slate-300";
           const reference = dailyPositionHistory?.recordedAt
             ? formatShanghaiReference(dailyPositionHistory.recordedAt, language) : "—";
-          const description = isEnglish
-            ? `Yesterday ${reference} (Beijing): ${formatPercent(change.previousPrice, 2)} → ${formatPercent(row.original.curPrice, 2)}. Daily snapshot, not rolling 24 hours.`
-            : `昨日参考 ${reference}（北京时间）：${formatPercent(change.previousPrice, 2)} → ${formatPercent(row.original.curPrice, 2)}；非滚动 24 小时。`;
+          const description = hasRecentReference
+            ? (isEnglish
+                ? `Most recent snapshot (${dailyPositionHistory?.baselineDate}) at ${reference} (Beijing): ${formatPercent(change.previousPrice, 2)} → ${formatPercent(row.original.curPrice, 2)}. NOT yesterday or rolling 24h.`
+                : `最近有效快照（${dailyPositionHistory?.baselineDate}）${reference}（北京时间）：${formatPercent(change.previousPrice, 2)} → ${formatPercent(row.original.curPrice, 2)}；非较昨日，非滚动 24h。`)
+            : (isEnglish
+                ? `Yesterday ${reference} (Beijing): ${formatPercent(change.previousPrice, 2)} → ${formatPercent(row.original.curPrice, 2)}. Daily snapshot, not rolling 24 hours.`
+                : `昨日参考 ${reference}（北京时间）：${formatPercent(change.previousPrice, 2)} → ${formatPercent(row.original.curPrice, 2)}；非滚动 24 小时。`);
           return (
             <span className="flex min-w-[88px] flex-col gap-0.5 font-mono" title={description}
               aria-label={description}>
@@ -813,7 +832,7 @@ export default function Home() {
         },
       },
     ],
-    [dailyPositionHistory, expandedPositionKey, handleQuoteToggle, hasYesterdayPrices, holdAprThreshold, isEnglish, language, marketValues, previousTokenPrices, totalAssetValue]
+    [dailyPositionHistory, expandedPositionKey, handleQuoteToggle, hasReferencePrices, hasRecentReference, referenceDateLabel, holdAprThreshold, isEnglish, language, marketValues, previousTokenPrices, totalAssetValue]
   );
 
   // Setup React Table instance
@@ -1228,12 +1247,16 @@ export default function Home() {
             {data && (
               <p className="mt-1 text-[11px] leading-5 text-slate-500">
                 {dailyPositionHistory?.status === "ok" && dailyPositionHistory.recordedAt
-                  ? (isEnglish
-                    ? `D1 Change reference: ${formatShanghaiReference(dailyPositionHistory.recordedAt, language)} Beijing time (not rolling 24h).`
-                    : `较昨日参考：${formatShanghaiReference(dailyPositionHistory.recordedAt, language)}（北京时间，非滚动 24h）。`)
+                  ? hasRecentReference
+                    ? (isEnglish
+                      ? `Since most recent snapshot (${dailyPositionHistory.baselineDate}): ${formatShanghaiReference(dailyPositionHistory.recordedAt, language)} Beijing time. Yesterday's snapshot is missing; NOT a one-day change.`
+                      : `较最近快照（${referenceDateLabel}）：${formatShanghaiReference(dailyPositionHistory.recordedAt, language)}（北京时间）。昨日快照缺失，当前不是单日涨跌幅。`)
+                    : (isEnglish
+                      ? `D1 Change reference: ${formatShanghaiReference(dailyPositionHistory.recordedAt, language)} Beijing time (not rolling 24h).`
+                      : `较昨日参考：${formatShanghaiReference(dailyPositionHistory.recordedAt, language)}（北京时间，非滚动 24h）。`)
                   : (isEnglish
-                    ? "D1 Change needs yesterday’s daily token snapshot; unavailable values show —."
-                    : "较昨日需要前一天的仓位价格快照；尚未积累历史数据时显示 —。")}
+                    ? "No valid position snapshot within the last seven Beijing calendar days; unavailable values show —."
+                    : "最近 7 个北京自然日内没有有效仓位价格快照；缺失数据仍显示 —。")}
               </p>
             )}
             <p className="mt-1.5 text-[11px] text-slate-500 md:hidden">
