@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { KeyRound, RefreshCw, Loader2, X, ClipboardList } from "lucide-react";
 import { useConnection, useSignTypedData } from "wagmi";
 import { encodeAbiParameters,getAddress,getCreate2Address,keccak256,formatUnits } from "viem";
 import { deriveClobCredentials, fetchBrowserOpenOrders, fetchConditionalBalance, type ClobCredentials, type ClobOrder } from "@/lib/browser-clob";
@@ -19,9 +20,10 @@ export function BrowserClobPanel({profileAddress,queryAddress,positions,language
  const creds=useRef<ClobCredentials|null>(null),version=useRef(0),balanceVersion=useRef(0);
  const [selectedAsset,setSelectedAsset]=useState(""),[balance,setBalance]=useState<{asset:string;raw:string;asOf:number}|null>(null),[balanceBusy,setBalanceBusy]=useState(false),[balanceError,setBalanceError]=useState("");
  const [orders,setOrders]=useState<ClobOrder[]|null>(null),[ordersReady,setOrdersReady]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(""),[time,setTime]=useState<number|null>(null);
+ const [readStep,setReadStep]=useState<"auth"|"orders"|null>(null);
  const [orderCenterOpen,setOrderCenterOpen]=useState(false),[orderCenterAsset,setOrderCenterAsset]=useState<string|null>(null);
  const centerSeen=useRef(0);
- useEffect(()=>{version.current++;balanceVersion.current++;creds.current=null;setOrders(null);setOrdersReady(false);setError("");setBusy(false);setTime(null);setBalance(null);setBalanceError("");setSelectedAsset("");setBalanceBusy(false);setOrderCenterOpen(false);onSnapshotChange({orders:null,ready:false});},[address,profileAddress,queryAddress,chainId]);
+ useEffect(()=>{version.current++;balanceVersion.current++;creds.current=null;setOrders(null);setOrdersReady(false);setError("");setBusy(false);setTime(null);setBalance(null);setBalanceError("");setSelectedAsset("");setBalanceBusy(false);setOrderCenterOpen(false);setReadStep(null);onSnapshotChange({orders:null,ready:false});},[address,profileAddress,queryAddress,chainId]);
  useEffect(()=>{
    if(!orderCenterRequest||centerSeen.current===orderCenterRequest.serial)return;
    centerSeen.current=orderCenterRequest.serial;
@@ -41,18 +43,18 @@ export function BrowserClobPanel({profileAddress,queryAddress,positions,language
   if(!address||!profileAddress||!matches||chainId!==137)return;
   const safe=getCreate2Address({from:"0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b",salt:keccak256(encodeAbiParameters([{type:"address"}],[getAddress(address)])),bytecodeHash:"0x2bce2127ff07fb632d16c8347c4ebf501f4841168bed00d9e6ef715ddb6fcecf"});
   if(safe.toLowerCase()!==profileAddress.toLowerCase()){setError("safe_mismatch");return;}
-  const current=++version.current;balanceVersion.current++;setOrdersReady(false);onSnapshotChange({orders,ready:false});setBusy(true);setError("");setBalance(null);setBalanceError("");setBalanceBusy(false);
+  const current=++version.current;balanceVersion.current++;setOrdersReady(false);onSnapshotChange({orders,ready:false});setBusy(true);setError("");setBalance(null);setBalanceError("");setBalanceBusy(false);setReadStep(creds.current?"orders":"auth");
   try{
    let session=creds.current;
    if(!session){
     const timestamp=Math.floor(Date.now()/1000);
     const signature=await signTypedDataAsync({domain:{name:"ClobAuthDomain",version:"1",chainId:137},types:{ClobAuth:[{name:"address",type:"address"},{name:"timestamp",type:"string"},{name:"nonce",type:"uint256"},{name:"message",type:"string"}]},primaryType:"ClobAuth",message:{address,timestamp:String(timestamp),nonce:0n,message:"This message attests that I control the given wallet"}});
     if(current!==version.current)return;
-    session=await deriveClobCredentials(address,signature,timestamp);if(current!==version.current)return;creds.current=session;
+    session=await deriveClobCredentials(address,signature,timestamp);if(current!==version.current)return;creds.current=session;setReadStep("orders");
    }
    const snapshot=await fetchBrowserOpenOrders(session,address,profileAddress);if(current!==version.current)return;setOrders(snapshot);setOrdersReady(true);onSnapshotChange({orders:snapshot,ready:true});setTime(Date.now());
   }catch(e){if(current===version.current){creds.current=null;setOrdersReady(false);onSnapshotChange({orders,ready:false});setError(e instanceof Error?e.message:"unknown");}}
-  finally{if(current===version.current)setBusy(false);}
+  finally{if(current===version.current){setBusy(false);setReadStep(null);}}
  }
  async function readBalance(){
   if(!creds.current||!address||!selectedAsset||busy||balanceBusy)return;
@@ -73,20 +75,21 @@ export function BrowserClobPanel({profileAddress,queryAddress,positions,language
  const currentOrders=orders??[];
  const visibleOrders=orderCenterAsset?currentOrders.filter(o=>o.asset_id===orderCenterAsset):currentOrders;
  return <>
-  {activeMode==='sell'&&<div className="border-b border-slate-800 bg-slate-950/25 px-4 py-3 sm:px-6">
+  {activeMode==='sell'&&<div className="ui-clob-strip border-b border-slate-700/30 px-4 py-4 sm:px-6">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="min-w-0">
-        <p className="text-sm font-semibold text-slate-100">{en?'CLOB connection & orders':'CLOB 连接与订单'}</p>
-        <p className="mt-1 text-xs text-slate-400">{ordersReady&&!busy?(en?'Snapshot ready · '+currentOrders.length+' open orders':'已读取 '+currentOrders.length+' 笔 LIVE 挂单'):busy?(en?'Refreshing account orders…':'正在核对挂单快照…'):(en?'Read official orders before signing.':'签名前须读取并核对全部官方挂单。')}
+        <div className="flex flex-wrap items-center gap-2"><p className="text-sm font-semibold text-slate-100">{en?'CLOB connection & orders':'CLOB 连接与订单'}</p>{creds.current&&<span className="ui-pill ui-pill-success"><span className="ui-live-dot" aria-hidden="true"/>{en?"Authenticated for this tab":"已认证 · 仅当前页面"}</span>}</div>
+        <p className="mt-1.5 text-xs leading-5 text-slate-400">{ordersReady&&!busy?(en?'Snapshot ready · '+currentOrders.length+' open orders':'已读取 '+currentOrders.length+' 笔 LIVE 挂单'):busy?(en?'Refreshing account orders…':'正在核对挂单快照…'):(en?'Read official orders before signing.':'签名前须读取并核对全部官方挂单。')}
         {time&&<span className="ml-2 text-slate-500">{new Date(time).toLocaleTimeString()}</span>}</p>
       </div>
       <div className="flex gap-2">
         <button type="button" disabled={busy||!matches||chainId!==137} onClick={()=>void read()}
-          className="rounded-lg border border-cyan-500/40 px-3 py-2 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-40">
-          {busy?(en?'Refreshing…':'读取中…'):(en?'Read / refresh orders':'读取 / 刷新挂单')}
+          className={(creds.current?"ui-button-secondary":"ui-button-primary")+" min-h-10 px-4 py-2 text-xs disabled:opacity-40"}>
+          {busy?<><Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true"/>{readStep==='auth'?(en?'Waiting for wallet…':'等待认证签名…'):(en?'Loading orders…':'读取挂单中…')}</>:creds.current?<><RefreshCw className="h-3.5 w-3.5" aria-hidden="true"/>{en?'Refresh orders':'刷新挂单'}</>:<><KeyRound className="h-3.5 w-3.5" aria-hidden="true"/>{en?'Connect CLOB · sign to read':'连接 CLOB · 签名认证'}</>}
         </button>
       </div>
     </div>
+    {!creds.current&&<p className="mt-2 text-[11px] leading-5 text-slate-500">{en?"The first order read requests one gas-free ClobAuth signature. It does not place or approve any trade.":"首次读取需签一次无需 Gas 的 ClobAuth 消息，仅用于认证读取，不会授权资产或提交交易。"}</p>}
     {!matches&&<p className="mt-2 text-xs text-amber-300">{en?'Query the connected Safe first.':'当前查询地址与钱包 Safe 不匹配，请先切换查询账户。'}</p>}
     {chainId!==137&&<p className="mt-2 text-xs text-amber-300">{en?'Switch to Polygon.':'请切换至 Polygon。'}</p>}
     {error&&<p role="alert" className="mt-2 text-xs text-amber-300">{messages[error]??(en?'Order read failed.':'订单读取失败，不能按空单处理。')}</p>}
@@ -108,12 +111,12 @@ export function BrowserClobPanel({profileAddress,queryAddress,positions,language
   {orderCenterOpen&&<div className="fixed inset-0 z-[85] flex justify-end bg-slate-950/70 backdrop-blur-sm"
     onMouseDown={e=>{if(e.target===e.currentTarget)setOrderCenterOpen(false);}}>
     <aside role="dialog" aria-modal="true" aria-label={en?'Order center':'订单中心'}
-      className="flex h-full w-full max-w-[700px] flex-col overflow-hidden border-l border-slate-700 bg-[#0c1327] shadow-2xl">
-      <header className="flex shrink-0 items-center justify-between border-b border-slate-700 p-4">
-        <div><h3 className="text-lg font-semibold text-slate-100">{en?'Order center':'订单中心'}</h3>
+      className="ui-dialog flex h-full w-full max-w-[700px] flex-col overflow-hidden border-l">
+      <header className="ui-dialog-header flex shrink-0 items-center justify-between border-b border-slate-700/40 px-5 py-5">
+        <div><h3 className="flex items-center gap-2 text-lg font-semibold text-slate-100"><ClipboardList className="h-5 w-5 text-cyan-300" aria-hidden="true"/>{en?'Order center':'订单中心'}</h3>
           <p className="mt-1 text-xs text-slate-400">{en?'All official LIVE orders · includes orders without current positions.':'全部 LIVE 挂单，包含已无持仓的 BUY / SELL。'}</p></div>
         <button type="button" aria-label={en?'Close order center':'关闭订单中心'} onClick={()=>setOrderCenterOpen(false)}
-          className="rounded-lg border border-slate-600 px-3 py-2 text-slate-200 hover:bg-slate-800">✕</button>
+          className="ui-button-quiet h-9 w-9" ><X className="h-4 w-4" aria-hidden="true"/></button>
       </header>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
         {!ordersReady&&<p role="alert" className="rounded-lg border border-amber-500/30 p-3 text-xs text-amber-300">
@@ -123,24 +126,24 @@ export function BrowserClobPanel({profileAddress,queryAddress,positions,language
           <span className="text-xs text-slate-400">{en?'Current LIVE orders':'当前未成交订单'}：{currentOrders.length}</span>
           <div className="flex gap-2">
             {orderCenterAsset&&<button type="button" onClick={()=>setOrderCenterAsset(null)}
-              className="rounded border border-slate-600 px-2 py-1 text-xs text-cyan-200">{en?'Show all markets':'查看全部市场'}</button>}
+              className="ui-button-quiet px-3 py-2 text-xs">{en?'Show all markets':'查看全部市场'}</button>}
             <button type="button" disabled={busy||!matches||chainId!==137} onClick={()=>void read()}
-              className="rounded border border-slate-600 px-2 py-1 text-xs text-slate-200 disabled:opacity-40">{en?'Refresh':'刷新挂单'}</button>
+              className="ui-button-secondary px-3 py-2 text-xs disabled:opacity-40">{en?'Refresh':'刷新挂单'}</button>
           </div>
         </div>
         <OpenOrdersTable orders={visibleOrders} positions={positions} language={language}/>
-        {orders&&<details className="rounded-lg border border-slate-700 p-3 text-xs text-slate-300">
+        {orders&&<details className="ui-inset p-4 text-xs text-slate-300">
           <summary className="cursor-pointer font-semibold text-slate-100">{en?'Advanced: compare CLOB balance':'高级核对 · CLOB 余额'}</summary>
           <p className="mt-2 text-amber-300">{en?'Balance shown is not executable quantity until validated.':'以下为只读快照差额，并非可执行份额；下单时仍需独立核查链上余额和授权。'}</p>
           <div className="mt-3 flex flex-wrap gap-2">
             <select aria-label={en?'Select position':'选择核对仓位'} disabled={busy||balanceBusy}
-              className="max-w-full rounded border border-slate-600 bg-slate-950 p-2"
+              className="ui-input max-w-full p-2"
               value={selectedAsset} onChange={e=>{balanceVersion.current++;setBalance(null);setSelectedAsset(e.target.value);}}>
               <option value="">{en?'Choose position':'选择仓位'}</option>
               {positions.filter(p=>!p.redeemable).map(p=><option key={p.asset} value={p.asset}>{p.title} · {p.outcome}</option>)}
             </select>
             <button type="button" disabled={!selectedAsset||balanceBusy||busy} onClick={()=>void readBalance()}
-              className="rounded border border-cyan-500/40 px-3 py-2 text-cyan-200 disabled:opacity-40">{en?'Read balance':'读取余额'}</button>
+              className="ui-button-secondary px-3 py-2 text-xs disabled:opacity-40">{en?'Read balance':'读取余额'}</button>
           </div>
           {balanceError&&<p role="alert" className="mt-2 text-amber-300">{balanceError}</p>}
           {balance&&<div className="mt-3 space-y-1">
