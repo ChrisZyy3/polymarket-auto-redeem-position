@@ -9,9 +9,9 @@ import { ManualSellReview, type SellReviewRequest } from "./manual-sell-review";
 import { OpenOrdersTable } from "./open-orders-table";
 import { reviewSellBalance } from "@/lib/sell-balance-review";
 
-export function BrowserClobPanel({profileAddress,queryAddress,positions,language,activeMode,targetAprInputs,selectedAssets,proposedQuantities,onQuantityChange,reviewRequest,orderCenterRequest,onSnapshotChange}:{
+export function BrowserClobPanel({profileAddress,queryAddress,positions,language,activeMode,targetAprInputs,defaultTargetAprPercent,selectedAssets,proposedQuantities,onQuantityChange,reviewRequest,orderCenterRequest,onSnapshotChange}:{
  profileAddress:string|null;queryAddress:string;positions:EnrichedPosition[];language:"zh"|"en";
- activeMode:'yield'|'sell';targetAprInputs:Record<string,string>;
+ activeMode:'yield'|'sell';targetAprInputs:Record<string,string>;defaultTargetAprPercent:number;
  selectedAssets:string[];proposedQuantities:Record<string,string>;onQuantityChange:(asset:string,value:string)=>void;
  reviewRequest:SellReviewRequest;orderCenterRequest:{serial:number;asset?:string}|null;
  onSnapshotChange:(next:{orders:ClobOrder[]|null;ready:boolean})=>void;
@@ -98,7 +98,7 @@ export function BrowserClobPanel({profileAddress,queryAddress,positions,language
     <ManualSellReview key={address+'-'+profileAddress}
       address={address} funder={profileAddress} credentials={creds.current}
       positions={positions} orders={orders} language={language}
-      ordersReady={ordersReady&&!busy} targetAprInputs={targetAprInputs}
+      ordersReady={ordersReady&&!busy} targetAprInputs={targetAprInputs} defaultTargetAprPercent={defaultTargetAprPercent}
       selectedAssets={selectedAssets} proposedQuantities={proposedQuantities}
       onQuantityChange={onQuantityChange} reviewRequest={reviewRequest}
       onOpenOrders={asset=>{setOrderCenterAsset(asset);setOrderCenterOpen(true);}}
