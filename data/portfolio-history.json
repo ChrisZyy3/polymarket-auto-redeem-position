@@ -2714,26 +2714,26 @@
       "positionCount": 22
     },
     {
-      "recordedAt": "2026-11-18T05:05:56.918Z",
+      "recordedAt": "2026-11-18T08:28:31.770Z",
       "address": "0x24816c037cdc2c9bd979e69d777541cf560a9b79",
-      "totalBalance": 63082.95356,
-      "positionsValue": 59633.6566,
+      "totalBalance": 62984.99476,
+      "positionsValue": 59535.6978,
       "availableBalance": 3449.29696,
       "positionCount": 10
     },
     {
-      "recordedAt": "2026-11-18T05:05:56.918Z",
+      "recordedAt": "2026-11-18T08:28:31.770Z",
       "address": "0x9f7eb5bc88342f01d18754be0439fad79ec282ce",
-      "totalBalance": 35494.866313,
-      "positionsValue": 34600.5323,
+      "totalBalance": 35414.671813,
+      "positionsValue": 34520.3378,
       "availableBalance": 894.334013,
       "positionCount": 3
     },
     {
-      "recordedAt": "2026-11-18T05:05:56.918Z",
+      "recordedAt": "2026-11-18T08:28:31.770Z",
       "address": "0x052f4191cd324a348835a846d34df5b0061e53fb",
-      "totalBalance": 412691.210032,
-      "positionsValue": 412672.7661,
+      "totalBalance": 412301.233132,
+      "positionsValue": 412282.7892,
       "availableBalance": 18.443932,
       "positionCount": 22
     }
