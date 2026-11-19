@@ -11,7 +11,7 @@ import {
   type QueueRecord
 } from '@/lib/manual-sell-queue';
 import { loadSellReview } from '@/lib/sell-snapshot';
-import { settlementConfirmedForDate, nextAfterVerifiedSell, sellReviewConfigKey, sellQuantityForPercent, sellLimitSummary } from '@/lib/sell-workbench-flow';
+import { nextAfterVerifiedSell, sellReviewConfigKey, sellQuantityForPercent, sellLimitSummary } from '@/lib/sell-workbench-flow';
 import type { EnrichedPosition } from '@/lib/types';
 import { sellSubmitProgress, shouldAutoRecheckSell, sellBlockReasonText, type SellSubmitReceipt, type SellSubmitStage } from '@/lib/sell-submit-feedback';
 
@@ -60,9 +60,6 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
   const {data:wallet} = useWalletClient();
   const publicClient = usePublicClient({chainId:137});
   const selected=selectedAssets;
-  const [coverage,setCoverage] = useState(false);
-  // Store the exact date confirmed for each market. If the date changes, it must be confirmed again.
-  const [settlementDates,setSettlementDates] = useState<Record<string,string>>({});
   const [active,setActive] = useState<string|null>(null);
   const [review,setReview] = useState<Snapshot|null>(null);
   const [busy,setBusy] = useState(false);
@@ -86,7 +83,9 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
   const activePosition=tradable.find(p=>p.asset===active);
   const activeApr=active?targetAprInputs[active]??String(defaultTargetAprPercent):String(defaultTargetAprPercent);
   const activeQuantity=activePosition ? (proposedQuantities[activePosition.asset] ?? String(indicativeUnreservedShares(activePosition.size,activePosition.asset,orders) ?? '')) : '';
-  const activeSettled=!!activePosition && settlementConfirmedForDate(settlementDates[activePosition.asset],activePosition.endDate);
+  const reviewChecksCurrent=!!review && !!activePosition && review.position.asset===activePosition.asset && review.position.endDate===activePosition.endDate;
+  const activeSettled=reviewChecksCurrent && review.checks.settlementDateVerified;
+  const coverage=reviewChecksCurrent && review.checks.ordersCoverageVerified;
 
   useEffect(()=>{
     try {
@@ -135,7 +134,6 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
   },[active]);
 
   function positionFor(id:string){return tradable.find(p=>p.asset===id);}
-  function isSettled(id:string){const p=positionFor(id);return !!p&&settlementConfirmedForDate(settlementDates[id],p.endDate);}
   function draftFor(id:string){
     const p=positionFor(id);
     return {
@@ -176,16 +174,15 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
     if(!/^0x[0-9a-f]{40}$/i.test(token)||!/^0x[0-9a-f]{40}$/i.test(operator)||!/^0x[0-9a-f]{40}$/i.test(account))throw Error('invalid_address');
     return publicClient.readContract({address:token as Address,abi:erc1155ApprovalAbi,functionName:'isApprovedForAll',args:[account as Address,operator as Address]});
   }
-  function requestFor(id:string,apr:string,quantity:string,confirmedCoverage=coverage,confirmedSettlement=isSettled(id)){
+  function requestFor(id:string,apr:string,quantity:string){
     return {credentials,signer:address,funder,asset:id,apr:Number(apr),quantity:Number(quantity),
-      coverageConfirmed:confirmedCoverage,settlementConfirmed:confirmedSettlement,
       readOnchainApproval:wallet?readOnchainApproval:undefined,readOnchainBalance:wallet?readOnchainBalance:undefined};
   }
 
   function configKey(id:string){
     const pos=positionFor(id),v=draftFor(id);
-    return sellReviewConfigKey({asset:id,apr:v.apr,quantity:v.quantity,coverage,
-      settlementConfirmed:isSettled(id),endDate:pos?.endDate});
+    return sellReviewConfigKey({asset:id,apr:v.apr,quantity:v.quantity,coverage:true,
+      settlementConfirmed:true,endDate:pos?.endDate});
   }
   async function prepareFor(id:string){
     if(lock.current||!positionFor(id)||!ordersReady||uncertain||pending)return;
@@ -212,7 +209,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
     }
   }
 
-  // Confirmations are deliberate user actions, but the fresh read starts automatically afterward.
+  // Preflight is automatic and read-only; changes to SELL intent require a new snapshot.
   useEffect(()=>{
     if(!active)return;
     const key=configKey(active);
@@ -222,11 +219,11 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
     // must never start an implicit second order review (invalid_quantity).
     void prepareFor(active);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[active,review,coverage,settlementDates,targetAprInputs,defaultTargetAprPercent,proposedQuantities,busy,ordersReady,pending,uncertain,activePosition?.endDate]);
+  },[active,review,targetAprInputs,defaultTargetAprPercent,proposedQuantities,busy,ordersReady,pending,uncertain,activePosition?.endDate]);
 
   async function execute(){
     if(lock.current||!active||!review||review.position.asset!==active||review.result.status!=='review'
-      ||!wallet||!ordersReady||!coverage||!isSettled(active)||pending||uncertain||reviewSignature!==configKey(active)
+      ||!wallet||!ordersReady||!coverage||!activeSettled||pending||uncertain||reviewSignature!==configKey(active)
       ||review.checks.marketStatus!=='accepting'||!review.checks.authorizationVerified||review.checks.tokenBalanceStatus!=='verified'||!review.checks.operator||Date.now()-review.asOf>60000)return;
     const id=active,config=draftFor(id);
     lock.current=true;const g=generation.current;setBusy(true);setMessage('');setSubmitStage('precheck');
@@ -238,6 +235,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
       const request=()=>requestFor(id,config.apr,config.quantity);
       const fresh=await loadSellReview(request());
       if(g!==generation.current||fresh.result.status!=='review'||!sameSellIntent(fresh.result,review.result)
+        ||!fresh.checks.ordersCoverageVerified||!fresh.checks.settlementDateVerified
         ||fresh.position.endDate!==review.position.endDate||fresh.checks.marketStatus!=='accepting'
         ||!fresh.checks.authorizationVerified||fresh.checks.tokenBalanceStatus!=='verified'||fresh.checks.operator!==review.checks.operator||configKey(id)!==reviewSignature)throw Error('review_changed');
       setSubmitStage('wallet');
@@ -248,6 +246,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
       setSubmitStage('postcheck');
       const final=await loadSellReview(request());
       if(g!==generation.current||final.result.status!=='review'||!sameSellIntent(final.result,review.result)
+        ||!final.checks.ordersCoverageVerified||!final.checks.settlementDateVerified
         ||final.position.endDate!==review.position.endDate||final.checks.marketStatus!=='accepting'
         ||!final.checks.authorizationVerified||final.checks.tokenBalanceStatus!=='verified'||final.checks.operator!==review.checks.operator||configKey(id)!==reviewSignature
         ||Date.now()-review.asOf>60000)throw Error('review_changed');
@@ -418,19 +417,21 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
             </details>
           </div>
           <div className="ui-inset p-4 text-xs">
-            <p className="font-semibold text-slate-100">{en?'Account and settlement confirmations':'账户与结算日期确认'}</p>
-            <label className="mt-2 flex cursor-pointer items-start gap-2 text-slate-300">
-              <input type="checkbox" checked={coverage} disabled={busy} onChange={e=>setCoverage(e.target.checked)} className="mt-0.5 accent-cyan-400"/>
-              <span>{en?'I matched all open orders on Polymarket for this Safe.':'已对照官网核对本 Safe 全部未成交挂单。'}</span>
-            </label>
-            <label className="mt-2 flex cursor-pointer items-start gap-2 text-slate-300">
-              <input type="checkbox" checked={activeSettled} disabled={busy||!activePosition.endDate}
-                onChange={e=>setSettlementDates(old=>({...old,[active]:e.target.checked?(activePosition.endDate??''):''}))}
-                className="mt-0.5 accent-cyan-400"/>
-              <span>{en?'I checked this market settlement estimate: ':'已确认本市场的预计结算日：'}{activePosition.endDate||'—'}.
-                {en?' Changes may affect APR pricing.':' 结算变化可能影响 APR。'}</span>
-            </label>
-            <p className="mt-2 text-slate-500">{en?'Confirmation immediately triggers a fresh non-trading precheck.':'确认选项变化后会自动重新执行只读预检查。'}</p>
+            <p className="font-semibold text-slate-100">{en?'Automatic safety verification':'自动安全核验 · 无需勾选'}</p>
+            <p className="mt-2 text-slate-300">
+              <span className={coverage?'text-emerald-300':'text-amber-300'}>{coverage?'✓':'○'}</span>{' '}
+              {en?'All Safe LIVE orders: ':'Safe 全部 LIVE 挂单：'}
+              {coverage?(en?'Verified, ':'已核实，')+(review?.checks.ordersCount??0)+(en?' orders':' 笔')
+                :(en?'Waiting for a complete, maker-verified CLOB read':'等待 CLOB 完整分页及 Maker 地址核验')}
+            </p>
+            <p className="mt-2 text-slate-300">
+              <span className={activeSettled?'text-emerald-300':'text-amber-300'}>{activeSettled?'✓':'○'}</span>{' '}
+              {en?'Estimated settlement date: ':'预计结算日期：'}{activePosition.endDate||'—'}
+              {' · '}{activeSettled?(en?'Matches live CLOB market metadata':'与 CLOB 市场元数据一致')
+                :(en?'Missing/mismatched market date; trading remains blocked':'市场日期缺失或不一致；禁止下单')}
+            </p>
+            {review&&<p className="mt-2 text-slate-500">{en?'Checked at ':'核验时间：'}{new Date(review.asOf).toLocaleTimeString()}
+              {' · '}{en?'Revalidated before and after wallet signature. Dates are estimates, not guaranteed resolution times.':'钱包签名前后均重新核验；该日期仍是估计值，不保证实际结算时刻。'}</p>}
           </div>
 
 
