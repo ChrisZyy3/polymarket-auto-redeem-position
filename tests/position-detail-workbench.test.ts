@@ -69,5 +69,7 @@ test("SELL planning uses one compressed six-column table with safe manual review
   assert.match(review,/createSafeSellClient/);
   assert.match(review,/loadSellReview/);
   assert.match(review,/matchingLiveSellOrder/);
+  assert.match(review,/自动安全核验 · 无需勾选/);
+  assert.doesNotMatch(review,/setCoverage|setSettlementDates/);
 });
 
