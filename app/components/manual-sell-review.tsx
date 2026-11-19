@@ -339,7 +339,7 @@ export function ManualSellReview({address,funder,credentials,positions,orders,la
 
   const previewReady=!!review && review.result.status==='review' && !!active && review.position.asset===active && reviewSignature===configKey(active);
   const signReady=previewReady&&!busy&&!pending&&!uncertain&&ordersReady&&!!wallet&&coverage&&!!active
-    &&isSettled(active)&&review.checks.marketStatus==='accepting'
+    &&activeSettled&&review.checks.marketStatus==='accepting'
     &&review.checks.authorizationVerified&&review.checks.tokenBalanceStatus==='verified'&&!!review.checks.operator&&clock-review.asOf<60000;
   const summary=review?.result.status==='review'&&activePosition
     ?sellLimitSummary(review.result.price,review.result.quantity,activePosition.avgPrice,activePosition.endDate):null;
