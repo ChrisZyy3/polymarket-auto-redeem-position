@@ -2,6 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { settlementConfirmedForDate, nextAfterVerifiedSell, sellReviewConfigKey, sellQuantityForPercent, sellLimitSummary } from '../lib/sell-workbench-flow';
 import type { QueueRecord } from '../lib/manual-sell-queue';
+import { normalizeMarketEndDate, verifyMarketSettlementDate } from '../lib/sell-settlement-verification';
+
+test('auto verification only accepts exact independently matched market dates',()=>{
+ assert.equal(normalizeMarketEndDate('2099-01-01T00:00:00Z'),'2099-01-01');
+ assert.equal(normalizeMarketEndDate('2099-02-29'),null);
+ assert.equal(normalizeMarketEndDate('2099-1-01'),null);
+ assert.equal(verifyMarketSettlementDate('2099-01-01','2099-01-01T00:00:00Z').verified,true);
+ for(const marketDate of [null,undefined,'2099-01-02T00:00:00Z','unavailable','2099-02-29'])
+  assert.equal(verifyMarketSettlementDate('2099-01-01',marketDate).verified,false);
+});
 
 test('settlement confirmation belongs to the exact market date, never a missing or changed estimate',()=>{
  assert.equal(settlementConfirmedForDate('2027-01-01','2027-01-01'),true);
